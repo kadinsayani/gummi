@@ -3,10 +3,7 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
-	"os"
-	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
@@ -23,52 +20,47 @@ import (
 // proposals into FDs, --request-changes re-runs the decompose pass with
 // the note attached — no new plumbing, the driver dispatches on the
 // card's kind and stage.
-func runResume(args []string) error {
-	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
-	rv := registerResumeFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi resume <id|ref> [--answer <text> | --approve | --request-changes <note> | --bounce [--note <text>]]")
-		fs.PrintDefaults()
-	}
+func runResume(fl cliFlags, args []string) error {
 	// resume is id-first (`resume FD-042 --answer no`) and accepts an
 	// external ref in the id slot (resolved against the store below, D11).
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("resume", args)
 	if err != nil {
 		return err
 	}
 
-	in, err := resumeInput(*rv.answer, *rv.approve, *rv.requestChanges, *rv.bounce, *rv.note, *rv.say,
-		isSet(fs, "answer"), isSet(fs, "request-changes"), isSet(fs, "note"), isSet(fs, "say"))
+	in, err := resumeInput(fl)
 	if err != nil {
 		return err
 	}
-	if in, err = goalResumeInput(in, *rv.goalNote, *rv.reverse, *rv.wrapUp, isSet(fs, "goal-note"), isSet(fs, "reverse")); err != nil {
+	if in, err = goalResumeInput(fl, in); err != nil {
 		return err
 	}
-	gate, ok := domain.NormalizeGateApproval(*rv.gate)
-	if !ok {
-		return fmt.Errorf(
-			"--gate-approval must be %q or %q (the retired %q/%q/%q/%q spellings are still accepted), got %q",
-			domain.GateAttended, domain.GateAutopilot, "off", "gates", "caller", "auto", *rv.gate)
+	gate, err := gateApproval(fl.String("gate-approval"))
+	if err != nil {
+		return err
 	}
-	if *rv.envelope < 0 {
-		return fmt.Errorf("--envelope must be a positive credit count, got %d", *rv.envelope)
+	envelope, runs, minutes := fl.Int("envelope"), fl.Int("runs"), fl.Int("minutes")
+	if envelope < 0 {
+		return fmt.Errorf("--envelope must be a positive credit count, got %d", envelope)
+	}
+	if runs < 0 || minutes < 0 {
+		return fmt.Errorf("--runs and --minutes must be positive, got %d and %d", runs, minutes)
+	}
+	if err := driver.ValidateUntil(domain.Stage(fl.String("until"))); err != nil {
+		return err
 	}
 	// resume mostly reuses the feature's existing envelope; --envelope raises
 	// it (the only way to clear an exhausted stage headlessly — driver.Resume
 	// treats it as a floor and never lowers). The rest of the driving options
 	// mirror run so the continued tail behaves the same.
-	if *rv.runs < 0 || *rv.minutes < 0 {
-		return fmt.Errorf("--runs and --minutes must be positive, got %d and %d", *rv.runs, *rv.minutes)
-	}
 	opts := driver.Options{
-		Envelope:      *rv.envelope,
-		SubstrateRuns: *rv.runs, SubstrateMinutes: *rv.minutes,
-		Retake:       *rv.retake,
-		GateApproval: gate, GateApprovalSet: isSet(fs, "gate-approval"),
-		StageTimeout: *rv.timeout,
-		Autonomous:   *rv.autonomous, Verbose: *rv.verbose, Ref: *rv.ref,
-		Until: domain.Stage(*rv.until),
+		Envelope:      envelope,
+		SubstrateRuns: runs, SubstrateMinutes: minutes,
+		Retake:       fl.String("retake"),
+		GateApproval: gate, GateApprovalSet: fl.Changed("gate-approval"),
+		StageTimeout: fl.Duration("stage-timeout"),
+		Autonomous:   fl.Bool("autonomous"), Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
+		Until: domain.Stage(fl.String("until")),
 	}
 
 	// resolve the id/ref inside the closure, once the store is open; --until
@@ -116,52 +108,11 @@ func runResume(args []string) error {
 	}, opts)
 }
 
-// resumeFlagValues holds the flag pointers `gummi resume` binds.
-// registerResumeFlags is the single registration site, so the skill's
-// grammar generator can enumerate the same set (see runFlagValues).
-type resumeFlagValues struct {
-	answer, requestChanges, note *string
-	say                          *string
-	gate, ref, until             *string
-	approve, autonomous, bounce  *bool
-	verbose                      *bool
-	envelope                     *int
-	runs, minutes                *int
-	retake                       *string
-	timeout                      *time.Duration
-	goalNote, reverse            *string
-	wrapUp                       *bool
-}
-
-// registerResumeFlags binds `gummi resume`'s flags onto fs and returns
-// their pointers (definition only; parsing stays in runResume).
-func registerResumeFlags(fs *flag.FlagSet) *resumeFlagValues {
-	return &resumeFlagValues{
-		answer:         fs.String("answer", "", "answer a delegated ask_user question"),
-		envelope:       fs.Int("envelope", 0, "raise the credit budget before resuming (required to clear a stage that ran out; never lowers it)"),
-		approve:        fs.Bool("approve", false, "approve a design gate handed back by --gate-approval=attended"),
-		requestChanges: fs.String("request-changes", "", "send a design gate back with a note"),
-		bounce:         fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's `b` key)"),
-		note:           fs.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)"),
-		say:            fs.String("say", "", "read a line the way the card page would and report what it would do, as a `say` event, without acting"),
-		gate:           fs.String("gate-approval", driver.GateAttended, "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)"),
-		timeout:        fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
-		autonomous:     fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
-		verbose:        fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
-		ref:            fs.String("ref", "", "external correlation id, echoed in the stream"),
-		until:          fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
-		goalNote:       fs.String("goal-note", "", "goals: add a note to a running goal; its lead reads it on its next turn"),
-		reverse:        fs.String("reverse", "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why"),
-		wrapUp:         fs.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped"),
-		runs:           fs.Int("runs", 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)"),
-		minutes:        fs.Int("minutes", 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)"),
-		retake:         fs.String("retake", "", "goals: declare the evidence of an experiment's conclusive runs stale (\"*\" for all), so the goal takes them again — for when the substrate, not the code, was what failed"),
-	}
-}
-
 // goalResumeInput folds the goal-only resume flags into in. --goal-note and
 // --wrap-up stand alone; --reverse may carry a --request-changes reason.
-func goalResumeInput(in driver.ResumeInput, goalNote, reverse string, wrapUp, noteSet, reverseSet bool) (driver.ResumeInput, error) {
+func goalResumeInput(fl cliFlags, in driver.ResumeInput) (driver.ResumeInput, error) {
+	noteSet, reverseSet := fl.Changed("goal-note"), fl.Changed("reverse")
+	wrapUp := fl.Bool("wrap-up")
 	n := 0
 	if noteSet {
 		n++
@@ -184,10 +135,10 @@ func goalResumeInput(in driver.ResumeInput, goalNote, reverse string, wrapUp, no
 	}
 	switch {
 	case noteSet:
-		note := goalNote
+		note := fl.String("goal-note")
 		in.Note = &note
 	case reverseSet:
-		ref := reverse
+		ref := fl.String("reverse")
 		in.Reverse = &ref
 	case wrapUp:
 		in.WrapUp = true
@@ -202,33 +153,32 @@ func goalResumeInput(in driver.ResumeInput, goalNote, reverse string, wrapUp, no
 // the driver can reject cleanly rather than silently re-running. --note
 // only composes with --bounce; on its own it is a usage error, not a silent
 // no-op.
-func resumeInput(answer string, approve bool, requestChanges string, bounce bool, note, say string,
-	answerSet, changesSet, noteSet, saySet bool,
-) (driver.ResumeInput, error) {
+func resumeInput(fl cliFlags) (driver.ResumeInput, error) {
+	bounce, noteSet := fl.Bool("bounce"), fl.Changed("note")
 	n := 0
 	var in driver.ResumeInput
-	if saySet {
+	if fl.Changed("say") {
 		n++
-		sy := say
+		sy := fl.String("say")
 		in = driver.ResumeInput{Say: &sy}
 	}
-	if answerSet {
+	if fl.Changed("answer") {
 		n++
-		a := answer
+		a := fl.String("answer")
 		in = driver.ResumeInput{Answer: &a}
 	}
-	if approve {
+	if fl.Bool("approve") {
 		n++
 		in = driver.ResumeInput{Approve: true}
 	}
-	if changesSet {
+	if fl.Changed("request-changes") {
 		n++
-		c := requestChanges
+		c := fl.String("request-changes")
 		in = driver.ResumeInput{RequestChanges: &c}
 	}
 	if bounce {
 		n++
-		nt := note
+		nt := fl.String("note")
 		in = driver.ResumeInput{Bounce: &nt}
 	}
 	if n > 1 {
@@ -238,16 +188,4 @@ func resumeInput(answer string, approve bool, requestChanges string, bounce bool
 		return driver.ResumeInput{}, fmt.Errorf("--note only applies with --bounce")
 	}
 	return in, nil
-}
-
-// isSet reports whether a flag was present on the command line (vs left at
-// its zero default), so an explicit empty value is distinguishable.
-func isSet(fs *flag.FlagSet, name string) bool {
-	found := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == name {
-			found = true
-		}
-	})
-	return found
 }

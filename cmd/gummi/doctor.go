@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -35,22 +34,13 @@ import (
 // engine/agent and holds no lock beyond a momentary probe, so it is safe to
 // run while a feature is live. It reports; it never repairs auth or writes
 // secrets (G2/G4).
-func runDoctor(args []string) error {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	flags := registerDoctorFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi doctor [--json] [--deep]")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+func runDoctor(fl cliFlags) error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
 	}
-	report := buildDoctorReport(cwd, doctorOpts{Deep: *flags.deep, Probe: probeModel})
-	if *flags.json {
+	report := buildDoctorReport(cwd, doctorOpts{Deep: fl.Bool("deep"), Probe: probeModel})
+	if fl.Bool("json") {
 		b, err := json.MarshalIndent(report, "", "  ")
 		if err != nil {
 			return err
@@ -84,16 +74,6 @@ func runDoctor(args []string) error {
 // for exactly the audience it is written for.
 const doctorNotReadyExit = 7
 
-// registerDoctorFlags binds `gummi doctor`'s flags, so the skill's grammar
-// generator can enumerate them (see runFlagValues). deep turns on the live
-// per-role reachability probe; the default stays cheap and offline.
-func registerDoctorFlags(fs *flag.FlagSet) *doctorFlags {
-	return &doctorFlags{
-		json: fs.Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)"),
-		deep: fs.Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)"),
-	}
-}
-
 // check statuses. fail blocks readiness; warn/unknown are advisory.
 const (
 	statusOK      = "ok"
@@ -116,13 +96,6 @@ type doctorCheck struct {
 	Status      string `json:"status"`
 	Detail      string `json:"detail"`
 	Remediation string `json:"remediation,omitempty"`
-}
-
-// doctorFlags are the flag pointers `gummi doctor` binds. registerDoctorFlags
-// returns them so runDoctor can thread the parsed values into the report.
-type doctorFlags struct {
-	json *bool
-	deep *bool
 }
 
 // doctorOpts configures buildDoctorReport's reachability probe. Deep turns

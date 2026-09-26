@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
-	"os"
 
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/state"
@@ -20,12 +17,7 @@ import (
 // genuinely unfinished verify should go through `resume` instead, and
 // verify says so (exit 1) when a cheap re-attach cannot be trusted.
 func runVerify(args []string) error {
-	fs := flag.NewFlagSet("verify", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi verify <id|ref>")
-		fmt.Fprintln(os.Stderr, "  re-run the acceptance checks on a verified branch and finalize its card")
-	}
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("verify", args)
 	if err != nil {
 		return err
 	}

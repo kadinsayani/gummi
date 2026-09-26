@@ -2,65 +2,40 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
-	"os"
-	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/state"
 )
 
-// runResearch implements `gummi research [flags] "<brief>"`: it mints one
-// RS card from a free-form brief and drives it headlessly through the
-// decompose gate, streaming the same milestone + decision NDJSON as `run`.
-// RS has no brainstorm/plan and no acceptance-seeded Verification plan, so
-// --full and --acceptance are not on its flag surface; --until only ever
-// accepts "shape", the sole pre-decompose stop on RS's route.
-func runResearch(args []string) error {
-	return runResearchCard(args, domain.CardType{Kind: domain.KindResearch}, "brief")
-}
-
-// runDiagnose implements `gummi diagnose [flags] "<symptom>"`: the same RS
-// card and the same drive, in the diagnosis mode (domain.ModeDiagnosis).
-// It is its own verb rather than a `research --diagnose` flag because the
+// runResearchCard is the body behind both `gummi research "<brief>"` and
+// `gummi diagnose "<symptom>"`: it mints one RS card and drives it
+// headlessly through the decompose gate, streaming the same milestone +
+// decision NDJSON as `run`. The two verbs differ only in the card type
+// they mint (diagnose adds domain.ModeDiagnosis) and the word their usage
+// line calls the argument.
+//
+// They stay two verbs rather than a `research --diagnose` flag because the
 // argument is a different thing — behaviour somebody saw, not a question
 // somebody asked — and the usage line is the only place that says so
 // before the card exists.
-func runDiagnose(args []string) error {
-	return runResearchCard(args, domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}, "symptom")
-}
-
-// runResearchCard is both verbs' body: they differ only in the card type
-// they mint and the word their usage line calls the argument.
-func runResearchCard(args []string, ct domain.CardType, noun string) error {
+//
+// RS has no acceptance-seeded Verification plan and never gets a worktree,
+// so neither --acceptance nor the adoption flags are on its surface;
+// --until only ever accepts "plan", the sole pre-decompose stop on its
+// route.
+func runResearchCard(fl cliFlags, args []string, ct domain.CardType, noun string) error {
 	verb := ct.Name()
-	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
-	rv := registerResearchFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: gummi %s [flags] \"<%s>\"\n", verb, noun)
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
+	if len(args) != 1 {
 		return fmt.Errorf("%s needs exactly one %s argument", verb, noun)
 	}
-	brief := fs.Arg(0)
+	brief := args[0]
 
-	// validate --until against RS's route before any work begins, so a bad
-	// stop target fails as a plain usage error, not mid-run.
-	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
-		return err
-	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, "", "", *rv.repo, *rv.base)
+	opts, err := driverOptions(fl, "")
 	if err != nil {
 		return err
 	}
-	opts.Until = domain.Stage(*rv.until)
 
 	return withRunEngine(func(ctx context.Context, d *driver.Driver, _ *state.Store, ws state.Workspace) (driver.Outcome, error) {
 		// mint the card first, then take its per-card lock for the drive so
@@ -82,38 +57,4 @@ func runResearchCard(args []string, ct domain.CardType, noun string) error {
 		defer clearPID()
 		return d.Drive(ctx, f)
 	}, opts)
-}
-
-// researchFlagValues holds the flag pointers `gummi research` binds.
-// registerResearchFlags is the single registration site: runResearch reads
-// these pointers, and the skill's command-grammar generator
-// (cmd/gummi/skill.go) enumerates the same flag set — so the documented
-// grammar can never drift from the shipped flags.
-type researchFlagValues struct {
-	envelope            *int
-	profile, gate, ref  *string
-	repo, until, base   *string
-	autonomous, verbose *bool
-	timeout             *time.Duration
-}
-
-// registerResearchFlags binds `gummi research`'s flags onto fs and returns
-// their pointers. It defines the flags only — parsing and validation stay
-// in runResearch — so a throwaway FlagSet can be handed here purely to
-// enumerate the grammar. Deliberately no --full, --acceptance, or
-// --skip-investigate: RS has no brainstorm/plan and no Verification-plan
-// section to seed.
-func registerResearchFlags(fs *flag.FlagSet) *researchFlagValues {
-	return &researchFlagValues{
-		envelope:   fs.Int("envelope", 0, "credit envelope for the research card (required; falls back to GUMMI_ENVELOPE)"),
-		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
-		gate:       fs.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)"),
-		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
-		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
-		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
-		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
-		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)"),
-		base:       fs.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)"),
-		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this stage (only \"plan\" is a valid stop)"),
-	}
 }

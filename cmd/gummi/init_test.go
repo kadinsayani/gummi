@@ -63,7 +63,7 @@ func TestRunInitMessages(t *testing.T) {
 	t.Chdir(dir)
 
 	first := captureStdout(t, func() {
-		if err := runInit(nil); err != nil {
+		if err := runCLI("init"); err != nil {
 			t.Fatalf("runInit (first): %v", err)
 		}
 	})
@@ -72,7 +72,7 @@ func TestRunInitMessages(t *testing.T) {
 	}
 
 	second := captureStdout(t, func() {
-		if err := runInit(nil); err != nil {
+		if err := runCLI("init"); err != nil {
 			t.Fatalf("runInit (second): %v", err)
 		}
 	})

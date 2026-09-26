@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -25,17 +24,12 @@ import (
 // file the driving process mirrors (internal/livelog). It drives nothing,
 // takes no lock, and can run against a card the TUI or a headless run
 // already owns, which is the whole point.
-func runWatch(args []string) error {
-	fs := flag.NewFlagSet("watch", flag.ContinueOnError)
-	jsonOut, wait, once := registerWatchFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi watch <id|ref> [--json] [--wait] [--once]")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+func runWatch(fl cliFlags, args []string) error {
+	idArg, err := oneID("watch", args)
 	if err != nil {
 		return err
 	}
+	jsonOut, wait, once := fl.Bool("json"), fl.Bool("wait"), fl.Bool("once")
 	return withReadWorkspace(func(ctx context.Context, store *state.Store, _ *worktree.Pool, ws state.Workspace) error {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
@@ -44,7 +38,7 @@ func runWatch(args []string) error {
 		path := ws.LiveFile(f.ID)
 		st, err := livelog.Stat(path)
 		switch {
-		case errors.Is(err, livelog.ErrNoLiveFile) && !*wait:
+		case errors.Is(err, livelog.ErrNoLiveFile) && !wait:
 			// Deterministic failure over a silent wait: nothing is
 			// streaming, and a watcher parked forever on a run that was
 			// never started reads exactly like a hang.
@@ -58,20 +52,11 @@ func runWatch(args []string) error {
 		ctx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
-		if !*jsonOut {
+		if !jsonOut {
 			renderWatchHeader(os.Stdout, string(f.ID), f.Title, st, err == nil)
 		}
-		return followLive(ctx, os.Stdout, path, *jsonOut, *once)
+		return followLive(ctx, os.Stdout, path, jsonOut, once)
 	})
-}
-
-// registerWatchFlags binds `gummi watch`'s flags onto fs, the single
-// registration site the skill's grammar generator also enumerates.
-func registerWatchFlags(fs *flag.FlagSet) (jsonOut, wait, once *bool) {
-	jsonOut = fs.Bool("json", false, "emit the raw record stream as NDJSON instead of the rendered transcript")
-	wait = fs.Bool("wait", false, "block until the card has a live stream instead of failing when none exists")
-	once = fs.Bool("once", false, "exit when the current session ends instead of following the card's next one")
-	return jsonOut, wait, once
 }
 
 // renderWatchHeader prints what is known before the stream starts: who

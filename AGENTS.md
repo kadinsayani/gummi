@@ -84,6 +84,19 @@ card's credits and hours went), `spec`, `diff`, `verify`,
 `merge`, `clean`, `deps`, `stack`, `doctor`, `skill`. See README's "Running headlessly"
 for the driver's command grammar and exit-status table.
 
+**Flags are declared once.** Cobra owns routing, help, completion *and*
+parsing: every flag is declared in `cobra.go`'s `bind*Flags` functions (the
+surface the driving verbs share lives in `flags.go` as `driveFlags`), and a
+command body reads what cobra parsed through `cliFlags`. Do not add a
+`flag.NewFlagSet` to a command — `TestNoCommandParsesItsOwnFlags` fails if you
+do. A second parser is what let `stack new --name`, `stack add --pos` and
+`merge --m` each be declared, advertised and then rejected at parse.
+
+`gummi skill` generates its bundle (`SKILL.md` + `references/`) from that same
+cobra tree, so the doc cannot name a flag the binary lacks or miss one it has.
+Tests drive verbs through the real tree via `runCLI` rather than calling
+`runXxx` directly; that is what makes an unreachable flag fail a test.
+
 `internal/deps.go` (build tag `pin`) blank-imports the pinned Charm stack
 — that's why `make build` runs `go build -tags pin ./...` too.
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -79,15 +78,7 @@ func resolveDepsID(ctx context.Context, store *state.Store, arg string) (domain.
 // errors (self-loop, cycle, late attachment, unknown card) verbatim and
 // exits non-zero; a successful add prints the edge and exits zero.
 func runDepsAdd(args []string) error {
-	fs := flag.NewFlagSet("deps add", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi deps add <dependent> <depends-on>")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
+	if len(args) != 2 {
 		return fmt.Errorf("deps add needs exactly two cards: <dependent> <depends-on>")
 	}
 	de, err := openDepsEnv()
@@ -96,11 +87,11 @@ func runDepsAdd(args []string) error {
 	}
 	defer de.cleanup()
 	ctx := context.Background()
-	dep, err := resolveDepsID(ctx, de.store, fs.Arg(0))
+	dep, err := resolveDepsID(ctx, de.store, args[0])
 	if err != nil {
 		return err
 	}
-	target, err := resolveDepsID(ctx, de.store, fs.Arg(1))
+	target, err := resolveDepsID(ctx, de.store, args[1])
 	if err != nil {
 		return err
 	}
@@ -115,15 +106,7 @@ func runDepsAdd(args []string) error {
 // the edge. Removing an edge that does not exist is an idempotent no-op that
 // exits zero (the store owns that semantics).
 func runDepsRm(args []string) error {
-	fs := flag.NewFlagSet("deps rm", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi deps rm <dependent> <depends-on>")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
+	if len(args) != 2 {
 		return fmt.Errorf("deps rm needs exactly two cards: <dependent> <depends-on>")
 	}
 	de, err := openDepsEnv()
@@ -132,11 +115,11 @@ func runDepsRm(args []string) error {
 	}
 	defer de.cleanup()
 	ctx := context.Background()
-	dep, err := resolveDepsID(ctx, de.store, fs.Arg(0))
+	dep, err := resolveDepsID(ctx, de.store, args[0])
 	if err != nil {
 		return err
 	}
-	target, err := resolveDepsID(ctx, de.store, fs.Arg(1))
+	target, err := resolveDepsID(ctx, de.store, args[1])
 	if err != nil {
 		return err
 	}
@@ -151,15 +134,7 @@ func runDepsRm(args []string) error {
 // (what the card depends on) as one FD-NNN per line, in the store's number
 // order.
 func runDepsList(args []string) error {
-	fs := flag.NewFlagSet("deps list", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi deps list <id>")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
+	if len(args) != 1 {
 		return fmt.Errorf("deps list needs exactly one card: <id>")
 	}
 	de, err := openDepsEnv()
@@ -168,7 +143,7 @@ func runDepsList(args []string) error {
 	}
 	defer de.cleanup()
 	ctx := context.Background()
-	id, err := resolveDepsID(ctx, de.store, fs.Arg(0))
+	id, err := resolveDepsID(ctx, de.store, args[0])
 	if err != nil {
 		return err
 	}

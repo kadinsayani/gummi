@@ -1,8 +1,6 @@
 package main
 
 import (
-	"strconv"
-
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -81,24 +79,20 @@ func runBoardCobra(cmd *cobra.Command, _ []string) error {
 	return runBoard()
 }
 
-// buildFlagArgs reconstructs the []string a cobra command parsed into, in
-// the shape the existing flag.FlagSet-based runXxx functions expect: every
-// flag that differs from its default as `--name value` (bare `--name` for an
-// on boolean), then the positional args unchanged. Each runXxx keeps its own
-// flag.NewFlagSet parsing untouched while cobra supplies routing and help.
-func buildFlagArgs(cmd *cobra.Command, positional []string) []string {
-	var out []string
+// resetFlags restores a command tree's flags to their declared defaults.
+// The cobra tree is package-level state, so a value parsed by one
+// invocation would otherwise be inherited by the next one in the same
+// process — which matters to the tests that drive the real tree, and to
+// anything embedding run().
+func resetFlags(cmd *cobra.Command) {
 	cmd.Flags().VisitAll(func(f *pflag.Flag) {
-		if !f.Changed || f.Value.String() == f.DefValue {
+		if !f.Changed {
 			return
 		}
-		if f.Value.Type() == "bool" {
-			if b, err := strconv.ParseBool(f.Value.String()); err == nil && b {
-				out = append(out, "--"+f.Name)
-			}
-			return
-		}
-		out = append(out, "--"+f.Name, f.Value.String())
+		_ = f.Value.Set(f.DefValue)
+		f.Changed = false
 	})
-	return append(out, positional...)
+	for _, sub := range cmd.Commands() {
+		resetFlags(sub)
+	}
 }

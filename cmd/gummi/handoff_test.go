@@ -40,7 +40,7 @@ func TestHandOffCommandClosesWithoutLanding(t *testing.T) {
 	store, f := verifiedCLIRepo(t)
 	before := cliGit(t, ".", "rev-parse", "HEAD")
 
-	if err := runHandOff([]string{string(f.ID)}); err != nil {
+	if err := runCLI("handoff", string(f.ID)); err != nil {
 		t.Fatalf("runHandOff: %v", err)
 	}
 
@@ -79,10 +79,10 @@ func TestHandOffCobra(t *testing.T) {
 // ended on main after all.
 func TestMergeAfterHandOffRetractsIt(t *testing.T) {
 	store, f := verifiedCLIRepo(t)
-	if err := runHandOff([]string{string(f.ID)}); err != nil {
+	if err := runCLI("handoff", string(f.ID)); err != nil {
 		t.Fatalf("runHandOff: %v", err)
 	}
-	if err := runMerge([]string{string(f.ID), "-m", "feat(export): land it after all"}); err != nil {
+	if err := runCLI("merge", string(f.ID), "-m", "feat(export): land it after all"); err != nil {
 		t.Fatalf("runMerge after hand-off: %v", err)
 	}
 	got, err := store.GetFeature(context.Background(), f.ID)
@@ -105,10 +105,10 @@ func TestMergeAfterHandOffRetractsIt(t *testing.T) {
 // reporting a landing that is never coming.
 func TestCleanRefusesAHandedOffCard(t *testing.T) {
 	_, f := verifiedCLIRepo(t)
-	if err := runHandOff([]string{string(f.ID)}); err != nil {
+	if err := runCLI("handoff", string(f.ID)); err != nil {
 		t.Fatalf("runHandOff: %v", err)
 	}
-	out, err := captureNDJSON(t, func() error { return runClean([]string{string(f.ID)}) })
+	out, err := captureNDJSON(t, func() error { return runCLI("clean", string(f.ID)) })
 	if err == nil {
 		t.Fatal("clean accepted a handed-off card")
 	}
@@ -127,7 +127,7 @@ func TestHandOffCommandRefusesUnverified(t *testing.T) {
 	if _, err := store.Transition(context.Background(), f.ID, domain.StageImplement, "user"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := captureNDJSON(t, func() error { return runHandOff([]string{string(f.ID)}) })
+	out, err := captureNDJSON(t, func() error { return runCLI("handoff", string(f.ID)) })
 	if err == nil {
 		t.Fatal("handoff accepted a card mid-flight")
 	}

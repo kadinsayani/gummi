@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
 	"os"
 
 	"github.com/morphis/gummi/internal/state"
@@ -15,12 +13,7 @@ import (
 // lock. Before a worktree exists (the item is still in a design stage), the
 // manager reports that clearly.
 func runDiff(args []string) error {
-	fs := flag.NewFlagSet("diff", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi diff <id|ref>")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("diff", args)
 	if err != nil {
 		return err
 	}

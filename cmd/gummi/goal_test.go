@@ -11,7 +11,7 @@ import (
 // workspace work, the same way a run does.
 func TestGoalRequiresEnvelope(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "")
-	err := runGoal([]string{"export works offline"})
+	err := runCLI("goal", "export works offline")
 	if err == nil || !strings.Contains(err.Error(), "envelope is required") {
 		t.Fatalf("err = %v, want an envelope-required failure", err)
 	}
@@ -19,37 +19,39 @@ func TestGoalRequiresEnvelope(t *testing.T) {
 
 func TestGoalValidatesItsArguments(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "1000")
-	if err := runGoal(nil); err == nil || !strings.Contains(err.Error(), "exactly one objective") {
+	if err := runCLI("goal"); err == nil || !strings.Contains(err.Error(), "exactly one objective") {
 		t.Fatalf("err = %v", err)
 	}
-	if err := runGoal([]string{"--until", "implement", "x"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
+	if err := runCLI("goal", "--until", "implement", "x"); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
 		t.Fatalf("err = %v", err)
 	}
-	if err := runGoal([]string{"--plan-file", "/nonexistent/goal.md", "x"}); err == nil || !strings.Contains(err.Error(), "--plan-file") {
+	if err := runCLI("goal", "--plan-file", "/nonexistent/goal.md", "x"); err == nil || !strings.Contains(err.Error(), "--plan-file") {
 		t.Fatalf("a missing plan file names the flag: %v", err)
 	}
 }
 
 func TestGoalResumeInput(t *testing.T) {
-	in, err := goalResumeInput(driver.ResumeInput{}, "also Windows", "", false, true, false)
+	goalFlags := func(argv ...string) cliFlags { return parsedFlags(t, "resume", argv...) }
+
+	in, err := goalResumeInput(goalFlags("--goal-note", "also Windows"), driver.ResumeInput{})
 	if err != nil || in.Note == nil || *in.Note != "also Windows" {
 		t.Fatalf("--goal-note: %+v %v", in, err)
 	}
 	why := "tables read better"
-	in, err = goalResumeInput(driver.ResumeInput{RequestChanges: &why}, "", "D-2", false, false, true)
+	in, err = goalResumeInput(goalFlags("--reverse", "D-2"), driver.ResumeInput{RequestChanges: &why})
 	if err != nil || in.Reverse == nil || *in.Reverse != "D-2" || in.RequestChanges == nil {
 		t.Fatalf("--reverse with a reason: %+v %v", in, err)
 	}
-	if in, err = goalResumeInput(driver.ResumeInput{}, "", "", true, false, false); err != nil || !in.WrapUp {
+	if in, err = goalResumeInput(goalFlags("--wrap-up"), driver.ResumeInput{}); err != nil || !in.WrapUp {
 		t.Fatalf("--wrap-up: %+v %v", in, err)
 	}
-	if _, err := goalResumeInput(driver.ResumeInput{}, "n", "D-1", false, true, true); err == nil {
+	if _, err := goalResumeInput(goalFlags("--goal-note", "n", "--reverse", "D-1"), driver.ResumeInput{}); err == nil {
 		t.Fatal("two goal flags at once must be refused")
 	}
-	if _, err := goalResumeInput(driver.ResumeInput{Approve: true}, "", "", true, false, false); err == nil {
+	if _, err := goalResumeInput(goalFlags("--wrap-up"), driver.ResumeInput{Approve: true}); err == nil {
 		t.Fatal("a goal flag with another decision must be refused")
 	}
-	if in, err := goalResumeInput(driver.ResumeInput{Approve: true}, "", "", false, false, false); err != nil || !in.Approve {
+	if in, err := goalResumeInput(goalFlags(), driver.ResumeInput{Approve: true}); err != nil || !in.Approve {
 		t.Fatalf("no goal flag passes the input through: %+v %v", in, err)
 	}
 }

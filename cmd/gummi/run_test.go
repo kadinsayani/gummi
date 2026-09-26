@@ -3,12 +3,10 @@ package main
 import (
 	"context"
 	"errors"
-	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/morphis/gummi/internal/driver"
 	"github.com/morphis/gummi/internal/state"
@@ -72,7 +70,7 @@ profiles:
 // fails loud before any workspace is touched.
 func TestRunRequiresEnvelope(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "")
-	err := runRun([]string{"a feature"})
+	err := runCLI("run", "a feature")
 	if err == nil || !strings.Contains(err.Error(), "envelope is required") {
 		t.Fatalf("err = %v, want an envelope-required failure", err)
 	}
@@ -81,7 +79,7 @@ func TestRunRequiresEnvelope(t *testing.T) {
 // GUMMI_ENVELOPE supplies the envelope when --envelope is absent.
 func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "250")
-	opts, err := driverOptions(0, "", driver.GateAttended, time.Minute, false, false, "", "", "", "", "")
+	opts, err := driverOptions(parsedFlags(t, "run"), "")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
@@ -90,22 +88,41 @@ func TestDriverOptionsEnvelopeFallback(t *testing.T) {
 	}
 }
 
-// An unknown --gate-approval value is rejected. --until is no longer
-// validated by driverOptions (that moved to runRun, ahead of the kind
-// widening — TestRunUntilValidation), so any string threads through as-is.
+// An unknown --gate-approval value is rejected, and the rest of the shared
+// driving surface threads through to driver.Options unchanged.
 func TestDriverOptionsGateValidation(t *testing.T) {
-	if _, err := driverOptions(100, "", "sometimes", time.Minute, false, false, "", "", "", "", ""); err == nil {
+	bad := parsedFlags(t, "run", "--envelope", "100", "--gate-approval", "sometimes")
+	if _, err := driverOptions(bad, ""); err == nil {
 		t.Fatal("bad gate-approval accepted")
 	}
-	opts, err := driverOptions(100, "", driver.GateAttended, 0, true, true, "JIRA-9", "must handle empty input", "plan", "", "release-2.1")
+	fl := parsedFlags(t, "run",
+		"--envelope", "100", "--gate-approval", driver.GateAttended,
+		"--stage-timeout", "0", "--autonomous", "--verbose",
+		"--ref", "JIRA-9", "--until", "plan", "--base", "release-2.1")
+	opts, err := driverOptions(fl, "must handle empty input")
 	if err != nil {
 		t.Fatalf("driverOptions: %v", err)
 	}
 	if opts.GateApproval != driver.GateAttended || !opts.Autonomous || opts.Ref != "JIRA-9" {
 		t.Fatalf("options not threaded through: %+v", opts)
 	}
-	if opts.Acceptance != "must handle empty input" || opts.Until != "plan" {
-		t.Fatalf("acceptance/until not threaded through: %+v", opts)
+	if opts.Acceptance != "must handle empty input" || opts.Until != "plan" || opts.Base != "release-2.1" {
+		t.Fatalf("acceptance/until/base not threaded through: %+v", opts)
+	}
+}
+
+// A verb that does not offer one of the shared driving flags still
+// assembles its options: goal takes no --repo, and resume changes neither
+// repo nor base. Reading an absent flag must be "" rather than a panic.
+func TestDriverOptionsToleratesAbsentSharedFlags(t *testing.T) {
+	for _, verb := range []string{"goal", "resume"} {
+		opts, err := driverOptions(parsedFlags(t, verb, "--envelope", "100"), "")
+		if err != nil {
+			t.Fatalf("%s: driverOptions: %v", verb, err)
+		}
+		if opts.Repo != "" {
+			t.Errorf("%s: Repo = %q, want empty", verb, opts.Repo)
+		}
 	}
 }
 
@@ -118,11 +135,11 @@ func TestRunUntilValidation(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "100")
 	// a real stage that is not a stop on the route → rejected. The design
 	// gate is the one stop, so every other stage lands here.
-	if err := runRun([]string{"--until", "implement", "a feature"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
+	if err := runCLI("run", "--until", "implement", "a feature"); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
 		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
 	}
 	// an unknown stage is always rejected.
-	if err := runRun([]string{"--until", "banana", "a feature"}); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
+	if err := runCLI("run", "--until", "banana", "a feature"); err == nil || !strings.Contains(err.Error(), "not a valid stop") {
 		t.Fatalf("err = %v, want a --until rejection naming the valid stops", err)
 	}
 }
@@ -156,21 +173,24 @@ func TestDriverExitMapping(t *testing.T) {
 
 // resumeInput enforces at most one decision flag and preserves an
 // explicitly-empty answer as a (rejectable) decision rather than a
-// silent re-run.
+// silent re-run. It reads the flags `gummi resume` really declares, so a
+// case here cannot describe a flag surface the binary does not have.
 func TestResumeInputMutuallyExclusive(t *testing.T) {
-	if _, err := resumeInput("no", true, "", false, "", "", true, false, false, false); err == nil {
+	rf := func(argv ...string) cliFlags { return parsedFlags(t, "resume", argv...) }
+
+	if _, err := resumeInput(rf("--answer", "no", "--approve")); err == nil {
 		t.Fatal("both --answer and --approve accepted")
 	}
-	in, err := resumeInput("no", false, "", false, "", "", true, false, false, false)
+	in, err := resumeInput(rf("--answer", "no"))
 	if err != nil || in.Answer == nil || *in.Answer != "no" {
 		t.Fatalf("answer input = %+v, err=%v", in, err)
 	}
-	in, err = resumeInput("", true, "", false, "", "", false, false, false, false)
+	in, err = resumeInput(rf("--approve"))
 	if err != nil || !in.Approve {
 		t.Fatalf("approve input = %+v, err=%v", in, err)
 	}
 	// no flags set → an all-zero input (re-run the parked stage).
-	in, err = resumeInput("", false, "", false, "", "", false, false, false, false)
+	in, err = resumeInput(rf())
 	if err != nil || in.Answer != nil || in.Approve || in.RequestChanges != nil || in.Bounce != nil {
 		t.Fatalf("empty resume input = %+v, err=%v", in, err)
 	}
@@ -180,51 +200,37 @@ func TestResumeInputMutuallyExclusive(t *testing.T) {
 // rewind), and --note is only meaningful when carried by --bounce — an
 // orphan --note is a usage error, not a silent no-op.
 func TestResumeInputBounce(t *testing.T) {
+	rf := func(argv ...string) cliFlags { return parsedFlags(t, "resume", argv...) }
+
 	// --bounce alone → empty-note bounce.
-	in, err := resumeInput("", false, "", true, "", "", false, false, false, false)
+	in, err := resumeInput(rf("--bounce"))
 	if err != nil || in.Bounce == nil || *in.Bounce != "" {
 		t.Fatalf("bounce input = %+v, err=%v", in, err)
 	}
 	// --bounce --note "why" → bounce carrying the note.
-	in, err = resumeInput("", false, "", true, "flaky mock", "", false, false, true, false)
+	in, err = resumeInput(rf("--bounce", "--note", "flaky mock"))
 	if err != nil || in.Bounce == nil || *in.Bounce != "flaky mock" {
 		t.Fatalf("bounce+note input = %+v, err=%v", in, err)
 	}
 	// --bounce combined with any other decision is refused.
-	if _, err := resumeInput("no", false, "", true, "", "", true, false, false, false); err == nil {
+	if _, err := resumeInput(rf("--answer", "no", "--bounce")); err == nil {
 		t.Fatal("both --answer and --bounce accepted")
 	}
-	if _, err := resumeInput("", true, "", true, "", "", false, false, false, false); err == nil {
+	if _, err := resumeInput(rf("--approve", "--bounce")); err == nil {
 		t.Fatal("both --approve and --bounce accepted")
 	}
-	if _, err := resumeInput("", false, "changes", true, "", "", false, true, false, false); err == nil {
+	if _, err := resumeInput(rf("--request-changes", "changes", "--bounce")); err == nil {
 		t.Fatal("both --request-changes and --bounce accepted")
 	}
 	// --note without --bounce is a usage error, not a silently-dropped flag.
-	if _, err := resumeInput("", false, "", false, "orphan", "", false, false, true, false); err == nil {
+	if _, err := resumeInput(rf("--note", "orphan")); err == nil {
 		t.Fatal("--note accepted without --bounce")
 	}
 }
 
 // resume rejects a malformed work-item id before touching the workspace.
 func TestResumeBadID(t *testing.T) {
-	if err := runResume([]string{"not-an-id"}); err == nil {
+	if err := runCLI("resume", "not-an-id"); err == nil {
 		t.Fatal("malformed id accepted")
-	}
-}
-
-// isSet distinguishes an explicitly-passed flag from its default.
-func TestIsSet(t *testing.T) {
-	fs := flag.NewFlagSet("t", flag.ContinueOnError)
-	a := fs.String("answer", "", "")
-	_ = a
-	if err := fs.Parse([]string{"--answer", ""}); err != nil {
-		t.Fatal(err)
-	}
-	if !isSet(fs, "answer") {
-		t.Fatal("explicitly-set empty flag reported unset")
-	}
-	if isSet(fs, "approve") {
-		t.Fatal("absent flag reported set")
 	}
 }

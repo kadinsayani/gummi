@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"os"
 
@@ -32,12 +31,7 @@ func initWorkspace(cwd string) (ws state.Workspace, existed bool, err error) {
 // runInit implements `gummi init`: create and seed the workspace in the
 // current directory, or report that one is already there. Finding an
 // initialized workspace is not an error — both paths return nil.
-func runInit(args []string) error {
-	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi init") }
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+func runInit() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err

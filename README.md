@@ -377,11 +377,12 @@ it. `gummi status` says by how much when it happens.
 names how the card closed in one `ending` field — `landed`, `handed_off`
 or `dropped`. A headless run stops at the first.
 
-**Let your agent drive gummi.** `gummi skill install` writes a `SKILL.md`
-for Claude Code, Copilot CLI, Codex and opencode, generated from the
-binary's real flags so it cannot drift. `gummi doctor` checks backend,
-auth, profile and envelope. The full reference, PR landing loop included,
-is in [docs/HEADLESS.md](docs/HEADLESS.md).
+**Let your agent drive gummi.** `gummi skill install` writes a skill bundle
+— `SKILL.md` plus the `references/` it points at — for Claude Code, Copilot
+CLI, Codex and opencode, generated from the same cobra tree that parses a
+real command line, so it cannot document a flag the binary lacks. `gummi
+doctor` checks backend, auth, profile and envelope. The full reference, PR
+landing loop included, is in [docs/HEADLESS.md](docs/HEADLESS.md).
 
 ## Backends and configuration
 

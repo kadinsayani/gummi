@@ -1,7 +1,6 @@
 package main
 
 import (
-	"flag"
 	"strings"
 	"testing"
 )
@@ -10,7 +9,7 @@ import (
 // GUMMI_ENVELOPE fails loud before any workspace is touched.
 func TestResearchRequiresEnvelope(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "")
-	err := runResearch([]string{"a research brief"})
+	err := runCLI("research", "a research brief")
 	if err == nil || !strings.Contains(err.Error(), "envelope is required") {
 		t.Fatalf("err = %v, want an envelope-required failure", err)
 	}
@@ -23,7 +22,7 @@ func TestResearchRequiresEnvelope(t *testing.T) {
 func TestResearchEnvelopeFallback(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("GUMMI_ENVELOPE", "250")
-	err := runResearch([]string{"a research brief"})
+	err := runCLI("research", "a research brief")
 	if err == nil || strings.Contains(err.Error(), "envelope is required") {
 		t.Fatalf("err = %v, want a non-envelope failure (the fallback should have satisfied the requirement)", err)
 	}
@@ -36,35 +35,38 @@ func TestResearchEnvelopeFallback(t *testing.T) {
 func TestResearchUntilValidation(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "100")
 	for _, until := range []string{"brainstorm", "spec", "implement", "banana"} {
-		err := runResearch([]string{"--until", until, "a research brief"})
+		err := runCLI("research", "--until", until, "a research brief")
 		if err == nil || !strings.Contains(err.Error(), "not a valid stop") || !strings.Contains(err.Error(), "plan") {
 			t.Fatalf("--until %s: err = %v, want a rejection naming plan as the only valid stop", until, err)
 		}
 	}
 }
 
-// RS seeds no Verification-plan section, so its flag surface
-// deliberately omits --acceptance. (--full was checked here too until it
-// was deleted outright: there is one route now, and no command defines
-// it. TestCobraFlagsMirrorCanonical is what keeps it from coming back on
-// the cobra side alone.)
-func TestResearchRejectsAcceptance(t *testing.T) {
-	fs := flag.NewFlagSet("research", flag.ContinueOnError)
-	registerResearchFlags(fs)
-	fs.VisitAll(func(f *flag.Flag) {
-		if f.Name == "acceptance" {
-			t.Errorf("registerResearchFlags binds --%s, want it absent", f.Name)
+// RS seeds no Verification-plan section and never gets a branch, so its
+// flag surface deliberately omits --acceptance and both adoption flags.
+// (--full was checked here too until it was deleted outright: there is one
+// route now, and no command defines it.)
+func TestResearchOmitsFeatureOnlyFlags(t *testing.T) {
+	for _, verb := range []string{"research", "diagnose"} {
+		cmd, _, err := rootCmd.Find([]string{verb})
+		if err != nil {
+			t.Fatalf("finding %s: %v", verb, err)
 		}
-	})
+		for _, name := range []string{"acceptance", "adopt", "pr", "full"} {
+			if cmd.Flags().Lookup(name) != nil {
+				t.Errorf("gummi %s binds --%s, want it absent", verb, name)
+			}
+		}
+	}
 }
 
 // research takes exactly one positional argument: the brief.
 func TestResearchRequiresOnePositional(t *testing.T) {
 	t.Setenv("GUMMI_ENVELOPE", "100")
-	if err := runResearch(nil); err == nil {
+	if err := runCLI("research"); err == nil {
 		t.Fatal("no positional accepted")
 	}
-	if err := runResearch([]string{"one", "two"}); err == nil {
+	if err := runCLI("research", "one", "two"); err == nil {
 		t.Fatal("two positionals accepted")
 	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -22,27 +21,22 @@ import (
 // read-only snapshot of a feature's stage, gate blockers, spend/envelope,
 // and branch state. --json is the skill's machine-readable path. It drives
 // nothing and holds no lock, so it is safe to poll a running feature.
-func runStatus(args []string) error {
-	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	jsonOut, statsOut := registerStatusFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi status <id|ref> [--json] [--stats]")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+func runStatus(fl cliFlags, args []string) error {
+	idArg, err := oneID("status", args)
 	if err != nil {
 		return err
 	}
+	jsonOut, statsOut := fl.Bool("json"), fl.Bool("stats")
 	return withReadWorkspace(func(ctx context.Context, store *state.Store, wt *worktree.Pool, ws state.Workspace) error {
 		f, err := resolveFeatureID(ctx, store, idArg)
 		if err != nil {
 			return err
 		}
 		view := buildStatus(ctx, store, wt, ws, &f)
-		if *statsOut {
+		if statsOut {
 			view.Stats = buildStats(ctx, store, &f)
 		}
-		if *jsonOut {
+		if jsonOut {
 			b, err := json.MarshalIndent(view, "", "  ")
 			if err != nil {
 				return err
@@ -50,25 +44,13 @@ func runStatus(args []string) error {
 			fmt.Println(string(b))
 			return nil
 		}
-		if *statsOut {
+		if statsOut {
 			renderStats(os.Stdout, view, view.Stats)
 			return nil
 		}
 		renderStatus(os.Stdout, view)
 		return nil
 	})
-}
-
-// registerStatusFlags binds `gummi status`'s flags onto fs and returns
-// their pointers, so the skill's grammar generator can enumerate them
-// alongside the run/resume flag sets (see runFlagValues).
-//
-// --stats is opt-in rather than always on because it reads the card's whole
-// event log, and status is a thing callers poll. Where the card stands
-// stays a cheap question; how it got there is the expensive one.
-func registerStatusFlags(fs *flag.FlagSet) (jsonOut, statsOut *bool) {
-	return fs.Bool("json", false, "emit machine-readable JSON instead of the text summary"),
-		fs.Bool("stats", false, "report where the card's credits and hours went instead of where it stands")
 }
 
 // statusView is the status command's payload — the JSON schema the skill

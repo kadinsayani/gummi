@@ -107,7 +107,7 @@ func TestDepsAddRmListRoundTrip(t *testing.T) {
 	store := depsFixture(t)
 	ctx := context.Background()
 
-	if err := runDepsAdd([]string{"FD-002", "FD-001"}); err != nil {
+	if err := runCLI("deps", "add", "FD-002", "FD-001"); err != nil {
 		t.Fatalf("runDepsAdd: %v", err)
 	}
 	deps, err := store.ListDependencies(ctx, "FD-002")
@@ -115,7 +115,7 @@ func TestDepsAddRmListRoundTrip(t *testing.T) {
 		t.Fatalf("after add: deps=%v err=%v, want [FD-001]", deps, err)
 	}
 	out := captureStdout(t, func() {
-		if err := runDepsList([]string{"FD-002"}); err != nil {
+		if err := runCLI("deps", "list", "FD-002"); err != nil {
 			t.Fatalf("runDepsList: %v", err)
 		}
 	})
@@ -123,14 +123,14 @@ func TestDepsAddRmListRoundTrip(t *testing.T) {
 		t.Errorf("deps list output missing the forward edge:\n%s", out)
 	}
 
-	if err := runDepsRm([]string{"FD-002", "FD-001"}); err != nil {
+	if err := runCLI("deps", "rm", "FD-002", "FD-001"); err != nil {
 		t.Fatalf("runDepsRm: %v", err)
 	}
 	if deps, _ := store.ListDependencies(ctx, "FD-002"); len(deps) != 0 {
 		t.Fatalf("after rm: deps=%v, want none", deps)
 	}
 	// removing an edge that does not exist is an idempotent no-op (exit 0).
-	if err := runDepsRm([]string{"FD-002", "FD-001"}); err != nil {
+	if err := runCLI("deps", "rm", "FD-002", "FD-001"); err != nil {
 		t.Fatalf("runDepsRm(missing): %v", err)
 	}
 }
@@ -139,7 +139,7 @@ func TestDepsAddRmListRoundTrip(t *testing.T) {
 // re-derives no dependency policy.
 func TestDepsAddSurfacesStoreError(t *testing.T) {
 	depsFixture(t)
-	if err := runDepsAdd([]string{"FD-001", "FD-001"}); err == nil {
+	if err := runCLI("deps", "add", "FD-001", "FD-001"); err == nil {
 		t.Fatal("self-dependency add accepted")
 	} else if !strings.Contains(err.Error(), "self-dependency") {
 		t.Fatalf("error = %q, want it to carry the store's self-dependency text", err)

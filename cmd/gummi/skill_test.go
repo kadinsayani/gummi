@@ -1,50 +1,93 @@
 package main
 
 import (
-	"flag"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/x/exp/golden"
+	"github.com/spf13/pflag"
 )
 
-// The rendered SKILL.md must name every flag the run/resume/status/doctor
-// commands actually register, plus every command — this is the drift lock
-// (DESIGN §7): add a flag to `gummi run` and this test fails until SKILL.md
-// regenerates from the real flag set.
+// Every flag the shipped commands declare must be documented somewhere in
+// the bundle — this is the drift lock (DESIGN §7): add a flag to `gummi
+// run` and this test fails until the skill regenerates.
+//
+// The bundle, not SKILL.md alone: a goal-only flag belongs in
+// references/goals.md, and an agent shipping one card should never have to
+// read past SKILL.md to find what it can use.
 func TestSkillDocumentsEveryFlag(t *testing.T) {
-	doc := skillBody()
-
-	registrars := map[string]func(*flag.FlagSet){
-		"run":      func(fs *flag.FlagSet) { registerRunFlags(fs) },
-		"research": func(fs *flag.FlagSet) { registerResearchFlags(fs) },
-		"goal":     func(fs *flag.FlagSet) { registerGoalFlags(fs) },
-		"resume":   func(fs *flag.FlagSet) { registerResumeFlags(fs) },
-		"merge":    func(fs *flag.FlagSet) { registerMergeFlags(fs) },
-		"commit":   func(fs *flag.FlagSet) { registerCommitFlags(fs) },
-		"status":   func(fs *flag.FlagSet) { registerStatusFlags(fs) },
-		"doctor":   func(fs *flag.FlagSet) { registerDoctorFlags(fs) },
+	var bundle strings.Builder
+	for _, f := range skillBundle() {
+		bundle.WriteString(f.body)
 	}
-	for cmd, reg := range registrars {
-		fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-		reg(fs)
-		fs.VisitAll(func(f *flag.Flag) {
+	doc := bundle.String()
+
+	for _, path := range []string{"run", "research", "diagnose", "goal", "resume", "merge", "squash", "commit", "status", "watch", "doctor"} {
+		cmd, _, err := rootCmd.Find(strings.Fields(path))
+		if err != nil {
+			t.Fatalf("finding %q: %v", path, err)
+		}
+		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if f.Name == "help" {
+				return
+			}
 			if !strings.Contains(doc, "--"+f.Name) {
-				t.Errorf("SKILL.md does not mention %s flag --%s", cmd, f.Name)
+				t.Errorf("the skill bundle does not mention %s flag --%s", path, f.Name)
 			}
 		})
 	}
 
 	for _, cmd := range []string{
-		"gummi run", "gummi research", "gummi goal", "gummi resume", "gummi verify", "gummi merge", "gummi commit", "gummi clean",
-		"gummi status", "gummi spec", "gummi diff", "gummi doctor", "gummi skill",
+		"gummi run", "gummi research", "gummi diagnose", "gummi resume", "gummi verify",
+		"gummi merge", "gummi squash", "gummi commit", "gummi clean", "gummi handoff",
+		"gummi status", "gummi watch", "gummi spec", "gummi diff", "gummi doctor",
+		"gummi deps add", "gummi skill",
 	} {
-		if !strings.Contains(doc, cmd) {
+		if !strings.Contains(skillBody(), cmd) {
 			t.Errorf("SKILL.md does not mention command %q", cmd)
 		}
 	}
+	if !strings.Contains(doc, "gummi goal") {
+		t.Error("the skill bundle does not mention `gummi goal`")
+	}
+}
+
+// A flag advertised in the skill must be one the binary really accepts.
+// The generated grammar is read off the cobra tree that parses, so this
+// checks the hand-written prose too — where `--m`, a flag the binary never
+// had, survived for as long as the grammar generator invented it.
+func TestSkillNamesNoFlagTheBinaryLacks(t *testing.T) {
+	known := declaredFlags()
+	seenForeign := map[string]bool{}
+	for _, f := range skillBundle() {
+		for _, m := range longFlagRe.FindAllStringSubmatch(f.body, -1) {
+			name := m[1]
+			if known[name] {
+				continue
+			}
+			if _, ok := foreignSkillFlags[name]; ok {
+				seenForeign[name] = true
+				continue
+			}
+			t.Errorf("%s documents --%s, which no gummi command declares", f.path, name)
+		}
+	}
+	// The opt-out list must not outlive the prose it excuses, or it
+	// quietly becomes a way to hide a real flag from the check.
+	for name := range foreignSkillFlags {
+		if !seenForeign[name] {
+			t.Errorf("foreignSkillFlags still excuses --%s, which the skill no longer mentions; drop the entry", name)
+		}
+	}
+}
+
+// foreignSkillFlags are long flags the skill quotes that belong to ANOTHER
+// tool, so gummi is not expected to declare them. This is the only way to
+// opt out of the check above, so every entry carries whose flag it is.
+var foreignSkillFlags = map[string]string{
+	"model": "the Claude CLI's --model, named to explain the cross-model trap in references/setup.md",
 }
 
 // The exit contract in the doc must carry the real exit codes, generated
@@ -61,10 +104,15 @@ func TestSkillDocumentsExitCodes(t *testing.T) {
 	}
 }
 
-// The whole rendered body is goldened so prose changes are reviewed
+// Every file of the bundle is goldened so prose changes are reviewed
 // deliberately (run `go test ./cmd/gummi -run TestSkillBodyGolden -update`).
 func TestSkillBodyGolden(t *testing.T) {
-	golden.RequireEqual(t, []byte(skillBody()))
+	for _, f := range skillBundle() {
+		name := strings.TrimSuffix(strings.TrimPrefix(f.path, "references/"), ".md")
+		t.Run(name, func(t *testing.T) {
+			golden.RequireEqual(t, []byte(f.body))
+		})
+	}
 }
 
 // renderSkill stamps the frontmatter with the version and the body hash, and
@@ -81,8 +129,25 @@ func TestSkillFrontmatterStamp(t *testing.T) {
 	if stamp.Hash != skillBodyHash() {
 		t.Errorf("stamped hash %q != skillBodyHash %q", stamp.Hash, skillBodyHash())
 	}
-	if got := installedBodyHash(raw); got != skillBodyHash() {
-		t.Errorf("installedBodyHash %q != skillBodyHash %q (body did not round-trip)", got, skillBodyHash())
+	_, body, split := splitFrontmatter(raw)
+	if !split || body != skillBody() {
+		t.Error("SKILL.md's body did not round-trip through its frontmatter")
+	}
+}
+
+// The bundle hash covers every file, not just SKILL.md: a hand-edited
+// reference file must read as drift exactly as an edited SKILL.md does.
+// Before the split there was one file and nothing to get this wrong.
+func TestSkillBundleHashCoversReferences(t *testing.T) {
+	files := skillBundle()
+	if len(files) < 2 {
+		t.Fatal("the bundle has no reference files to cover")
+	}
+	base := bundleHash(files)
+	edited := append([]skillFile(nil), files...)
+	edited[len(edited)-1].body += "\nHAND EDIT\n"
+	if bundleHash(edited) == base {
+		t.Errorf("editing %s did not change the bundle hash", edited[len(edited)-1].path)
 	}
 }
 
@@ -100,58 +165,78 @@ func TestParseInstalledStampForeign(t *testing.T) {
 // re-install is idempotent; a drifted (hand-edited) file is not overwritten
 // without --force; --force replaces it.
 func TestInstallOneLifecycle(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, ".claude", "skills", "gummi", "SKILL.md")
-	tgt := installTarget{path: path, label: "test"}
-	content := renderSkill("vtest")
+	root := t.TempDir()
+	dir := filepath.Join(root, ".claude", "skills", "gummi")
+	tgt := installTarget{dir: dir, label: "test"}
+	bundle := installBundle("vtest")
 	curHash := skillBodyHash()
+	upToDate := func() bool {
+		h, complete := installedBundleHash(dir)
+		return complete && h == curHash
+	}
 
 	// dry-run: nothing on disk.
-	if err := installOne(tgt, content, curHash, false, true); err != nil {
+	if err := installOne(tgt, bundle, curHash, false, true); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(path); !os.IsNotExist(err) {
+	if _, err := os.Stat(tgt.skillPath()); !os.IsNotExist(err) {
 		t.Fatalf("dry-run created a file: %v", err)
 	}
 
-	// real install: file present and stamped, body matches.
-	if err := installOne(tgt, content, curHash, false, false); err != nil {
+	// real install: every file present and stamped, bundle matches.
+	if err := installOne(tgt, bundle, curHash, false, false); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(path)
+	for _, f := range bundle {
+		if _, err := os.Stat(filepath.Join(dir, f.path)); err != nil {
+			t.Fatalf("install did not write %s: %v", f.path, err)
+		}
+	}
+	if !upToDate() {
+		t.Fatal("installed bundle does not match the current skill")
+	}
+	raw, err := os.ReadFile(tgt.skillPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if installedBodyHash(raw) != curHash {
-		t.Fatal("installed body does not match the current skill")
-	}
 
 	// re-install without --force is a no-op (content unchanged).
-	if err := installOne(tgt, content, curHash, false, false); err != nil {
+	if err := installOne(tgt, bundle, curHash, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := os.ReadFile(path); string(again) != string(raw) {
+	if again, _ := os.ReadFile(tgt.skillPath()); string(again) != string(raw) {
 		t.Fatal("idempotent re-install rewrote the file")
 	}
 
-	// hand-edit → drift → refuse without --force (edit survives).
-	edited := append(raw, []byte("\nHAND EDIT\n")...)
-	if err := os.WriteFile(path, edited, 0o644); err != nil {
+	// a hand-edited REFERENCE file is drift too, and is refused without
+	// --force just as an edited SKILL.md is.
+	ref := filepath.Join(dir, bundle[len(bundle)-1].path)
+	refRaw, err := os.ReadFile(ref)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := installOne(tgt, content, curHash, false, false); err != nil {
+	if err := os.WriteFile(ref, append(refRaw, []byte("\nHAND EDIT\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if now, _ := os.ReadFile(path); !strings.Contains(string(now), "HAND EDIT") {
-		t.Fatal("drifted file was overwritten without --force")
+	if upToDate() {
+		t.Fatal("an edited reference file still read as up to date")
+	}
+	if err := installOne(tgt, bundle, curHash, false, false); err != nil {
+		t.Fatal(err)
+	}
+	if now, _ := os.ReadFile(ref); !strings.Contains(string(now), "HAND EDIT") {
+		t.Fatal("drifted reference was overwritten without --force")
 	}
 
-	// --force replaces it; body matches the current skill again.
-	if err := installOne(tgt, content, curHash, true, false); err != nil {
+	// --force replaces the whole bundle.
+	if err := installOne(tgt, bundle, curHash, true, false); err != nil {
 		t.Fatal(err)
 	}
-	if now, _ := os.ReadFile(path); installedBodyHash(now) != curHash || strings.Contains(string(now), "HAND EDIT") {
-		t.Fatal("--force did not restore the file")
+	if now, _ := os.ReadFile(ref); strings.Contains(string(now), "HAND EDIT") {
+		t.Fatal("--force did not restore the reference file")
+	}
+	if !upToDate() {
+		t.Fatal("--force did not restore the bundle")
 	}
 }
 
@@ -161,10 +246,10 @@ func TestInstallOneLifecycle(t *testing.T) {
 func TestSkillInstallCheck(t *testing.T) {
 	dir := t.TempDir()
 	curHash := skillBodyHash()
-	content := renderSkill("vtest")
+	bundle := installBundle("vtest")
 
-	upToDate := installTarget{path: filepath.Join(dir, "up-to-date", "SKILL.md"), label: "up-to-date"}
-	if err := installOne(upToDate, content, curHash, false, false); err != nil {
+	upToDate := installTarget{dir: filepath.Join(dir, "up-to-date"), label: "up-to-date"}
+	if err := installOne(upToDate, bundle, curHash, false, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -172,28 +257,28 @@ func TestSkillInstallCheck(t *testing.T) {
 		t.Errorf("all targets up to date: checkTargets = %v, want nil", err)
 	}
 
-	absent := installTarget{path: filepath.Join(dir, "absent", "SKILL.md"), label: "absent"}
+	absent := installTarget{dir: filepath.Join(dir, "absent"), label: "absent"}
 	if err := checkTargets([]installTarget{upToDate, absent}, curHash); err == nil {
 		t.Error("missing target: checkTargets = nil, want an error naming it")
-	} else if !strings.Contains(err.Error(), absent.path) {
-		t.Errorf("checkTargets error %q does not name absent target %q", err, absent.path)
+	} else if !strings.Contains(err.Error(), absent.dir) {
+		t.Errorf("checkTargets error %q does not name absent target %q", err, absent.dir)
 	}
 
-	drifted := installTarget{path: filepath.Join(dir, "drifted", "SKILL.md"), label: "drifted"}
-	if err := installOne(drifted, content, curHash, false, false); err != nil {
+	drifted := installTarget{dir: filepath.Join(dir, "drifted"), label: "drifted"}
+	if err := installOne(drifted, bundle, curHash, false, false); err != nil {
 		t.Fatal(err)
 	}
-	raw, err := os.ReadFile(drifted.path)
+	raw, err := os.ReadFile(drifted.skillPath())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(drifted.path, append(raw, []byte("\nHAND EDIT\n")...), 0o644); err != nil {
+	if err := os.WriteFile(drifted.skillPath(), append(raw, []byte("\nHAND EDIT\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := checkTargets([]installTarget{upToDate, drifted}, curHash); err == nil {
 		t.Error("drifted target: checkTargets = nil, want an error naming it")
-	} else if !strings.Contains(err.Error(), drifted.path) {
-		t.Errorf("checkTargets error %q does not name drifted target %q", err, drifted.path)
+	} else if !strings.Contains(err.Error(), drifted.dir) {
+		t.Errorf("checkTargets error %q does not name drifted target %q", err, drifted.dir)
 	}
 }
 
@@ -204,23 +289,23 @@ func TestResolveTargets(t *testing.T) {
 	if err != nil || len(proj) != 2 {
 		t.Fatalf("project targets = %+v, err=%v", proj, err)
 	}
-	if !strings.HasSuffix(proj[0].path, filepath.Join(".claude", "skills", "gummi", "SKILL.md")) {
-		t.Errorf("project path = %q", proj[0].path)
+	if !strings.HasSuffix(proj[0].dir, filepath.Join(".claude", "skills", "gummi")) {
+		t.Errorf("project dir = %q", proj[0].dir)
 	}
-	if !strings.HasSuffix(proj[1].path, filepath.Join(".agents", "skills", "gummi", "SKILL.md")) {
-		t.Errorf("codex project path = %q", proj[1].path)
+	if !strings.HasSuffix(proj[1].dir, filepath.Join(".agents", "skills", "gummi")) {
+		t.Errorf("codex project dir = %q", proj[1].dir)
 	}
 	codexProject, err := resolveTargets("project", "codex", "/repo")
-	if err != nil || len(codexProject) != 1 || codexProject[0].path != codexProjectSkillPath("/repo") {
+	if err != nil || len(codexProject) != 1 || codexProject[0].dir != codexProjectSkillDir("/repo") {
 		t.Fatalf("explicit codex project target = %+v, err=%v", codexProject, err)
 	}
 	codex, err := resolveTargets("user", "codex", "/repo")
-	if err != nil || len(codex) != 1 || !strings.Contains(codex[0].path, filepath.Join(".agents", "skills", "gummi")) {
+	if err != nil || len(codex) != 1 || !strings.Contains(codex[0].dir, filepath.Join(".agents", "skills", "gummi")) {
 		t.Fatalf("codex user target = %+v, err=%v", codex, err)
 	}
 
 	cop, err := resolveTargets("user", "copilot", "/repo")
-	if err != nil || len(cop) != 1 || !strings.Contains(cop[0].path, filepath.Join(".copilot", "skills", "gummi")) {
+	if err != nil || len(cop) != 1 || !strings.Contains(cop[0].dir, filepath.Join(".copilot", "skills", "gummi")) {
 		t.Fatalf("copilot user target = %+v, err=%v", cop, err)
 	}
 	if _, err := resolveTargets("user", "bogus", "/repo"); err == nil {
@@ -228,12 +313,12 @@ func TestResolveTargets(t *testing.T) {
 	}
 }
 
-// userSkillPath honors CLAUDE_CONFIG_DIR for the claude/opencode home.
-func TestUserSkillPathHonorsClaudeConfigDir(t *testing.T) {
+// userSkillDir honors CLAUDE_CONFIG_DIR for the claude/opencode home.
+func TestUserSkillDirHonorsClaudeConfigDir(t *testing.T) {
 	t.Setenv("CLAUDE_CONFIG_DIR", "/custom/cc")
-	got := userSkillPath(agentClaude)
-	if want := filepath.Join("/custom/cc", "skills", "gummi", "SKILL.md"); got != want {
-		t.Errorf("userSkillPath = %q, want %q", got, want)
+	got := userSkillDir(agentClaude)
+	if want := filepath.Join("/custom/cc", "skills", "gummi"); got != want {
+		t.Errorf("userSkillDir = %q, want %q", got, want)
 	}
 }
 
@@ -271,7 +356,7 @@ func TestSkillInstallProjectScopeRefusesUnmanagedRepo(t *testing.T) {
 	dir := gitRepo(t)
 	t.Chdir(dir)
 
-	err := skillInstall([]string{"--scope", "project", "--agent", "claude"})
+	err := runCLI("skill", "install", "--scope", "project", "--agent", "claude")
 	if err == nil {
 		t.Fatal("skillInstall in a repo with no gummi workspace = nil error, want a refusal")
 	}
@@ -292,7 +377,7 @@ func TestSkillInstallProjectScopeAnchorsToWorkspaceRoot(t *testing.T) {
 	writeConfig(t, ws, "repo: repo\n")
 	t.Chdir(repo)
 
-	if err := skillInstall([]string{"--scope", "project", "--agent", "claude"}); err != nil {
+	if err := runCLI("skill", "install", "--scope", "project", "--agent", "claude"); err != nil {
 		t.Fatalf("skillInstall: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(ws, ".claude", "skills", "gummi", "SKILL.md")); err != nil {
@@ -316,7 +401,7 @@ func TestSkillInstallProjectScopeRefusesSymlinkedGummi(t *testing.T) {
 	}
 	t.Chdir(dir)
 
-	err := skillInstall([]string{"--scope", "project", "--agent", "claude"})
+	err := runCLI("skill", "install", "--scope", "project", "--agent", "claude")
 	if err == nil {
 		t.Fatal("skillInstall with a symlinked .gummi = nil error, want a refusal")
 	}

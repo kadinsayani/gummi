@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -959,18 +958,22 @@ func (f *doctorFixture) rewindMain() {
 	git("branch", "-M", "tmp-rewound", "main")
 }
 
-// --deep parses through registerDoctorFlags and defaults off, so the
-// default `gummi doctor` stays cheap and offline.
+// --deep defaults off, so the default `gummi doctor` stays cheap and
+// offline, and parses through the command that actually runs it.
 func TestDoctorDeepFlag(t *testing.T) {
-	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
-	flags := registerDoctorFlags(fs)
-	if *flags.deep {
+	resetFlags(rootCmd)
+	t.Cleanup(func() { resetFlags(rootCmd) })
+	cmd, _, err := rootCmd.Find([]string{"doctor"})
+	if err != nil {
+		t.Fatalf("finding doctor: %v", err)
+	}
+	if cmdFlags(cmd).Bool("deep") {
 		t.Fatal("deep defaults on")
 	}
-	if err := fs.Parse([]string{"--deep"}); err != nil {
+	if err := cmd.Flags().Parse([]string{"--deep"}); err != nil {
 		t.Fatal(err)
 	}
-	if !*flags.deep {
+	if !cmdFlags(cmd).Bool("deep") {
 		t.Fatal("--deep did not parse")
 	}
 }

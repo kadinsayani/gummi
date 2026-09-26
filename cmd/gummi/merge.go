@@ -2,9 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
-	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -14,22 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
-// mergeFlagValues holds the flag pointer `gummi merge` binds. registerMergeFlags
-// is the single registration site: runMerge reads it, cobra binds the same
-// surface, and the skill's command-grammar generator enumerates it.
-type mergeFlagValues struct {
-	message *string
-}
-
-// registerMergeFlags binds `gummi merge`'s flags onto fs and returns their
-// pointers. A single -m/--message flag carries the landing message: inline
-// text, or the sentinel "-" to read it from stdin.
-func registerMergeFlags(fs *flag.FlagSet) *mergeFlagValues {
-	msg := fs.String("m", "", "landing commit message (required; - reads from stdin)")
-	fs.StringVar(msg, "message", "", "long form of -m")
-	return &mergeFlagValues{message: msg}
-}
-
 // runMerge implements `gummi merge <id|ref> -m <message|->`: the headless
 // landing verb. It requires the card to be at a verified branch, takes the
 // commit message explicitly from the caller (never drafts one), validates it,
@@ -37,30 +18,17 @@ func registerMergeFlags(fs *flag.FlagSet) *mergeFlagValues {
 // a `merged` NDJSON event (with the landed commit sha) and exiting 0 on
 // success. A missing, malformed, or unverified precondition fails loudly with
 // a non-zero exit before any git mutation.
-func runMerge(args []string) error {
-	fs := flag.NewFlagSet("merge", flag.ContinueOnError)
-	mv := registerMergeFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi merge <id|ref> -m <message|->")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+func runMerge(fl cliFlags, args []string) error {
+	idArg, err := oneID("merge", args)
 	if err != nil {
 		return err
 	}
-	message := *mv.message
 	// a goal lands as a merge commit gummi writes from the goal and its
 	// cards, so -m is optional for one
 	isGoal := strings.HasPrefix(strings.ToUpper(idArg), "GL-")
-	if message == "" && !isGoal {
-		return fmt.Errorf("merge needs a commit message: pass -m <message> (or -m - to read one from stdin)")
-	}
-	if message == "-" {
-		b, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return fmt.Errorf("reading commit message from stdin: %w", err)
-		}
-		message = string(b)
+	message, err := commitMessage(fl, "merge", !isGoal)
+	if err != nil {
+		return err
 	}
 	return withLandingWorkspace(func(ctx context.Context, d *driver.Driver, store *state.Store, ws state.Workspace, _ *worktree.Pool) (driver.Outcome, error) {
 		f, err := resolveFeatureID(ctx, store, idArg)
@@ -81,12 +49,7 @@ func runMerge(args []string) error {
 // streaming a `cleaned` NDJSON event and exiting 0 on success. It refuses
 // anything that has not actually landed, or that carries tracked-dirty rework.
 func runClean(args []string) error {
-	fs := flag.NewFlagSet("clean", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi clean <id|ref>")
-		fmt.Fprintln(os.Stderr, "  remove a landed card's worktree and branch")
-	}
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("clean", args)
 	if err != nil {
 		return err
 	}
@@ -112,12 +75,7 @@ func runClean(args []string) error {
 // verified branch, and every gate floor that holds a landing holds a hand-off
 // too: waiving the merge never waived the quality bar.
 func runHandOff(args []string) error {
-	fs := flag.NewFlagSet("handoff", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi handoff <id|ref>")
-		fmt.Fprintln(os.Stderr, "  close a verified card and keep its branch — nothing lands")
-	}
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("handoff", args)
 	if err != nil {
 		return err
 	}

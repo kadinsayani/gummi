@@ -70,6 +70,7 @@ func (e *exitError) Error() string { return fmt.Sprintf("exit status %d", e.code
 // with no arguments launches the board, creating the .gummi workspace lazily
 // on first run.
 func run(args []string) error {
+	resetFlags(rootCmd)
 	rootCmd.SetArgs(args)
 	return rootCmd.Execute()
 }

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -70,27 +69,16 @@ func resolveFeatureID(ctx context.Context, store *state.Store, arg string) (doma
 	return f, nil
 }
 
-// idFirstArg parses an id-first command line (`status FD-042 --json`),
-// pulling a leading non-flag id out before flag parsing (Go's flag package
-// stops at the first positional) and tolerating a trailing one as a
-// flags-first fallback. Shared by resume/status/spec/diff so they accept
-// the same grammar.
-func idFirstArg(fs *flag.FlagSet, args []string) (string, error) {
-	var idArg string
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		idArg, args = args[0], args[1:]
+// oneID pulls the single work-item id out of a command's positional args.
+// cobra has already parsed and removed the flags, wherever they appeared,
+// so `status FD-042 --json` and `status --json FD-042` arrive here
+// identically — which is the whole of what the old flag-order workaround
+// existed for (Go's stdlib flag package stops at the first positional).
+func oneID(verb string, args []string) (string, error) {
+	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+		return "", fmt.Errorf("%s needs exactly one work-item id", verb)
 	}
-	if err := fs.Parse(args); err != nil {
-		return "", err
-	}
-	if idArg == "" {
-		idArg = fs.Arg(0)
-	}
-	if idArg == "" || fs.NArg() > 1 {
-		fs.Usage()
-		return "", fmt.Errorf("%s needs exactly one work-item id", fs.Name())
-	}
-	return idArg, nil
+	return args[0], nil
 }
 
 // artifactPath resolves where an item's design artifact lives right now,

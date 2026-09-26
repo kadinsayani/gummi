@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -69,41 +68,24 @@ func (pe *prEnv) repoDir(ctx context.Context, f *domain.Feature) (string, error)
 // (by URL, by number against the card's own repo, or by --auto matching the
 // card's branch), and persist it. Prints the linked repo#number, URL, and
 // head SHA on success.
-func runPRLink(args []string) error {
-	fs := flag.NewFlagSet("pr link", flag.ContinueOnError)
-	auto := fs.Bool("auto", false, "resolve the PR whose head branch matches the card's branch (via gh pr list --head)")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi pr link <card> <url|number> [--auto]")
-		fs.PrintDefaults()
-	}
-	// pull a leading non-flag id out first (mirroring idFirstArg in
-	// read.go), since this grammar has a second, optional positional
-	// (<url|number>) that idFirstArg's fixed one-positional shape can't
-	// express; a card-name-first line ("FD-001 --auto") and a
-	// flags-reconstructed one ("--auto FD-001", what buildFlagArgs emits)
-	// both need to resolve to the same id + spec.
+func runPRLink(fl cliFlags, args []string) error {
+	// This grammar has a second, optional positional (<url|number>) that
+	// oneID's fixed one-positional shape cannot express.
+	auto := fl.Bool("auto")
 	var idArg string
-	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		idArg, args = args[0], args[1:]
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	rest := fs.Args()
-	if idArg == "" && len(rest) > 0 {
-		idArg, rest = rest[0], rest[1:]
+	var rest []string
+	if len(args) > 0 {
+		idArg, rest = args[0], args[1:]
 	}
 	var spec string
 	switch {
 	case idArg == "":
-		fs.Usage()
 		return fmt.Errorf("pr link needs a card and either <url|number> or --auto")
-	case *auto && len(rest) == 0:
+	case auto && len(rest) == 0:
 		spec = ""
-	case !*auto && len(rest) == 1:
+	case !auto && len(rest) == 1:
 		spec = rest[0]
 	default:
-		fs.Usage()
 		return fmt.Errorf("pr link needs a card and either <url|number> or --auto")
 	}
 
@@ -148,11 +130,7 @@ func runPRLink(args []string) error {
 // runPRUnlink implements `gummi pr unlink <card>`: clears a linked PR,
 // refusing when the card carries none.
 func runPRUnlink(args []string) error {
-	fs := flag.NewFlagSet("pr unlink", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi pr unlink <card>")
-	}
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("pr unlink", args)
 	if err != nil {
 		return err
 	}
@@ -195,17 +173,12 @@ type prStatusView struct {
 
 // runPRStatus implements `gummi pr status <card> [--json]`: a live query of
 // the linked PR's state and comment count.
-func runPRStatus(args []string) error {
-	fs := flag.NewFlagSet("pr status", flag.ContinueOnError)
-	jsonOut := fs.Bool("json", false, "emit machine-readable JSON instead of the text summary")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi pr status <card> [--json]")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+func runPRStatus(fl cliFlags, args []string) error {
+	idArg, err := oneID("pr status", args)
 	if err != nil {
 		return err
 	}
+	jsonOut := fl.Bool("json")
 
 	ghBinary := pr.GHBinary()
 	if err := pr.Available(ghBinary); err != nil {
@@ -240,7 +213,7 @@ func runPRStatus(args []string) error {
 		URL: f.PullRequest.URL, HeadSHA: headSHA,
 		State: state, Comments: comments,
 	}
-	if *jsonOut {
+	if jsonOut {
 		b, err := json.MarshalIndent(view, "", "  ")
 		if err != nil {
 			return err
@@ -300,18 +273,12 @@ type prIngestSummary struct {
 // FD-094's (feature_id, source_ref) uniqueness in the store, not by this
 // verb; the pre-write ListDiffAnnotations snapshot below only classifies the
 // summary counts.
-func runPRComments(args []string) error {
-	fs := flag.NewFlagSet("pr comments", flag.ContinueOnError)
-	ingest := fs.Bool("ingest", false, "write an annotation per unresolved review thread onto the card's diff")
-	jsonOut := fs.Bool("json", false, "emit machine-readable JSON instead of the text summary")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi pr comments <card> [--ingest] [--json]")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+func runPRComments(fl cliFlags, args []string) error {
+	idArg, err := oneID("pr comments", args)
 	if err != nil {
 		return err
 	}
+	ingest, jsonOut := fl.Bool("ingest"), fl.Bool("json")
 
 	ghBinary := pr.GHBinary()
 	if err := pr.Available(ghBinary); err != nil {
@@ -343,10 +310,10 @@ func runPRComments(args []string) error {
 		_ = pe.store.SetPullRequest(ctx, f.ID, refreshed) // side effect only; list/ingest render off the fetched threads, not this
 	}
 
-	if !*ingest {
-		return renderPRCommentsList(threads, topLevel, *jsonOut)
+	if !ingest {
+		return renderPRCommentsList(threads, topLevel, jsonOut)
 	}
-	return runPRCommentsIngest(ctx, pe, &f, threads, topLevel, *jsonOut)
+	return runPRCommentsIngest(ctx, pe, &f, threads, topLevel, jsonOut)
 }
 
 func renderPRCommentsList(threads []pr.ReviewThread, topLevel []pr.TopLevelComment, jsonOut bool) error {

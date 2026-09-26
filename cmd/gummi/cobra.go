@@ -1,23 +1,26 @@
 package main
 
 import (
-	"github.com/spf13/cobra"
+	"fmt"
 
-	"github.com/morphis/gummi/internal/driver"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
+
+	"github.com/morphis/gummi/internal/domain"
 )
 
 // This file wires the top-level commands and their nested subcommands onto
-// the cobra tree. Each is a thin adapter in the "Option A" shape: cobra owns
-// routing, help, flags, and completion; the underlying runXxx(args []string)
-// error implementations are unchanged and are re-entered with the flag slice
-// buildFlagArgs reconstructs from the parsed cobra flags.
+// the cobra tree. Cobra owns routing, help, completion AND parsing: each
+// command's flags are declared once, in the bind functions at the bottom,
+// and its RunE hands the body a cliFlags view of what cobra parsed. See
+// flags.go for why there is exactly one declaration site.
 
 // runCmd implements `gummi run [flags] "<description>"`.
 var runCmd = &cobra.Command{
 	Use:   "run [flags] \"<description>\"",
 	Short: "Headlessly drive one card to a verified branch",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runRun(buildFlagArgs(cmd, args))
+		return runRun(cmdFlags(cmd), args)
 	},
 }
 
@@ -26,7 +29,7 @@ var researchCmd = &cobra.Command{
 	Use:   "research [flags] \"<brief>\"",
 	Short: "Headlessly drive one research card through decompose",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runResearch(buildFlagArgs(cmd, args))
+		return runResearchCard(cmdFlags(cmd), args, domain.CardType{Kind: domain.KindResearch}, "brief")
 	},
 }
 
@@ -35,7 +38,8 @@ var diagnoseCmd = &cobra.Command{
 	Use:   "diagnose [flags] \"<symptom>\"",
 	Short: "Headlessly drive one diagnosis card through decompose",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDiagnose(buildFlagArgs(cmd, args))
+		return runResearchCard(cmdFlags(cmd), args,
+			domain.CardType{Kind: domain.KindResearch, Mode: domain.ModeDiagnosis}, "symptom")
 	},
 }
 
@@ -44,24 +48,8 @@ var resumeCmd = &cobra.Command{
 	Use:   "resume <id|ref> [decision]",
 	Short: "Pick a parked card back up and drive it on",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runResume(resumeArgv(cmd, args))
+		return runResume(cmdFlags(cmd), args)
 	},
-}
-
-// resumeArgv is buildFlagArgs plus one exception for `resume`:
-// buildFlagArgs drops a flag whose explicit value equals its cobra default,
-// since it can't tell "never passed" from "passed the default value" apart.
-// --gate-approval attended is a legitimate no-op re-affirmation (it
-// overrides a persisted autopilot mode), so re-add it here when that's
-// exactly what buildFlagArgs dropped. The exception lives at this one call site rather
-// than in buildFlagArgs itself, which stays generic for the ~20 other
-// commands routed through it.
-func resumeArgv(cmd *cobra.Command, args []string) []string {
-	argv := buildFlagArgs(cmd, args)
-	if f := cmd.Flags().Lookup("gate-approval"); f != nil && f.Changed && f.Value.String() == f.DefValue {
-		argv = append([]string{"--gate-approval", f.Value.String()}, argv...)
-	}
-	return argv
 }
 
 // goalCmd implements `gummi goal [flags] "<objective>"`.
@@ -69,7 +57,7 @@ var goalCmd = &cobra.Command{
 	Use:   `goal [flags] "<objective>"`,
 	Short: "Agree a goal, then let it run its cards on one branch until it is ready for you",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runGoal(buildFlagArgs(cmd, args))
+		return runGoal(cmdFlags(cmd), args)
 	},
 }
 
@@ -77,9 +65,7 @@ var goalCmd = &cobra.Command{
 var verifyCmd = &cobra.Command{
 	Use:   "verify <id|ref>",
 	Short: "Re-run the checks on a verified branch and finalize its card",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runVerify(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runVerify(args) },
 }
 
 // mergeCmd implements `gummi merge <id|ref> -m <message|->`.
@@ -87,7 +73,7 @@ var mergeCmd = &cobra.Command{
 	Use:   "merge <id|ref> -m <message|->",
 	Short: "Headlessly land a verified branch as one squash commit",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runMerge(buildFlagArgs(cmd, args))
+		return runMerge(cmdFlags(cmd), args)
 	},
 }
 
@@ -96,7 +82,7 @@ var squashCmd = &cobra.Command{
 	Use:   "squash <id|ref> -m <message|->",
 	Short: "Collapse a card's branch to one commit, in place",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runSquash(buildFlagArgs(cmd, args))
+		return runSquash(cmdFlags(cmd), args)
 	},
 }
 
@@ -104,18 +90,14 @@ var squashCmd = &cobra.Command{
 var handoffCmd = &cobra.Command{
 	Use:   "handoff <id|ref>",
 	Short: "Close a verified card and keep its branch — nothing lands",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runHandOff(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runHandOff(args) },
 }
 
 // cleanCmd implements `gummi clean <id|ref>`.
 var cleanCmd = &cobra.Command{
 	Use:   "clean <id|ref>",
 	Short: "Remove a landed card's worktree and branch",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runClean(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runClean(args) },
 }
 
 // commitCmd implements `gummi commit <id|ref> -m <message|->`.
@@ -123,7 +105,7 @@ var commitCmd = &cobra.Command{
 	Use:   "commit <id|ref> -m <message|->",
 	Short: "Commit a card's own uncommitted worktree changes onto its branch",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runCommit(buildFlagArgs(cmd, args))
+		return runCommit(cmdFlags(cmd), args)
 	},
 }
 
@@ -132,16 +114,16 @@ var statusCmd = &cobra.Command{
 	Use:   "status <id|ref> [--json] [--stats]",
 	Short: "Show a card's stage, spend, and branch state",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runStatus(buildFlagArgs(cmd, args))
+		return runStatus(cmdFlags(cmd), args)
 	},
 }
 
-// watchCmd implements `gummi watch <id|ref> [--json] [--wait]`.
+// watchCmd implements `gummi watch <id|ref> [--json] [--wait] [--once]`.
 var watchCmd = &cobra.Command{
 	Use:   "watch <id|ref> [--json] [--wait] [--once]",
 	Short: "Follow the live agent stream of a card another gummi is driving",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runWatch(buildFlagArgs(cmd, args))
+		return runWatch(cmdFlags(cmd), args)
 	},
 }
 
@@ -149,26 +131,22 @@ var watchCmd = &cobra.Command{
 var specCmd = &cobra.Command{
 	Use:   "spec <id|ref>",
 	Short: "Dump a card's current design artifact",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runSpec(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runSpec(args) },
 }
 
 // diffCmd implements `gummi diff <id|ref>`.
 var diffCmd = &cobra.Command{
 	Use:   "diff <id|ref>",
 	Short: "Dump a card's worktree diff against its base branch",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDiff(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runDiff(args) },
 }
 
 // doctorCmd implements `gummi doctor [--json] [--deep]`.
 var doctorCmd = &cobra.Command{
 	Use:   "doctor [--json] [--deep]",
 	Short: "Run a readiness checklist for the workspace",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runDoctor(buildFlagArgs(cmd, args))
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runDoctor(cmdFlags(cmd))
 	},
 }
 
@@ -176,9 +154,7 @@ var doctorCmd = &cobra.Command{
 var initCmd = &cobra.Command{
 	Use:   "init",
 	Short: "Create and seed the .gummi workspace in the current directory",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runInit(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, _ []string) error { return runInit() },
 }
 
 // ingestCmd implements `gummi ingest [flags] <spec-file>`.
@@ -186,7 +162,7 @@ var ingestCmd = &cobra.Command{
 	Use:   "ingest [flags] <spec-file>",
 	Short: "Split a document into cards",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runIngest(buildFlagArgs(cmd, args))
+		return runIngest(cmdFlags(cmd), args)
 	},
 }
 
@@ -199,16 +175,16 @@ var bugsCmd = &cobra.Command{
 var bugsIngestCmd = &cobra.Command{
 	Use:   "ingest",
 	Short: "Import open bugs from a GitHub repo",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBugIngest(buildFlagArgs(cmd, args))
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runBugIngest(cmdFlags(cmd))
 	},
 }
 
 var bugsNewCmd = &cobra.Command{
 	Use:   "new",
 	Short: "Create one bug by hand",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return runBugNew(buildFlagArgs(cmd, args))
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runBugNew(cmdFlags(cmd))
 	},
 }
 
@@ -221,25 +197,19 @@ var depsCmd = &cobra.Command{
 var depsAddCmd = &cobra.Command{
 	Use:   "add <dependent> <depends-on>",
 	Short: "Record that a card depends on another",
-	RunE: func(_ *cobra.Command, args []string) error {
-		return runDepsAdd(args)
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runDepsAdd(args) },
 }
 
 var depsRmCmd = &cobra.Command{
 	Use:   "rm <dependent> <depends-on>",
 	Short: "Remove a dependency edge",
-	RunE: func(_ *cobra.Command, args []string) error {
-		return runDepsRm(args)
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runDepsRm(args) },
 }
 
 var depsListCmd = &cobra.Command{
 	Use:   "list <id>",
 	Short: "List a card's dependencies",
-	RunE: func(_ *cobra.Command, args []string) error {
-		return runDepsList(args)
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runDepsList(args) },
 }
 
 // stackCmd groups the stack operations. A stack is a chain of cards
@@ -252,15 +222,19 @@ var stackCmd = &cobra.Command{
 }
 
 var stackNewCmd = &cobra.Command{
-	Use:   "new <bottom-card>",
+	Use:   "new <bottom-card> [--name <name>]",
 	Short: "Start a stack from the card that sits at its bottom",
-	RunE:  func(_ *cobra.Command, args []string) error { return runStackNew(args) },
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runStackNew(cmdFlags(cmd), args)
+	},
 }
 
 var stackAddCmd = &cobra.Command{
-	Use:   "add <stack> <card>",
+	Use:   "add <stack> <card> [--pos N]",
 	Short: "Put a card into a stack",
-	RunE:  func(_ *cobra.Command, args []string) error { return runStackAdd(args) },
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runStackAdd(cmdFlags(cmd), args)
+	},
 }
 
 var stackRmCmd = &cobra.Command{
@@ -297,23 +271,21 @@ var prLinkCmd = &cobra.Command{
 	Use:   "link <card> <url|number> [--auto]",
 	Short: "Link a card to an existing PR",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPRLink(buildFlagArgs(cmd, args))
+		return runPRLink(cmdFlags(cmd), args)
 	},
 }
 
 var prUnlinkCmd = &cobra.Command{
 	Use:   "unlink <card>",
 	Short: "Clear a card's linked PR",
-	RunE: func(_ *cobra.Command, args []string) error {
-		return runPRUnlink(args)
-	},
+	RunE:  func(_ *cobra.Command, args []string) error { return runPRUnlink(args) },
 }
 
 var prStatusCmd = &cobra.Command{
 	Use:   "status <card> [--json]",
 	Short: "Show a card's linked PR state and comment count",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPRStatus(buildFlagArgs(cmd, args))
+		return runPRStatus(cmdFlags(cmd), args)
 	},
 }
 
@@ -321,7 +293,7 @@ var prCommentsCmd = &cobra.Command{
 	Use:   "comments <card> [--ingest] [--json]",
 	Short: "List or ingest a linked PR's unresolved review threads as diff annotations",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return runPRComments(buildFlagArgs(cmd, args))
+		return runPRComments(cmdFlags(cmd), args)
 	},
 }
 
@@ -332,58 +304,48 @@ var skillCmd = &cobra.Command{
 }
 
 var skillShowCmd = &cobra.Command{
-	Use:   "show",
-	Short: "Print the rendered SKILL.md",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return skillShow(buildFlagArgs(cmd, args))
-	},
+	Use:   "show [<file>]",
+	Short: "Print the rendered SKILL.md, or one of its reference files",
+	RunE:  func(_ *cobra.Command, args []string) error { return skillShow(args) },
 }
 
 var skillInstallCmd = &cobra.Command{
 	Use:   "install",
-	Short: "Install the SKILL.md for an agent",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return skillInstall(buildFlagArgs(cmd, args))
+	Short: "Install the skill bundle for an agent",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return skillInstall(cmdFlags(cmd))
 	},
 }
 
 var skillListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "Report each install target's state",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return skillList(buildFlagArgs(cmd, args))
-	},
+	RunE:  func(_ *cobra.Command, _ []string) error { return skillList() },
 }
 
 func init() {
-	bindRunFlags(runCmd)
-	bindResearchFlags(researchCmd)
+	bindRunFlags(runCmd.Flags())
+	bindResearchFlags(researchCmd.Flags())
 	// diagnose is the same card in the other mode, so it is the same flag
 	// surface — bound from the one definition rather than restated.
-	bindResearchFlags(diagnoseCmd)
-	bindResumeFlags(resumeCmd)
-	bindGoalFlags(goalCmd)
-	mergeCmd.Flags().StringP("message", "m", "", "landing commit message (required; - reads from stdin)")
-	squashCmd.Flags().StringP("message", "m", "", "collapsed commit message (required; - reads from stdin)")
-	squashCmd.Flags().Bool("force", false, "proceed even if the linked PR has open review threads")
-	commitCmd.Flags().StringP("message", "m", "", "commit message for the card's uncommitted worktree changes (required; - reads from stdin)")
-	statusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
-	statusCmd.Flags().Bool("stats", false, "report where the card's credits and hours went instead of where it stands")
-	watchCmd.Flags().Bool("json", false, "emit the raw record stream as NDJSON instead of the rendered transcript")
-	watchCmd.Flags().Bool("wait", false, "block until the card has a live stream instead of failing when none exists")
-	watchCmd.Flags().Bool("once", false, "exit when the current session ends instead of following the card's next one")
-	doctorCmd.Flags().Bool("json", false, "emit the readiness checklist as JSON (the skill's setup path)")
-	doctorCmd.Flags().Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
-
-	bindIngestFlags(ingestCmd)
-	bindBugsIngestFlags(bugsIngestCmd)
-	bindBugsNewFlags(bugsNewCmd)
-	bindSkillInstallFlags(skillInstallCmd)
-
-	prLinkCmd.Flags().Bool("auto", false, "resolve the PR whose head branch matches the card's branch (via gh pr list --head)")
-	prStatusCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
-	prCommentsCmd.Flags().Bool("ingest", false, "write an annotation per unresolved review thread onto the card's diff")
-	prCommentsCmd.Flags().Bool("json", false, "emit machine-readable JSON instead of the text summary")
+	bindResearchFlags(diagnoseCmd.Flags())
+	bindGoalFlags(goalCmd.Flags())
+	bindResumeFlags(resumeCmd.Flags())
+	bindMergeFlags(mergeCmd.Flags())
+	bindSquashFlags(squashCmd.Flags())
+	bindCommitFlags(commitCmd.Flags())
+	bindStatusFlags(statusCmd.Flags())
+	bindWatchFlags(watchCmd.Flags())
+	bindDoctorFlags(doctorCmd.Flags())
+	bindIngestFlags(ingestCmd.Flags())
+	bindBugsIngestFlags(bugsIngestCmd.Flags())
+	bindBugsNewFlags(bugsNewCmd.Flags())
+	bindStackNewFlags(stackNewCmd.Flags())
+	bindStackAddFlags(stackAddCmd.Flags())
+	bindPRLinkFlags(prLinkCmd.Flags())
+	bindPRStatusFlags(prStatusCmd.Flags())
+	bindPRCommentsFlags(prCommentsCmd.Flags())
+	bindSkillInstallFlags(skillInstallCmd.Flags())
 
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
@@ -392,138 +354,193 @@ func init() {
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
 }
 
-// bindRunFlags mirrors the flags registerRunFlags defines on runRun's
-// FlagSet, so cobra parses the same surface (runRun still re-parses the
-// reconstructed slice, and the SKILL grammar stays sourced from
-// registerRunFlags).
-func bindRunFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.Int("envelope", 0, "spend budget for the card, in credits (required; falls back to GUMMI_ENVELOPE)")
-	f.String("profile", "", "profile mapping roles to models (default: first configured)")
-	f.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)")
-	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
-	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
-	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
-	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)")
-	f.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)")
-	f.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
-	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
-	f.String("adopt", "", "mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it")
-	f.String("pr", "", "mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations")
+// bindRunFlags declares `gummi run`'s flags: the shared driving surface
+// plus the three only a feature card takes.
+func bindRunFlags(fs *pflag.FlagSet) {
+	stdDriveFlags().bind(fs)
+	fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)")
+	adoptionFlags(fs)
 }
 
-// bindResearchFlags mirrors the flags registerResearchFlags defines on
-// runResearch's FlagSet, so cobra parses the same surface (runResearch
-// still re-parses the reconstructed slice, and the SKILL grammar stays
-// sourced from registerResearchFlags). No --acceptance: RS has no
-// Verification-plan section to seed.
-func bindResearchFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.Int("envelope", 0, "spend budget for the research card, in credits (required; falls back to GUMMI_ENVELOPE)")
-	f.String("profile", "", "profile mapping roles to models (default: first configured)")
-	f.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)")
-	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
-	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
-	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	f.String("ref", "", "external correlation id, echoed in the stream and persisted for status/resume lookup")
-	f.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)")
-	f.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)")
-	f.String("until", "", `stop cleanly before crossing the gate that leaves this stage (only "shape" is a valid stop on RS's route)`)
+// bindResearchFlags declares the flags `gummi research` and `gummi
+// diagnose` share. No --acceptance: RS has no Verification-plan section to
+// seed, and it never gets a branch, so neither adoption flag applies.
+func bindResearchFlags(fs *pflag.FlagSet) {
+	d := stdDriveFlags()
+	d.envelope = "spend budget for the research card, in credits (required; falls back to GUMMI_ENVELOPE)"
+	d.until = `stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)`
+	d.bind(fs)
 }
 
-// bindIngestFlags mirrors the flags registerIngestFlags defines on
-// runIngest's FlagSet, so cobra parses the same surface (runIngest still
-// re-parses the reconstructed slice).
-func bindIngestFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.String("profile", "", "profile the new features adopt (default: first configured)")
-	f.Int("envelope", 0, "spend budget per card, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
-	f.Bool("yes", false, "materialize without the confirmation prompt")
-	f.String("repo", "", "managed repository to create the cards in (a configured `repos:` name; required when `repos:` is configured)")
+// bindGoalFlags declares `gummi goal`'s flags. A goal spends, plans and
+// stops differently enough from a card that most of the shared surface
+// needs its own wording; no --repo, because a goal is not in a repository
+// (its cards name their own, DESIGN §17.2).
+func bindGoalFlags(fs *pflag.FlagSet) {
+	d := stdDriveFlags()
+	d.envelope = "the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)"
+	d.profile = "profile mapping roles to models, the lead included (default: first configured)"
+	d.gate = "who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)"
+	d.timeout = "per-stage inactivity timeout for the goal and each of its cards (0 disables)"
+	d.autonomous = "let the architect take its recommended answer instead of asking during the plan conversation"
+	d.base = "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)"
+	d.until = `stop cleanly before the goal's plan is approved (only "plan" is a valid stop)`
+	d.repo = ""
+	d.bind(fs)
+	fs.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
+	fs.String("after", "", "the goal this one continues (GL-NNN): what it came to know — reference, decided constants, findings, its hand-over — comes with it, and this goal's plan cannot be approved until that one has landed")
+	fs.String("reference", "", "documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff")
 }
 
-// bindGoalFlags mirrors registerGoalFlags.
-func bindGoalFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.Int("envelope", 0, "the goal's whole budget in credits — its cards, its lead and its own review all spend inside it (required; falls back to GUMMI_ENVELOPE)")
-	f.String("profile", "", "profile mapping roles to models, the lead included (default: first configured)")
-	f.String("gate-approval", driver.GateAttended, "who approves the goal's plan: attended|autopilot (past its plan a goal always runs itself)")
-	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout for the goal and each of its cards (0 disables)")
-	f.Bool("autonomous", false, "let the architect take its recommended answer instead of asking during the plan conversation")
-	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	f.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup")
-	f.String("base", "", "branch the goal branch forks from and lands on in the goal's home repository (default: whatever it has checked out)")
-	f.String("plan-file", "", "a complete goal doc to start the plan conversation from (a file path, or - for stdin)")
-	f.String("after", "", "the goal this one continues (GL-NNN): what it came to know — reference, decided constants, findings, its hand-over — comes with it, and this goal's plan cannot be approved until that one has landed")
-	f.String("reference", "", "documents the goal is agreed against — a design, a table, a spec — as comma-separated paths; copied into the goal's notebook, pinned at the plan gate, and listed in every card's kickoff")
-	f.String("until", "", "stop cleanly before the goal's plan is approved (only \"plan\" is a valid stop)")
+// bindResumeFlags declares `gummi resume`'s flags: the shared driving
+// surface, the decision flags that say why the run stopped, and the
+// goal-only levers.
+func bindResumeFlags(fs *pflag.FlagSet) {
+	d := stdDriveFlags()
+	d.envelope = "raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)"
+	d.gate = "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)"
+	d.ref = "external correlation id, echoed in the stream"
+	// A resumed card already knows its repository, its base branch and the
+	// profile it was minted with; none of the three can be changed now.
+	d.profile, d.repo, d.base = "", "", ""
+	d.bind(fs)
+
+	fs.String("answer", "", "answer a delegated ask_user question")
+	fs.Bool("approve", false, "approve a design gate handed back by --gate-approval=attended")
+	fs.String("request-changes", "", "send a design gate back with a note")
+	fs.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)")
+	fs.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)")
+	fs.String("say", "", "read a line the way the card page would and report what it would do, as a say event, without acting")
+
+	for _, name := range goalResumeFlagNames {
+		switch name {
+		case "goal-note":
+			fs.String(name, "", "goals: add a note to a running goal; its lead reads it on its next turn")
+		case "reverse":
+			fs.String(name, "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why")
+		case "wrap-up":
+			fs.Bool(name, false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped")
+		case "runs":
+			fs.Int(name, 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)")
+		case "minutes":
+			fs.Int(name, 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)")
+		case "retake":
+			fs.String(name, "", `goals: declare the evidence of an experiment's conclusive runs stale ("*" for all), so the goal takes them again — for when the substrate, not the code, was what failed`)
+		}
+	}
 }
 
-// bindResumeFlags mirrors registerResumeFlags.
-func bindResumeFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.String("goal-note", "", "goals: add a note to a running goal; its lead reads it on its next turn")
-	f.String("reverse", "", "goals: reverse a decision for review (D-N) and send the goal back; --request-changes adds why")
-	f.Bool("wrap-up", false, "goals: finish now — nothing new starts, verified work lands, the rest is dropped")
-	f.Int("runs", 0, "goals: raise the substrate budget to this many experiment runs before resuming (never lowers it)")
-	f.Int("minutes", 0, "goals: raise the substrate budget to this many substrate minutes before resuming (never lowers it)")
-	f.String("retake", "", "goals: declare the evidence of an experiment's conclusive runs stale (\"*\" for all), so the goal takes them again — for when the substrate, not the code, was what failed")
-	f.String("answer", "", "answer a delegated ask_user question")
-	f.Int("envelope", 0, "raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)")
-	f.Bool("approve", false, "approve a design gate handed back by --gate-approval=attended")
-	f.String("request-changes", "", "send a design gate back with a note")
-	f.Bool("bounce", false, "rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)")
-	f.String("note", "", "addendum to the reborn stage's kickoff (used with --bounce)")
-	f.String("say", "", "read a line the way the card page would and report what it would do, as a `say` event, without acting")
-	f.String("gate-approval", driver.GateAttended, "who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)")
-	f.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)")
-	f.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions")
-	f.Bool("verbose", false, "add per-tool-call activity lines to the stream")
-	f.String("ref", "", "external correlation id, echoed in the stream")
-	f.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)")
+// goalResumeFlagNames are the `resume` flags that only ever apply to a
+// goal. They are named here so the skill's grammar generator can keep them
+// out of the core SKILL.md — an agent shipping one card cannot use any of
+// them — and print them in the goals reference instead.
+var goalResumeFlagNames = []string{"goal-note", "reverse", "wrap-up", "runs", "minutes", "retake"}
+
+func bindMergeFlags(fs *pflag.FlagSet) { messageFlag(fs, "landing commit message") }
+func bindCommitFlags(fs *pflag.FlagSet) {
+	messageFlag(fs, "commit message for the card's uncommitted worktree changes")
 }
 
-// bindBugsIngestFlags mirrors runBugIngest's flag set.
-func bindBugsIngestFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.String("repo", "", "owner/repo to import from (default: this repo's origin remote)")
-	f.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; required when `repos:` is configured)")
-	f.String("label", "bug", "issue label filter (\"\" imports all issues)")
-	f.String("state", "open", "issue state: open|closed|all")
-	f.String("profile", "", "profile the new bugs adopt (default: first configured)")
-	f.Int("envelope", 0, "spend budget per bug, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
-	f.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)")
-	f.Bool("yes", false, "materialize without the confirmation prompt")
-	f.Bool("comments", false, "fetch issue comments into the report's Discussion section")
+func bindSquashFlags(fs *pflag.FlagSet) {
+	messageFlag(fs, "collapsed commit message")
+	fs.Bool("force", false, "proceed even if the linked PR has open review threads")
 }
 
-// bindBugsNewFlags mirrors runBugNew's flag set.
-func bindBugsNewFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.String("title", "", "bug title (required)")
-	f.String("one-liner", "", "short one-line summary")
-	f.String("severity", "", "severity: critical|high|medium|low")
-	f.String("repro", "", "reproduction steps")
-	f.String("expected", "", "expected behavior")
-	f.String("actual", "", "actual behavior")
-	f.String("env", "", "environment (versions, OS, config)")
-	f.String("desc", "", "summary of what's broken")
-	f.String("profile", "", "profile the bug adopts (default: first configured)")
-	f.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
-	f.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)")
-	f.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
-	f.String("adopt", "", "mint the bug onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it")
-	f.String("pr", "", "mint the bug onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations")
-	f.Bool("yes", false, "create without the confirmation prompt")
+// bindStatusFlags declares `gummi status`'s flags.
+//
+// --stats is opt-in rather than always on because it reads the card's
+// whole event log, and status is a thing callers poll. Where the card
+// stands stays a cheap question; how it got there is the expensive one.
+func bindStatusFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit machine-readable JSON instead of the text summary")
+	fs.Bool("stats", false, "report where the card's credits and hours went instead of where it stands")
 }
 
-// bindSkillInstallFlags mirrors skillInstall's flag set.
-func bindSkillInstallFlags(cmd *cobra.Command) {
-	f := cmd.Flags()
-	f.String("agent", "", "target a specific agent: claude|codex|opencode|copilot (default: detect)")
-	f.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
-	f.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
-	f.Bool("dry-run", false, "print what would be written, change nothing")
-	f.Bool("check", false, "verify every target is up to date; write nothing, fail if any is absent/foreign/drifted")
+func bindWatchFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit the raw record stream as NDJSON instead of the rendered transcript")
+	fs.Bool("wait", false, "block until the card has a live stream instead of failing when none exists")
+	fs.Bool("once", false, "exit when the current session ends instead of following the card's next one")
+}
+
+func bindDoctorFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit the readiness checklist as JSON (the skill's setup path)")
+	fs.Bool("deep", false, "probe per-role model reachability with a live backend turn (TTL-cached)")
+}
+
+func bindIngestFlags(fs *pflag.FlagSet) {
+	fs.String("profile", "", "profile the new features adopt (default: first configured)")
+	fs.Int("envelope", 0, "spend budget per card, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
+	fs.String("repo", "", "managed repository to create the cards in (a configured repos: name; required when repos: is configured)")
+	fs.Bool("yes", false, "materialize without the confirmation prompt")
+}
+
+func bindBugsIngestFlags(fs *pflag.FlagSet) {
+	fs.String("repo", "", "owner/repo to import from (default: this repo's origin remote)")
+	fs.String("target-repo", "", "managed repository to create the bugs in (a configured repos: name; required when repos: is configured)")
+	fs.String("label", "bug", `issue label filter ("" imports all issues)`)
+	fs.String("state", "open", "issue state: open|closed|all")
+	fs.String("profile", "", "profile the new bugs adopt (default: first configured)")
+	fs.Int("envelope", 0, "spend budget per bug, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
+	fs.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)")
+	fs.Bool("comments", false, "fetch issue comments into the report's Discussion section")
+	fs.Bool("yes", false, "materialize without the confirmation prompt")
+}
+
+func bindBugsNewFlags(fs *pflag.FlagSet) {
+	fs.String("title", "", "bug title (required)")
+	fs.String("one-liner", "", "short one-line summary")
+	fs.String("severity", "", "severity: critical|high|medium|low")
+	fs.String("repro", "", "reproduction steps")
+	fs.String("expected", "", "expected behavior")
+	fs.String("actual", "", "actual behavior")
+	fs.String("env", "", "environment (versions, OS, config)")
+	fs.String("desc", "", "summary of what's broken")
+	fs.String("profile", "", "profile the bug adopts (default: first configured)")
+	fs.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)")
+	fs.String("repo", "", "managed repository to create the bug in (a configured repos: name; required when repos: is configured)")
+	fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)")
+	adoptionFlags(fs)
+	fs.Bool("yes", false, "create without the confirmation prompt")
+}
+
+func bindStackNewFlags(fs *pflag.FlagSet) {
+	fs.String("name", "", "the stack's display name (default: the bottom card's slug)")
+}
+
+func bindStackAddFlags(fs *pflag.FlagSet) {
+	fs.Int("pos", -1, "position in the stack, 0 at the bottom (default: the top)")
+}
+
+func bindPRLinkFlags(fs *pflag.FlagSet) {
+	fs.Bool("auto", false, "resolve the PR whose head branch matches the card's branch (via gh pr list --head)")
+}
+
+func bindPRStatusFlags(fs *pflag.FlagSet) {
+	jsonFlag(fs, "emit machine-readable JSON instead of the text summary")
+}
+
+func bindPRCommentsFlags(fs *pflag.FlagSet) {
+	fs.Bool("ingest", false, "write an annotation per unresolved review thread onto the card's diff")
+	jsonFlag(fs, "emit machine-readable JSON instead of the text summary")
+}
+
+func bindSkillInstallFlags(fs *pflag.FlagSet) {
+	fs.String("agent", "", "target a specific agent: "+skillAgentList+" (default: detect)")
+	fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
+	fs.Bool("force", false, "overwrite an existing skill bundle (default: refuse and warn on drift)")
+	fs.Bool("dry-run", false, "print what would be written, change nothing")
+	fs.Bool("check", false, "verify every target is up to date; write nothing, fail if any is absent/foreign/drifted")
+}
+
+// gateApproval normalizes the --gate-approval value every driving verb
+// takes, reporting the one error message all of them used to spell out
+// separately (and differently).
+func gateApproval(raw string) (string, error) {
+	norm, ok := domain.NormalizeGateApproval(raw)
+	if !ok {
+		return "", fmt.Errorf(
+			"--gate-approval must be %q or %q (the retired %q/%q/%q/%q spellings are still accepted), got %q",
+			domain.GateAttended, domain.GateAutopilot, "off", "gates", "caller", "auto", raw)
+	}
+	return norm, nil
 }

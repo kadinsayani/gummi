@@ -39,7 +39,86 @@ write and what to hand the human. Skip all of that once it reports
 ## Command grammar
 
 ```
-{{.Grammar}}
+Flags shared by run, research, diagnose and resume — listed again under a
+verb only where that verb means something different by one:
+
+    --autonomous              auto-take the recommended answer instead of checkpointing questions
+    --base string             branch the card's work forks from and lands on (default: whatever the repository has checked out)
+    --envelope int            spend budget for the card, in credits (required; falls back to GUMMI_ENVELOPE)
+    --gate-approval string    who crosses this card's gates: attended|autopilot (retired spellings off/gates/caller/full still accepted; persisted on the card; resume keeps it)
+    --profile string          profile mapping roles to models (default: first configured)
+    --ref string              external correlation id, echoed in the stream and persisted for status/resume lookup
+    --repo string             managed repository to create the card in (a configured repos: name; required when repos: is configured)
+    --stage-timeout duration  per-stage inactivity timeout (0 disables)
+    --until string            stop cleanly before crossing the gate that leaves the design stage (default: run to a verified branch)
+    --verbose                 add per-tool-call activity lines to the stream
+
+gummi run [flags] "<description>"
+    --acceptance string  acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)
+    --adopt string       mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it
+    --pr string          mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations
+
+gummi research [flags] "<brief>"
+gummi diagnose [flags] "<symptom>"
+    --envelope int  spend budget for the research card, in credits (required; falls back to GUMMI_ENVELOPE)
+    --until string  stop cleanly before crossing the gate that leaves this stage (only "plan" is a valid stop)
+
+gummi resume <id|ref> [decision]
+    --answer string           answer a delegated ask_user question
+    --approve                 approve a design gate handed back by --gate-approval=attended
+    --bounce                  rewind one rerun edge — a verify-fail escalation to the work stage, an implement-stage card back to plan — and continue (the TUI's b key)
+    --envelope int            raise the spend budget before resuming, in credits (required to clear a card that ran out; never lowers it)
+    --gate-approval string    who crosses this card's later gates: attended|autopilot (retired spellings still accepted; inherits the run's mode when omitted; pass to change it)
+    --note string             addendum to the reborn stage's kickoff (used with --bounce)
+    --ref string              external correlation id, echoed in the stream
+    --request-changes string  send a design gate back with a note
+    --say string              read a line the way the card page would and report what it would do, as a say event, without acting
+
+gummi verify <id|ref>
+
+gummi merge <id|ref> -m <message|->
+    -m, --message string  landing commit message (required; - reads from stdin)
+
+gummi squash <id|ref> -m <message|->
+    --force               proceed even if the linked PR has open review threads
+    -m, --message string  collapsed commit message (required; - reads from stdin)
+
+gummi commit <id|ref> -m <message|->
+    -m, --message string  commit message for the card's uncommitted worktree changes (required; - reads from stdin)
+
+gummi handoff <id|ref>
+
+gummi clean <id|ref>
+
+gummi status <id|ref>
+    --json   emit machine-readable JSON instead of the text summary
+    --stats  report where the card's credits and hours went instead of where it stands
+
+gummi watch <id|ref>
+    --json  emit the raw record stream as NDJSON instead of the rendered transcript
+    --once  exit when the current session ends instead of following the card's next one
+    --wait  block until the card has a live stream instead of failing when none exists
+
+gummi spec <id|ref>
+
+gummi diff <id|ref>
+
+gummi doctor
+    --deep  probe per-role model reachability with a live backend turn (TTL-cached)
+    --json  emit the readiness checklist as JSON (the skill's setup path)
+
+gummi deps add <dependent> <depends-on>
+
+gummi deps rm <dependent> <depends-on>
+
+gummi deps list <id>
+
+gummi skill show|install|list
+    --agent string  target a specific agent: claude|codex|opencode|copilot|pi (default: detect)
+    --check         verify every target is up to date; write nothing, fail if any is absent/foreign/drifted
+    --dry-run       print what would be written, change nothing
+    --force         overwrite an existing skill bundle (default: refuse and warn on drift)
+    --scope string  install scope: project|user (default: project, or ask when interactive)
 ```
 
 A run drives one card through the workflow: plan → implement → verify. There is
@@ -61,7 +140,16 @@ as NDJSON, one record per line, for a caller that would rather parse than read.
 Each `gummi run` / `gummi resume` streams milestone + decision NDJSON on stdout
 and exits with a **typed status**. Branch on the exit code:
 
-{{.ExitTable}}
+| Exit | Status | What it means / your action |
+|------|--------|-----------------------------|
+| 0 | `verified` | verified branch ready — report it upward, stop |
+| 0 | `stopped` | clean `--until` stop — `resume <id> --approve` crosses the gate and continues |
+| 1 | `error` | setup/agent failure — check `status <id>`; resumable if a non-terminal card exists (`resumable` on the error event) |
+| 2 | `question` | a delegated ask (`question` event) → `resume <id> --answer <text>`; a caller gate (`gate` event) → `resume <id> --approve` or `--request-changes <note>` |
+| 3 | `blocked` | open %% or diff threads block a gate — resolve them, then `resume <id>`; or `resume <id> --request-changes <note>` to bounce it back |
+| 4 | `escalation` | rerun/critique cap or unclear verdict — report to the human; once they address it, `resume <id>` re-runs the stage. A verify-fail (or review cap-hit) carries `next: resume <id> --bounce --note "<why>"`, which rewinds the feature to implement/fix and drives review→verify again |
+| 5 | `exhausted` | credit budget dry — `resume <id> --envelope N` (N larger than the dry budget) raises it and continues |
+| 6 | `timeout` | a stage went quiet — read the event `hint`, report to the human; `resume <id>` re-runs the stage |
 
 **Capture that exit code directly — never through a pipe.** `gummi run … | tee
 run.log` (or `| head`, `| grep`) reports the *filter's* exit status, not

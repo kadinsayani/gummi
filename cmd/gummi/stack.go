@@ -9,7 +9,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 	"strings"
@@ -23,17 +22,8 @@ import (
 
 // runStackNew implements `gummi stack new <bottom-card> [--name <name>]`:
 // start a stack from the card that will sit at its bottom.
-func runStackNew(args []string) error {
-	fs := flag.NewFlagSet("stack new", flag.ContinueOnError)
-	name := fs.String("name", "", "the stack's display name (default: the bottom card's slug)")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi stack new <bottom-card> [--name <name>]")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
+func runStackNew(fl cliFlags, args []string) error {
+	if len(args) != 1 {
 		return fmt.Errorf("stack new takes exactly one card")
 	}
 	env, err := openDepsEnv()
@@ -42,7 +32,7 @@ func runStackNew(args []string) error {
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	bottom, err := resolveDepsID(ctx, env.store, fs.Arg(0))
+	bottom, err := resolveDepsID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}
@@ -53,7 +43,7 @@ func runStackNew(args []string) error {
 	if f.StackID != "" {
 		return fmt.Errorf("%s is already in stack %s", f.ID, f.StackID)
 	}
-	label := *name
+	label := fl.String("name")
 	if label == "" {
 		label = f.Slug
 	}
@@ -73,17 +63,8 @@ func runStackNew(args []string) error {
 }
 
 // runStackAdd implements `gummi stack add <stack> <card> [--pos N]`.
-func runStackAdd(args []string) error {
-	fs := flag.NewFlagSet("stack add", flag.ContinueOnError)
-	pos := fs.Int("pos", -1, "position in the stack, 0 at the bottom (default: the top)")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi stack add <stack> <card> [--pos N]")
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
+func runStackAdd(fl cliFlags, args []string) error {
+	if len(args) != 2 {
 		return fmt.Errorf("stack add takes a stack and a card")
 	}
 	env, err := openDepsEnv()
@@ -92,12 +73,12 @@ func runStackAdd(args []string) error {
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	id := domain.StackID(fs.Arg(0))
-	card, err := resolveDepsID(ctx, env.store, fs.Arg(1))
+	id := domain.StackID(args[0])
+	card, err := resolveDepsID(ctx, env.store, args[1])
 	if err != nil {
 		return err
 	}
-	if err := env.store.AddToStack(ctx, id, card, *pos); err != nil {
+	if err := env.store.AddToStack(ctx, id, card, fl.Int("pos")); err != nil {
 		return err
 	}
 	fmt.Printf("%s added to %s\n", card, id)
@@ -107,13 +88,7 @@ func runStackAdd(args []string) error {
 // runStackRm implements `gummi stack rm <card>`: take a card out of its
 // stack, closing the gap so the cards above it move down a rung.
 func runStackRm(args []string) error {
-	fs := flag.NewFlagSet("stack rm", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi stack rm <card>") }
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
+	if len(args) != 1 {
 		return fmt.Errorf("stack rm takes exactly one card")
 	}
 	env, err := openDepsEnv()
@@ -122,7 +97,7 @@ func runStackRm(args []string) error {
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	card, err := resolveDepsID(ctx, env.store, fs.Arg(0))
+	card, err := resolveDepsID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}
@@ -143,18 +118,12 @@ func runStackRm(args []string) error {
 
 // runStackMv implements `gummi stack mv <card> <pos>`.
 func runStackMv(args []string) error {
-	fs := flag.NewFlagSet("stack mv", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi stack mv <card> <position>") }
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 2 {
-		fs.Usage()
+	if len(args) != 2 {
 		return fmt.Errorf("stack mv takes a card and a position")
 	}
 	var pos int
-	if _, err := fmt.Sscanf(fs.Arg(1), "%d", &pos); err != nil {
-		return fmt.Errorf("%q is not a position", fs.Arg(1))
+	if _, err := fmt.Sscanf(args[1], "%d", &pos); err != nil {
+		return fmt.Errorf("%q is not a position", args[1])
 	}
 	env, err := openDepsEnv()
 	if err != nil {
@@ -162,7 +131,7 @@ func runStackMv(args []string) error {
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	card, err := resolveDepsID(ctx, env.store, fs.Arg(0))
+	card, err := resolveDepsID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}
@@ -180,19 +149,14 @@ func runStackMv(args []string) error {
 // runStackList implements `gummi stack list [<stack>]`: every stack, or
 // the members of one.
 func runStackList(args []string) error {
-	fs := flag.NewFlagSet("stack list", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi stack list [<stack>]") }
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
 	env, err := openDepsEnv()
 	if err != nil {
 		return err
 	}
 	defer env.cleanup()
 	ctx := context.Background()
-	if fs.NArg() == 1 {
-		return printStack(ctx, env.store, domain.StackID(fs.Arg(0)))
+	if len(args) == 1 {
+		return printStack(ctx, env.store, domain.StackID(args[0]))
 	}
 	stacks, err := env.store.ListStacks(ctx)
 	if err != nil {
@@ -222,13 +186,7 @@ func runStackList(args []string) error {
 // It exists for the outside driver and for the reader who wants to see it
 // happen, not because the board needs it: a stack replays itself.
 func runStackRestack(args []string) error {
-	fs := flag.NewFlagSet("stack restack", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi stack restack <stack|card>") }
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
+	if len(args) != 1 {
 		return fmt.Errorf("stack restack takes a stack or a card in one")
 	}
 	env, cleanup, err := openStackEngine()
@@ -237,7 +195,7 @@ func runStackRestack(args []string) error {
 	}
 	defer cleanup()
 	ctx := context.Background()
-	id, err := resolveStackID(ctx, env.store, fs.Arg(0))
+	id, err := resolveStackID(ctx, env.store, args[0])
 	if err != nil {
 		return err
 	}

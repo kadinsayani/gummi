@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"os"
 
@@ -15,12 +14,7 @@ import (
 // markdown, wherever it lives right now — its workspace home, its draft, or
 // a mid-flight worktree copy. It drives nothing and holds no lock.
 func runSpec(args []string) error {
-	fs := flag.NewFlagSet("spec", flag.ContinueOnError)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi spec <id|ref>")
-		fs.PrintDefaults()
-	}
-	idArg, err := idFirstArg(fs, args)
+	idArg, err := oneID("spec", args)
 	if err != nil {
 		return err
 	}

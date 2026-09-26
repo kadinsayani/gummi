@@ -80,7 +80,7 @@ func TestCommitCommand_Happy(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCommit([]string{string(f.ID), "-m", "fix(export): commit stray worktree changes"})
+		runErr = runCLI("commit", string(f.ID), "-m", "fix(export): commit stray worktree changes")
 	})
 	if runErr != nil {
 		t.Fatalf("runCommit: %v", runErr)
@@ -132,7 +132,7 @@ func TestCommitCommand_StdinMessage(t *testing.T) {
 	os.Stdin = r
 	defer func() { os.Stdin = origStdin }()
 
-	if err := runCommit([]string{string(f.ID), "-m", "-"}); err != nil {
+	if err := runCLI("commit", string(f.ID), "-m", "-"); err != nil {
 		t.Fatalf("runCommit: %v", err)
 	}
 	wtPath := filepath.Join(".gummi", "worktrees", string(f.ID))
@@ -143,7 +143,7 @@ func TestCommitCommand_StdinMessage(t *testing.T) {
 
 // A missing -m fails before touching git.
 func TestCommitCommand_RequiresMessage(t *testing.T) {
-	if err := runCommit([]string{"FD-009"}); err == nil {
+	if err := runCLI("commit", "FD-009"); err == nil {
 		t.Fatal("commit without -m accepted")
 	}
 }
@@ -160,7 +160,7 @@ func TestCommitCommand_NoopExitsZero(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCommit([]string{string(f.ID), "-m", "fix(export): commit stray worktree changes"})
+		runErr = runCLI("commit", string(f.ID), "-m", "fix(export): commit stray worktree changes")
 	})
 	if runErr != nil {
 		t.Fatalf("runCommit: %v", runErr)
@@ -186,7 +186,7 @@ func TestCommitThenSquashComposesOnPRLinkedCard(t *testing.T) {
 
 	var squashErr error
 	preOut := captureStdout(t, func() {
-		squashErr = runSquash([]string{string(f.ID), "-m", "feat(export): collapsed"})
+		squashErr = runCLI("squash", string(f.ID), "-m", "feat(export): collapsed")
 	})
 	if squashErr == nil {
 		t.Fatal("squash accepted a PR-linked card's dirty worktree")
@@ -195,10 +195,10 @@ func TestCommitThenSquashComposesOnPRLinkedCard(t *testing.T) {
 		t.Fatalf("stdout = %q, want the dirty-worktree refusal (ErrDirtyWorktree) in the error event", preOut)
 	}
 
-	if err := runCommit([]string{string(f.ID), "-m", "fix(export): commit stray worktree changes"}); err != nil {
+	if err := runCLI("commit", string(f.ID), "-m", "fix(export): commit stray worktree changes"); err != nil {
 		t.Fatalf("runCommit: %v", err)
 	}
-	if err := runSquash([]string{string(f.ID), "-m", "feat(export): collapsed"}); err != nil {
+	if err := runCLI("squash", string(f.ID), "-m", "feat(export): collapsed"); err != nil {
 		t.Fatalf("runSquash after commit: %v", err)
 	}
 

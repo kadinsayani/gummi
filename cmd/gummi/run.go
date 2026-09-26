@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -34,36 +33,21 @@ const defaultStageTimeout = 20 * time.Minute
 // to a verified branch, streaming milestone + decision NDJSON and exiting
 // with a typed status. An envelope is required (D6) and an agent must be
 // configured — both fail loud before any work begins.
-func runRun(args []string) error {
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	rv := registerRunFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, `usage: gummi run [flags] "<description>"`)
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if fs.NArg() != 1 {
-		fs.Usage()
+func runRun(fl cliFlags, args []string) error {
+	if len(args) != 1 {
 		return fmt.Errorf("run needs exactly one description argument")
 	}
-	desc := fs.Arg(0)
+	desc := args[0]
 
-	acceptanceText, err := readAcceptance(*rv.acceptance)
+	acceptanceText, err := readAcceptance(fl.String("acceptance"))
 	if err != nil {
 		return err
 	}
-	// validate --until before any work begins, so a bad target fails as a
-	// plain usage error rather than mid-run.
-	if err := driver.ValidateUntil(domain.Stage(*rv.until)); err != nil {
-		return err
-	}
-	opts, err := driverOptions(*rv.envelope, *rv.profile, *rv.gate, *rv.timeout, *rv.autonomous, *rv.verbose, *rv.ref, acceptanceText, *rv.until, *rv.repo, *rv.base)
+	opts, err := driverOptions(fl, acceptanceText)
 	if err != nil {
 		return err
 	}
-	adoption, err := resolveAdoption(*rv.adopt, *rv.pr, *rv.repo)
+	adoption, err := resolveAdoption(fl.String("adopt"), fl.String("pr"), fl.String("repo"))
 	if err != nil {
 		return err
 	}
@@ -102,43 +86,6 @@ func runRun(args []string) error {
 	}, opts)
 }
 
-// runFlagValues holds the flag pointers `gummi run` binds. registerRunFlags
-// is the single registration site: runRun reads these pointers, and the
-// skill's command-grammar generator (cmd/gummi/skill.go) enumerates the
-// same flag set — so the documented grammar can never drift from the
-// shipped flags (a golden test asserts every one appears in SKILL.md).
-type runFlagValues struct {
-	envelope                       *int
-	profile, gate, ref, acceptance *string
-	repo, until, base              *string
-	autonomous, verbose            *bool
-	timeout                        *time.Duration
-	adopt                          *string
-	pr                             *string
-}
-
-// registerRunFlags binds `gummi run`'s flags onto fs and returns their
-// pointers. It defines the flags only — parsing and validation stay in
-// runRun — so a throwaway FlagSet can be handed here purely to enumerate
-// the grammar.
-func registerRunFlags(fs *flag.FlagSet) *runFlagValues {
-	return &runFlagValues{
-		envelope:   fs.Int("envelope", 0, "credit envelope for the feature (required; falls back to GUMMI_ENVELOPE)"),
-		profile:    fs.String("profile", "", "profile mapping roles to models (default: first configured)"),
-		gate:       fs.String("gate-approval", driver.GateAttended, "who crosses this card's gates: attended|autopilot (retired spellings still accepted; persisted on the card; resume keeps it)"),
-		timeout:    fs.Duration("stage-timeout", defaultStageTimeout, "per-stage inactivity timeout (0 disables)"),
-		autonomous: fs.Bool("autonomous", false, "auto-take the recommended answer instead of checkpointing questions"),
-		verbose:    fs.Bool("verbose", false, "add per-tool-call activity lines to the stream"),
-		ref:        fs.String("ref", "", "external correlation id, echoed in the stream and persisted for `status`/`resume` lookup"),
-		repo:       fs.String("repo", "", "managed repository to create the card in (a configured `repos:` name; required when `repos:` is configured)"),
-		base:       fs.String("base", "", "branch the card's work forks from and lands on (default: whatever the repository has checked out)"),
-		acceptance: fs.String("acceptance", "", "acceptance criteria to seed the spec draft's Verification plan (a file path, or - for stdin)"),
-		until:      fs.String("until", "", "stop cleanly before crossing the gate that leaves this design stage (default: run to a verified branch)"),
-		adopt:      fs.String("adopt", "", "mint the card onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it"),
-		pr:         fs.String("pr", "", "mint the card onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations"),
-	}
-}
-
 // readAcceptance loads the --acceptance criteria: a file path, or "-" for
 // stdin. An empty flag (the default) yields empty text and no read. File IO
 // lives here in the CLI so the driver's Options carries the criteria text,
@@ -164,7 +111,8 @@ func readAcceptance(pathOrDash string) (string, error) {
 
 // driverOptions validates and assembles the shared driving options. The
 // envelope is required: it falls back to GUMMI_ENVELOPE, then refuses.
-func driverOptions(envelope int, profile string, gate string, timeout time.Duration, autonomous, verbose bool, ref, acceptance, until, repo, base string) (driver.Options, error) {
+func driverOptions(fl cliFlags, acceptance string) (driver.Options, error) {
+	envelope := fl.Int("envelope")
 	if envelope == 0 {
 		if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
 			if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -175,16 +123,22 @@ func driverOptions(envelope int, profile string, gate string, timeout time.Durat
 	if envelope <= 0 {
 		return driver.Options{}, fmt.Errorf("an envelope is required: pass --envelope N (or set GUMMI_ENVELOPE); runs refuse to start without one")
 	}
-	norm, ok := domain.NormalizeGateApproval(gate)
-	if !ok {
-		return driver.Options{}, fmt.Errorf(
-			"--gate-approval must be %q, %q, or %q (aliases %q, %q accepted), got %q",
-			domain.GateAttended, domain.GateAttended, domain.GateAutopilot, "auto", "caller", gate)
+	gate, err := gateApproval(fl.String("gate-approval"))
+	if err != nil {
+		return driver.Options{}, err
+	}
+	// validate --until before any work begins, so a bad target fails as a
+	// plain usage error rather than mid-run.
+	until := fl.String("until")
+	if err := driver.ValidateUntil(domain.Stage(until)); err != nil {
+		return driver.Options{}, err
 	}
 	return driver.Options{
-		Envelope: envelope, Profile: profile, GateApproval: norm,
-		StageTimeout: timeout, Autonomous: autonomous, Verbose: verbose, Ref: ref,
-		Acceptance: acceptance, Until: domain.Stage(until), Repo: repo, Base: base,
+		Envelope: envelope, Profile: fl.opt("profile"), GateApproval: gate,
+		StageTimeout: fl.Duration("stage-timeout"),
+		Autonomous:   fl.Bool("autonomous"), Verbose: fl.Bool("verbose"), Ref: fl.String("ref"),
+		Acceptance: acceptance, Until: domain.Stage(until),
+		Repo: fl.opt("repo"), Base: fl.opt("base"),
 	}, nil
 }
 

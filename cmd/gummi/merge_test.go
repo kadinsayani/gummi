@@ -89,7 +89,7 @@ func TestMergeCommandLandsVerifiedBranch(t *testing.T) {
 	store, f := verifiedCLIRepo(t)
 	before := cliGit(t, ".", "rev-parse", "HEAD")
 
-	if err := runMerge([]string{string(f.ID), "-m", "feat(export): land headlessly"}); err != nil {
+	if err := runCLI("merge", string(f.ID), "-m", "feat(export): land headlessly"); err != nil {
 		t.Fatalf("runMerge: %v", err)
 	}
 	got, err := store.GetFeature(context.Background(), f.ID)
@@ -126,7 +126,7 @@ func TestMergeCobraShorthandFlag(t *testing.T) {
 
 // A missing -m fails before touching git (no workspace, no repo needed).
 func TestMergeCommandRequiresMessage(t *testing.T) {
-	if err := runMerge([]string{"FD-009"}); err == nil {
+	if err := runCLI("merge", "FD-009"); err == nil {
 		t.Fatal("merge without -m accepted")
 	}
 }
@@ -134,10 +134,10 @@ func TestMergeCommandRequiresMessage(t *testing.T) {
 // A landed card cleans and exits 0: the worktree and branch are removed.
 func TestCleanCommandRemovesLanded(t *testing.T) {
 	store, f := verifiedCLIRepo(t)
-	if err := runMerge([]string{string(f.ID), "-m", "feat(export): land headlessly"}); err != nil {
+	if err := runCLI("merge", string(f.ID), "-m", "feat(export): land headlessly"); err != nil {
 		t.Fatalf("runMerge: %v", err)
 	}
-	if err := runClean([]string{string(f.ID)}); err != nil {
+	if err := runCLI("clean", string(f.ID)); err != nil {
 		t.Fatalf("runClean: %v", err)
 	}
 	wt, err := worktree.NewManager(context.Background(), ".", ".", store)

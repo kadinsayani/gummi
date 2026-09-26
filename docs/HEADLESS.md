@@ -498,23 +498,33 @@ depends on another.
 
 ## The calling-agent skill
 
-gummi generates its own skill, a `SKILL.md` documenting this loop, and
-installs it where Claude Code, GitHub Copilot CLI, Codex and opencode
-read it:
+gummi generates its own skill documenting this loop, and installs it where
+Claude Code, GitHub Copilot CLI, Codex and opencode read it:
 
 ```sh
 gummi skill install          # project scope: .claude/skills + .agents/skills
 gummi doctor                 # then check backend, auth and envelope are ready
 ```
 
-A project-scope install writes `.claude/skills/gummi/SKILL.md` for Claude,
-Copilot and opencode, plus `.agents/skills/gummi/SKILL.md` for Codex.
-`--scope user` writes to each detected agent's home instead, `--agent`
-targets one, `--dry-run` prints what would be written, and `--check`
-fails if any target is absent or drifted. The command grammar and exit
-table are generated from the binary's real flags, so they cannot drift.
-The frontmatter is version-stamped, so `install` and `list` detect a
-stale or edited file and refuse to overwrite it without `--force`.
+The skill is a **bundle**: `SKILL.md`, the common path an agent reads on
+every invocation, plus `references/` files it points at —
+`references/setup.md` (first-run readiness), `references/resume.md`
+(choosing a resume verb, and the orphan check before a retry) and
+`references/goals.md` (`gummi goal`). Splitting it is what keeps it cheap:
+an agent shipping one card reads SKILL.md and nothing else.
+`gummi skill show` prints SKILL.md; `gummi skill show goals` prints one
+reference.
+
+A project-scope install writes `.claude/skills/gummi/` for Claude, Copilot
+and opencode, plus `.agents/skills/gummi/` for Codex. `--scope user` writes
+to each detected agent's home instead, `--agent` targets one, `--dry-run`
+prints what would be written, and `--check` fails if any target is absent or
+drifted. The command grammar and exit table are generated from the same
+cobra tree that parses a real command line, so the skill cannot document a
+flag the binary lacks — or miss one it has. The frontmatter is
+version-stamped and its hash covers the whole bundle, so `install` and
+`list` detect a stale or edited file — a reference file included — and
+refuse to overwrite it without `--force`.
 
 `gummi doctor` is the readiness check the skill's first-run setup runs
 (`--json` for a machine-readable checklist, `--deep` to probe each role's

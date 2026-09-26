@@ -127,7 +127,7 @@ func TestPRLinkPersistsAndRefusesDoubleLink(t *testing.T) {
 	setFakeGHEnv(t, bin)
 
 	out := captureStdout(t, func() {
-		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+		if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 			t.Fatalf("runPRLink: %v", err)
 		}
 	})
@@ -144,7 +144,7 @@ func TestPRLinkPersistsAndRefusesDoubleLink(t *testing.T) {
 		t.Fatalf("persisted PullRequest = %+v, want %+v", got.PullRequest, want)
 	}
 
-	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/99"}); err == nil {
+	if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/99"); err == nil {
 		t.Fatal("double-link should be refused")
 	} else if !strings.Contains(err.Error(), "already linked") {
 		t.Errorf("error = %q, want it to name the existing link", err)
@@ -160,7 +160,7 @@ func TestPRLinkWarnsWhenSquashDisallowed(t *testing.T) {
 	setFakeGHEnv(t, bin)
 
 	errOut := captureStderr(t, func() {
-		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+		if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 			t.Fatalf("runPRLink: %v", err)
 		}
 	})
@@ -184,7 +184,7 @@ func TestPRLinkQuietWhenSquashAllowed(t *testing.T) {
 	setFakeGHEnv(t, bin)
 
 	errOut := captureStderr(t, func() {
-		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+		if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 			t.Fatalf("runPRLink: %v", err)
 		}
 	})
@@ -209,7 +209,7 @@ func TestPRLinkQuietWhenSettingsFetchFails(t *testing.T) {
 	setFakeGHEnv(t, bin)
 
 	errOut := captureStderr(t, func() {
-		if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+		if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 			t.Fatalf("runPRLink: %v", err)
 		}
 	})
@@ -232,7 +232,7 @@ func TestPRLinkAuto(t *testing.T) {
 	bin := fakePRTestGH(t, "{}", "["+testViewJSON+"]")
 	setFakeGHEnv(t, bin)
 
-	if err := runPRLink([]string{"FD-001", "--auto"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "--auto"); err != nil {
 		t.Fatalf("runPRLink --auto: %v", err)
 	}
 	got, err := store.GetFeature(context.Background(), "FD-001")
@@ -250,10 +250,10 @@ func TestPRUnlinkClearsAndRefusesWhenUnlinked(t *testing.T) {
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	setFakeGHEnv(t, bin)
 
-	if err := runPRLink([]string{"FD-001", "42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "42"); err != nil {
 		t.Fatalf("runPRLink: %v", err)
 	}
-	if err := runPRUnlink([]string{"FD-001"}); err != nil {
+	if err := runCLI("pr", "unlink", "FD-001"); err != nil {
 		t.Fatalf("runPRUnlink: %v", err)
 	}
 	got, err := store.GetFeature(context.Background(), "FD-001")
@@ -263,7 +263,7 @@ func TestPRUnlinkClearsAndRefusesWhenUnlinked(t *testing.T) {
 	if !got.PullRequest.Empty() {
 		t.Fatalf("PullRequest after unlink = %+v, want Empty()", got.PullRequest)
 	}
-	if err := runPRUnlink([]string{"FD-001"}); err == nil {
+	if err := runCLI("pr", "unlink", "FD-001"); err == nil {
 		t.Fatal("unlink on an already-unlinked card should refuse")
 	}
 }
@@ -274,7 +274,7 @@ func TestPRStatusRendersTextAndJSON(t *testing.T) {
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	setFakeGHEnv(t, bin)
 
-	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 		t.Fatalf("runPRLink: %v", err)
 	}
 
@@ -283,7 +283,7 @@ func TestPRStatusRendersTextAndJSON(t *testing.T) {
 	t.Setenv("GUMMI_GH_CMD", bin2)
 
 	out := captureStdout(t, func() {
-		if err := runPRStatus([]string{"FD-001"}); err != nil {
+		if err := runCLI("pr", "status", "FD-001"); err != nil {
 			t.Fatalf("runPRStatus: %v", err)
 		}
 	})
@@ -292,7 +292,7 @@ func TestPRStatusRendersTextAndJSON(t *testing.T) {
 	}
 
 	jsonOut := captureStdout(t, func() {
-		if err := runPRStatus([]string{"FD-001", "--json"}); err != nil {
+		if err := runCLI("pr", "status", "FD-001", "--json"); err != nil {
 			t.Fatalf("runPRStatus --json: %v", err)
 		}
 	})
@@ -308,7 +308,7 @@ func TestPRStatusRefreshesHeadSHA(t *testing.T) {
 	store := prFixture(t)
 	bin := fakePRTestGH(t, testViewJSON, "[]") // links with HeadSHA A
 	setFakeGHEnv(t, bin)
-	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 		t.Fatalf("runPRLink: %v", err)
 	}
 	before, err := store.GetFeature(context.Background(), "FD-001")
@@ -323,7 +323,7 @@ func TestPRStatusRefreshesHeadSHA(t *testing.T) {
 	const newSHA = "cafebabecafebabecafebabecafebabecafebabe"
 	bin2 := fakePRTestGH(t, `{"state":"OPEN","comments":[],"headRefOid":"`+newSHA+`"}`, "[]")
 	t.Setenv("GUMMI_GH_CMD", bin2)
-	if err := runPRStatus([]string{"FD-001"}); err != nil {
+	if err := runCLI("pr", "status", "FD-001"); err != nil {
 		t.Fatalf("runPRStatus: %v", err)
 	}
 
@@ -346,19 +346,19 @@ func TestPRVerbsFailWithoutGH(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 
-	if err := runPRLink([]string{"FD-001", "42"}); err == nil || !strings.Contains(err.Error(), "not on PATH") {
+	if err := runCLI("pr", "link", "FD-001", "42"); err == nil || !strings.Contains(err.Error(), "not on PATH") {
 		t.Errorf("pr link with missing gh = %v, want an error naming gh", err)
 	}
-	if err := runPRStatus([]string{"FD-001"}); err == nil || !strings.Contains(err.Error(), "not on PATH") {
+	if err := runCLI("pr", "status", "FD-001"); err == nil || !strings.Contains(err.Error(), "not on PATH") {
 		t.Errorf("pr status with missing gh = %v, want an error naming gh", err)
 	}
-	if err := runPRUnlink([]string{"FD-001"}); err == nil || !strings.Contains(err.Error(), "not on PATH") {
+	if err := runCLI("pr", "unlink", "FD-001"); err == nil || !strings.Contains(err.Error(), "not on PATH") {
 		t.Errorf("pr unlink with missing gh = %v, want an error naming gh", err)
 	}
 
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	t.Setenv("GUMMI_GH_CMD", bin)
-	if err := runPRLink([]string{"FD-001", "42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "42"); err != nil {
 		t.Errorf("pr link with gh present but no token env vars = %v, want nil (auth is gh's concern)", err)
 	}
 }
@@ -371,7 +371,7 @@ func TestPRCommentsRefusesUnlinkedCard(t *testing.T) {
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	setFakeGHEnv(t, bin)
 
-	err := runPRComments([]string{"FD-001"})
+	err := runCLI("pr", "comments", "FD-001")
 	if err == nil {
 		t.Fatal("pr comments on an unlinked card should refuse")
 	}
@@ -476,7 +476,7 @@ func TestPRCommentsListMode(t *testing.T) {
 	store, f := prCommentsFixture(t)
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	setFakeGHEnv(t, bin)
-	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 		t.Fatalf("runPRLink: %v", err)
 	}
 
@@ -484,7 +484,7 @@ func TestPRCommentsListMode(t *testing.T) {
 	t.Setenv("GUMMI_GH_CMD", bin2)
 
 	out := captureStdout(t, func() {
-		if err := runPRComments([]string{"FD-001"}); err != nil {
+		if err := runCLI("pr", "comments", "FD-001"); err != nil {
 			t.Fatalf("runPRComments: %v", err)
 		}
 	})
@@ -517,7 +517,7 @@ func TestPRCommentsRefreshesHeadSHA(t *testing.T) {
 	store, _ := prCommentsFixture(t)
 	bin := fakePRTestGH(t, testViewJSON, "[]") // links with HeadSHA A
 	setFakeGHEnv(t, bin)
-	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 		t.Fatalf("runPRLink: %v", err)
 	}
 
@@ -527,7 +527,7 @@ func TestPRCommentsRefreshesHeadSHA(t *testing.T) {
 	bin2 := fakePRCommentsGH(t, testViewJSON, freshFixture)
 	t.Setenv("GUMMI_GH_CMD", bin2)
 
-	if err := runPRComments([]string{"FD-001"}); err != nil {
+	if err := runCLI("pr", "comments", "FD-001"); err != nil {
 		t.Fatalf("runPRComments: %v", err)
 	}
 
@@ -549,7 +549,7 @@ func TestPRCommentsIngestWritesAndIsIdempotent(t *testing.T) {
 	store, f := prCommentsFixture(t)
 	bin := fakePRTestGH(t, testViewJSON, "[]")
 	setFakeGHEnv(t, bin)
-	if err := runPRLink([]string{"FD-001", "https://github.com/o/r/pull/42"}); err != nil {
+	if err := runCLI("pr", "link", "FD-001", "https://github.com/o/r/pull/42"); err != nil {
 		t.Fatalf("runPRLink: %v", err)
 	}
 
@@ -557,7 +557,7 @@ func TestPRCommentsIngestWritesAndIsIdempotent(t *testing.T) {
 	t.Setenv("GUMMI_GH_CMD", bin2)
 
 	firstOut := captureStdout(t, func() {
-		if err := runPRComments([]string{"FD-001", "--ingest"}); err != nil {
+		if err := runCLI("pr", "comments", "FD-001", "--ingest"); err != nil {
 			t.Fatalf("runPRComments --ingest (first run): %v", err)
 		}
 	})
@@ -588,7 +588,7 @@ func TestPRCommentsIngestWritesAndIsIdempotent(t *testing.T) {
 	}
 
 	secondOut := captureStdout(t, func() {
-		if err := runPRComments([]string{"FD-001", "--ingest"}); err != nil {
+		if err := runCLI("pr", "comments", "FD-001", "--ingest"); err != nil {
 			t.Fatalf("runPRComments --ingest (second run): %v", err)
 		}
 	})
@@ -604,7 +604,7 @@ func TestPRCommentsIngestWritesAndIsIdempotent(t *testing.T) {
 	}
 
 	jsonOut := captureStdout(t, func() {
-		if err := runPRComments([]string{"FD-001", "--ingest", "--json"}); err != nil {
+		if err := runCLI("pr", "comments", "FD-001", "--ingest", "--json"); err != nil {
 			t.Fatalf("runPRComments --ingest --json: %v", err)
 		}
 	})

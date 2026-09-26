@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -96,37 +95,6 @@ func closeAgents(agents map[string]agent.Agent) {
 	}
 }
 
-// bugIngestFlagValues holds the pointers registerBugIngestFlags binds, so
-// runBugIngest and the cobra adapter share one flag grammar. The --repo
-// flag is the GitHub owner/repo to import from; --target-repo is the
-// managed repository the minted bugs belong to. The two are never one
-// flag: --repo's existing meaning is untouched.
-type bugIngestFlagValues struct {
-	repo, targetRepo, label, stateFilter, profile *string
-	envelope                                      *int
-	issue                                         *int
-	yes, comments                                 *bool
-}
-
-// registerBugIngestFlags binds `gummi bugs ingest`'s flags onto fs and
-// returns their pointers. It defines the flags only — parsing and
-// validation stay in runBugIngest — so a throwaway FlagSet can be handed
-// here purely to enumerate the grammar (and the cobra adapter stays in
-// lockstep with it).
-func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
-	return &bugIngestFlagValues{
-		repo:        fs.String("repo", "", "owner/repo to import from (default: this repo's origin remote)"),
-		targetRepo:  fs.String("target-repo", "", "managed repository to create the bugs in (a configured `repos:` name; required when `repos:` is configured)"),
-		label:       fs.String("label", "bug", "issue label filter (\"\" imports all issues)"),
-		stateFilter: fs.String("state", "open", "issue state: open|closed|all"),
-		profile:     fs.String("profile", "", "profile the new bugs adopt (default: first configured)"),
-		envelope:    fs.Int("envelope", 0, "spend budget per bug, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
-		issue:       fs.Int("issue", 0, "import exactly this GitHub issue number from the fetched set (0 = batch import, all fresh proposals)"),
-		yes:         fs.Bool("yes", false, "materialize without the confirmation prompt"),
-		comments:    fs.Bool("comments", false, "fetch issue comments into the report's Discussion section"),
-	}
-}
-
 // runBugIngest implements `gummi bugs ingest`: pull open issues from a
 // GitHub repo (default: this repo's origin remote), print them, and —
 // after confirmation — materialize the fresh ones into the todo backlog.
@@ -134,38 +102,28 @@ func registerBugIngestFlags(fs *flag.FlagSet) *bugIngestFlagValues {
 // against N (via selectIssue) and only that one bug is materialized; every
 // other flag keeps its current meaning. Without --issue this is the batch
 // path, unchanged.
-func runBugIngest(args []string) error {
-	fs := flag.NewFlagSet("bugs ingest", flag.ContinueOnError)
-	f := registerBugIngestFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs ingest [--repo owner/repo] [--target-repo r] [--label bug] [--state open] [--profile p] [--envelope n] [--comments] [--issue N] [--yes]")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	be, err := openBugEnv(*f.profile, *f.envelope)
+func runBugIngest(fl cliFlags) error {
+	be, err := openBugEnv(fl.String("profile"), fl.Int("envelope"))
 	if err != nil {
 		return err
 	}
 	defer be.cleanup()
 
 	cwd, _ := os.Getwd()
-	src := ingestGitHubSource(*f.repo, *f.label, *f.stateFilter, *f.comments, cwd)
+	src := ingestGitHubSource(fl.String("repo"), fl.String("label"), fl.String("state"), fl.Bool("comments"), cwd)
 	ctx := context.Background()
-	target := *f.repo
+	target := fl.String("repo")
 	if target == "" {
 		target = "origin"
 	}
-	fmt.Printf("Importing GitHub issues from %s (label %q, state %s) …\n", target, *f.label, *f.stateFilter)
+	fmt.Printf("Importing GitHub issues from %s (label %q, state %s) …\n", target, fl.String("label"), fl.String("state"))
 	res, err := be.eng.IngestBugs(ctx, src)
 	if err != nil {
 		return err
 	}
 
-	if *f.issue != 0 {
-		prop, err := selectIssue(res, *f.issue, target, *f.label, *f.stateFilter)
+	if fl.Int("issue") != 0 {
+		prop, err := selectIssue(res, fl.Int("issue"), target, fl.String("label"), fl.String("state"))
 		if err != nil {
 			return err
 		}
@@ -173,13 +131,13 @@ func runBugIngest(args []string) error {
 		if prop.ExternalRef != "" {
 			fmt.Printf("      %s\n", clean(prop.ExternalRef))
 		}
-		if !*f.yes {
+		if !fl.Bool("yes") {
 			if !confirm(os.Stdin, os.Stdout, "Materialize this bug into todo?") {
 				fmt.Println("Aborted — nothing created.")
 				return nil
 			}
 		}
-		return materializeBugs(ctx, be, []domain.BugProposal{prop}, *f.targetRepo, "", adoption{})
+		return materializeBugs(ctx, be, []domain.BugProposal{prop}, fl.String("target-repo"), "", adoption{})
 	}
 
 	renderBugProposals(os.Stdout, res)
@@ -188,13 +146,13 @@ func runBugIngest(args []string) error {
 		return nil
 	}
 
-	if !*f.yes {
+	if !fl.Bool("yes") {
 		if !confirm(os.Stdin, os.Stdout, fmt.Sprintf("Create %d bug%s in todo?", len(res.Proposals), cardPlural(len(res.Proposals)))) {
 			fmt.Println("Aborted — nothing created.")
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, *f.targetRepo, "", adoption{})
+	return materializeBugs(ctx, be, res.Proposals, fl.String("target-repo"), "", adoption{})
 }
 
 // selectIssue resolves a GitHub issue number against a single
@@ -230,78 +188,34 @@ func ingestGitHubSource(repo, label, state string, comments bool, dir string) en
 	}
 }
 
-// bugNewFlagValues holds the pointers registerBugsNewFlags binds, so
-// runBugNew and the cobra adapter share one flag grammar.
-type bugNewFlagValues struct {
-	title, oneLiner, severity, repro, expected, actual, env, desc *string
-	profile, repo, base                                           *string
-	adopt, pr                                                     *string
-	envelope                                                      *int
-	yes                                                           *bool
-}
-
-// registerBugsNewFlags binds `gummi bugs new`'s flags onto fs and returns
-// their pointers. It defines the flags only — parsing and validation stay in
-// runBugNew — so a throwaway FlagSet can be handed here purely to enumerate
-// the grammar (and the cobra adapter stays in lockstep with it).
-func registerBugsNewFlags(fs *flag.FlagSet) *bugNewFlagValues {
-	return &bugNewFlagValues{
-		title:    fs.String("title", "", "bug title (required)"),
-		oneLiner: fs.String("one-liner", "", "short one-line summary"),
-		severity: fs.String("severity", "", "severity: critical|high|medium|low"),
-		repro:    fs.String("repro", "", "reproduction steps"),
-		expected: fs.String("expected", "", "expected behavior"),
-		actual:   fs.String("actual", "", "actual behavior"),
-		env:      fs.String("env", "", "environment (versions, OS, config)"),
-		desc:     fs.String("desc", "", "summary of what's broken"),
-		profile:  fs.String("profile", "", "profile the bug adopts (default: first configured)"),
-		envelope: fs.Int("envelope", 0, "spend budget, in credits (0 = uncapped; falls back to GUMMI_ENVELOPE)"),
-		repo:     fs.String("repo", "", "managed repository to create the bug in (a configured `repos:` name; required when `repos:` is configured)"),
-		base:     fs.String("base", "", "branch the fix forks from and lands on (default: whatever the repository has checked out)"),
-		adopt:    fs.String("adopt", "", "mint the bug onto this existing branch instead of cutting one for it; gummi never deletes or rewrites it"),
-		pr:       fs.String("pr", "", "mint the bug onto the branch behind this pull request (url or number), link it, and pull its review comments in as diff annotations"),
-		yes:      fs.Bool("yes", false, "create without the confirmation prompt"),
-	}
-}
-
 // runBugNew implements `gummi bugs new`: one hand-entered bug straight
 // into the todo backlog with a seeded report.
-func runBugNew(args []string) error {
-	fs := flag.NewFlagSet("bugs new", flag.ContinueOnError)
-	f := registerBugsNewFlags(fs)
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi bugs new --title T [--severity S] [--repro …] [--expected …] [--actual …] [--env …] [--desc …] [--profile p] [--repo r] [--base b] [--adopt branch | --pr url] [--envelope n] [--yes]")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	if strings.TrimSpace(*f.title) == "" {
-		fs.Usage()
+func runBugNew(fl cliFlags) error {
+	if strings.TrimSpace(fl.String("title")) == "" {
 		return fmt.Errorf("bugs new needs a --title")
 	}
-	adopted, err := resolveAdoption(*f.adopt, *f.pr, *f.repo)
+	adopted, err := resolveAdoption(fl.String("adopt"), fl.String("pr"), fl.String("repo"))
 	if err != nil {
 		return err
 	}
 
-	be, err := openBugEnv(*f.profile, *f.envelope)
+	be, err := openBugEnv(fl.String("profile"), fl.Int("envelope"))
 	if err != nil {
 		return err
 	}
 	defer be.cleanup()
 
 	prop := domain.BugProposal{
-		Title:    strings.TrimSpace(*f.title),
-		OneLiner: strings.TrimSpace(*f.oneLiner),
+		Title:    strings.TrimSpace(fl.String("title")),
+		OneLiner: strings.TrimSpace(fl.String("one-liner")),
 		Source:   "manual",
-		Severity: domain.NormalizeSeverity(*f.severity),
+		Severity: domain.NormalizeSeverity(fl.String("severity")),
 		Report: domain.BugReport{
-			Description:  strings.TrimSpace(*f.desc),
-			Reproduction: strings.TrimSpace(*f.repro),
-			Expected:     strings.TrimSpace(*f.expected),
-			Actual:       strings.TrimSpace(*f.actual),
-			Environment:  strings.TrimSpace(*f.env),
+			Description:  strings.TrimSpace(fl.String("desc")),
+			Reproduction: strings.TrimSpace(fl.String("repro")),
+			Expected:     strings.TrimSpace(fl.String("expected")),
+			Actual:       strings.TrimSpace(fl.String("actual")),
+			Environment:  strings.TrimSpace(fl.String("env")),
 		},
 	}
 	ctx := context.Background()
@@ -310,13 +224,13 @@ func runBugNew(args []string) error {
 		return err
 	}
 	renderBugProposals(os.Stdout, res)
-	if !*f.yes {
+	if !fl.Bool("yes") {
 		if !confirm(os.Stdin, os.Stdout, "Create this bug in todo?") {
 			fmt.Println("Aborted — nothing created.")
 			return nil
 		}
 	}
-	return materializeBugs(ctx, be, res.Proposals, *f.repo, *f.base, adopted)
+	return materializeBugs(ctx, be, res.Proposals, fl.String("repo"), fl.String("base"), adopted)
 }
 
 // materializeBugs mints the proposals and prints what was created.

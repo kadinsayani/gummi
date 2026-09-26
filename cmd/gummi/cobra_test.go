@@ -1,15 +1,13 @@
 package main
 
 import (
-	"flag"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/spf13/cobra"
-	"github.com/spf13/pflag"
 
 	"github.com/morphis/gummi/internal/driver"
 )
@@ -148,83 +146,94 @@ func TestCobraUnknownCommand(t *testing.T) {
 	}
 }
 
-// BG-003: `resume --gate-approval auto` re-affirms the run's default gate
-// mode explicitly, overriding a persisted "caller" mode. buildFlagArgs drops
-// any flag whose explicit value equals its cobra default (it can't tell
-// "never passed" from "passed the default" apart), which silently dropped
-// this exact flag from the argv handed to the legacy flag.FlagSet — so the
-// override never took effect. resumeArgv is the seam that re-adds it; this
-// exercises the real call path (cobra flag parse -> resumeArgv -> the
-// legacy flag.FlagSet's isSet) rather than asserting on buildFlagArgs alone.
-func TestResumeArgvKeepsExplicitDefaultGateApproval(t *testing.T) {
-	resumeCmd.ResetFlags()
-	bindResumeFlags(resumeCmd)
-	t.Cleanup(func() {
-		resumeCmd.ResetFlags()
-		bindResumeFlags(resumeCmd)
-	})
+// BG-003: `resume --gate-approval attended` re-affirms the run's default
+// gate mode explicitly, overriding a mode persisted on the card.
+//
+// This used to be a hazard worth a dedicated workaround. Cobra parsed the
+// flag, a helper re-serialized the parsed flags into a []string for a
+// second, stdlib parser, and that serializer dropped any flag whose value
+// equalled its default — because a []string cannot carry "the user typed
+// this". The override silently never took effect, and one command grew a
+// bespoke patch to re-add exactly this flag. There is one parser now, and
+// pflag's Changed carries the fact directly.
+func TestResumeKeepsExplicitDefaultGateApproval(t *testing.T) {
+	resetFlags(rootCmd)
+	t.Cleanup(func() { resetFlags(rootCmd) })
 
-	if err := resumeCmd.Flags().Set("gate-approval", driver.GateAttended); err != nil {
+	cmd, _, err := rootCmd.Find([]string{"resume"})
+	if err != nil {
+		t.Fatalf("finding resume: %v", err)
+	}
+	if err := cmd.Flags().Set("gate-approval", driver.GateAttended); err != nil {
 		t.Fatalf("Set(gate-approval, %q): %v", driver.GateAttended, err)
 	}
-
-	argv := resumeArgv(resumeCmd, []string{"FD-000"})
-
-	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
-	rv := registerResumeFlags(fs)
-	if err := fs.Parse(argv); err != nil {
-		t.Fatalf("fs.Parse(%v): %v", argv, err)
+	if !cmdFlags(cmd).Changed("gate-approval") {
+		t.Fatal("Changed(gate-approval) = false after an explicit --gate-approval attended")
 	}
-	if !isSet(fs, "gate-approval") {
-		t.Fatalf("isSet(gate-approval) = false after explicit --gate-approval auto; argv was %v", argv)
-	}
-	if *rv.gate != driver.GateAttended {
-		t.Fatalf("gate = %q, want %q", *rv.gate, driver.GateAttended)
+	if got := cmdFlags(cmd).String("gate-approval"); got != driver.GateAttended {
+		t.Fatalf("gate-approval = %q, want %q", got, driver.GateAttended)
 	}
 }
 
-// canonicalAndCobra pairs a cobra command with the function that registers
-// its canonical flag grammar, so the test can assert the two never drift.
-func TestCobraFlagsMirrorCanonical(t *testing.T) {
-	cases := []struct {
-		name     string
-		cmd      *cobra.Command
-		register func(fs *flag.FlagSet)
-	}{
-		{name: "run", cmd: runCmd, register: func(fs *flag.FlagSet) { registerRunFlags(fs) }},
-		{name: "research", cmd: researchCmd, register: func(fs *flag.FlagSet) { registerResearchFlags(fs) }},
-		{name: "goal", cmd: goalCmd, register: func(fs *flag.FlagSet) { registerGoalFlags(fs) }},
-		{name: "resume", cmd: resumeCmd, register: func(fs *flag.FlagSet) { registerResumeFlags(fs) }},
-		{name: "ingest", cmd: ingestCmd, register: func(fs *flag.FlagSet) { registerIngestFlags(fs) }},
-		{name: "bugs new", cmd: bugsNewCmd, register: func(fs *flag.FlagSet) { registerBugsNewFlags(fs) }},
-		{name: "bugs ingest", cmd: bugsIngestCmd, register: func(fs *flag.FlagSet) { registerBugIngestFlags(fs) }},
+// Every flag a command advertises must be parsed by that same command.
+//
+// This is now structural — cobra both declares and parses — so the test
+// guards the structure rather than a second copy of it: no command body
+// may build its own flag set. Two parsers is what let `gummi stack new
+// --name`, `gummi stack add --pos` and `gummi merge --m` be declared,
+// advertised by --help or documented in SKILL.md, and then rejected at
+// parse with "unknown flag".
+func TestNoCommandParsesItsOwnFlags(t *testing.T) {
+	root := repoRoot(t)
+	dir := filepath.Join(root, "cmd", "gummi")
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("reading %s: %v", dir, err)
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			canonical := flag.NewFlagSet(c.name, flag.ContinueOnError)
-			c.register(canonical)
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatalf("reading %s: %v", name, err)
+		}
+		if bytes.Contains(b, []byte("flag.NewFlagSet")) {
+			t.Errorf("%s builds its own flag.FlagSet; cobra already parsed the command line — "+
+				"declare the flags in cobra.go and read them through cliFlags, or the two sets will drift", name)
+		}
+	}
+}
 
-			canonical.VisitAll(func(f *flag.Flag) {
-				if c.cmd.Flags().Lookup(f.Name) == nil {
-					t.Errorf("%s: canonical flag --%s is not bound on the cobra command", c.name, f.Name)
-				}
-			})
-			// And the other direction, which is the one that bites a user.
-			// Cobra owns --help and completion, then hands the command an
-			// argv the canonical FlagSet re-parses; a flag bound only here
-			// is advertised by --help, offered by completion, and then
-			// rejected at parse with "flag provided but not defined".
-			// --full shipped that way. Only cobra's own --help is exempt:
-			// it never reaches the canonical set because cobra answers it.
-			c.cmd.Flags().VisitAll(func(f *pflag.Flag) {
-				if f.Name == "help" {
-					return
-				}
-				if canonical.Lookup(f.Name) == nil {
-					t.Errorf("%s: cobra binds --%s, which the canonical FlagSet does not define — `gummi %s --%s` will be advertised and then rejected", c.name, f.Name, c.name, f.Name)
-				}
-			})
-		})
+// Every flag bound on the tree must be one the skill's grammar generator
+// can render, and every command the grammar names must be on the tree.
+// mustFindCmd panics on a path that does not resolve, so rendering the
+// grammar at all is the assertion.
+func TestSkillGrammarResolvesAgainstTheTree(t *testing.T) {
+	if got := commandGrammar(); got == "" {
+		t.Fatal("commandGrammar() is empty")
+	}
+	if got := goalGrammar(); got == "" {
+		t.Fatal("goalGrammar() is empty")
+	}
+}
+
+// A flag that only ever applies to a goal must stay out of SKILL.md's core
+// grammar: an agent shipping one card cannot use any of them, and they
+// were a fifth of `resume`'s listing.
+func TestCoreGrammarOmitsGoalOnlyFlags(t *testing.T) {
+	grammar := commandGrammar()
+	for _, name := range goalResumeFlagNames {
+		if strings.Contains(grammar, "--"+name+" ") || strings.Contains(grammar, "--"+name+"\n") {
+			t.Errorf("core grammar mentions the goal-only flag --%s; it belongs in references/goals.md", name)
+		}
+	}
+	goals := goalGrammar()
+	for _, name := range goalResumeFlagNames {
+		if !strings.Contains(goals, "--"+name) {
+			t.Errorf("the goals reference is missing --%s", name)
+		}
 	}
 }
 

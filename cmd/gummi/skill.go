@@ -4,68 +4,141 @@ import (
 	"crypto/sha256"
 	_ "embed"
 	"encoding/hex"
-	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"text/template"
-	"time"
 
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 
 	"github.com/morphis/gummi/internal/driver"
 )
 
-// skill.tmpl.md is the SKILL.md *body* (no frontmatter, no version string),
-// embedded so `gummi skill show/install` can render it. Its command-grammar
-// and exit-code sections are generated from the real flag sets and
-// driver.Status, so the shipped doc can never drift from the binary — a
-// golden + drift test (skill_test.go) locks that.
+// The skill ships as a bundle: SKILL.md plus the reference files it points
+// at. Splitting it is what keeps it cheap — SKILL.md is loaded on every
+// invocation by the agent driving gummi, while first-run setup, the long
+// form of the resume verbs, and everything about goals are each needed by
+// a fraction of those invocations. An agent shipping one card reads
+// SKILL.md and nothing else.
+//
+// Every template's command grammar and exit table are generated from the
+// live cobra tree and driver.Status, so the shipped doc can never document
+// a flag the binary lacks — or miss one it has. A golden + drift test
+// (skill_test.go) locks that.
 //
 //go:embed skill.tmpl.md
 var skillTemplate string
 
+//go:embed skill_setup.tmpl.md
+var skillSetupTemplate string
+
+//go:embed skill_resume.tmpl.md
+var skillResumeTemplate string
+
+//go:embed skill_goals.tmpl.md
+var skillGoalsTemplate string
+
 const skillName = "gummi"
+
+// skillAgentList is the --agent value list, shared by the flag's help text
+// and its parser so the two cannot disagree about which agents exist.
+const skillAgentList = "claude|codex|opencode|copilot|pi"
 
 const skillDescription = "Ship one PR-sized feature or bug to a verified branch via gummi's headless, spec-driven workflow (spec, review, verify; gummi never merges). Use when the work warrants a spec, an independent code review, and an isolated branch — not for trivial one-line edits."
 
-// skillShow prints the rendered SKILL.md (frontmatter + body) to stdout.
+// skillShow prints the rendered SKILL.md (frontmatter + body) to stdout,
+// or — given a name — one of the reference files it points at.
 func skillShow(args []string) error {
-	fs := flag.NewFlagSet("skill show", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi skill show") }
-	if err := fs.Parse(args); err != nil {
+	files := skillBundle()
+	switch len(args) {
+	case 0:
+		_, err := os.Stdout.Write(renderSkill(version()))
 		return err
+	case 1:
+		want := args[0]
+		for _, f := range files {
+			if f.path == want || f.path == "references/"+want+".md" {
+				_, err := io.WriteString(os.Stdout, f.body)
+				return err
+			}
+		}
+		var names []string
+		for _, f := range files[1:] {
+			names = append(names, strings.TrimSuffix(strings.TrimPrefix(f.path, "references/"), ".md"))
+		}
+		return fmt.Errorf("no skill file %q; the references are: %s", want, strings.Join(names, ", "))
 	}
-	_, err := os.Stdout.Write(renderSkill(version()))
-	return err
+	return fmt.Errorf("skill show takes at most one file name")
 }
 
 // --- rendering + version stamp ----------------------------------------
 
-// skillBody renders the embedded template with the generated grammar and
-// exit table. It is deterministic and version-free, so it is safe to hash
-// and to golden-test.
-func skillBody() string {
-	tmpl := template.Must(template.New("skill").Parse(skillTemplate))
+// skillFile is one file of the installed bundle: a path relative to the
+// skill directory, and the rendered body that belongs at it.
+type skillFile struct {
+	path string
+	body string
+}
+
+// skillBundle renders every file the skill installs, SKILL.md first. It is
+// deterministic and version-free, so it is safe to hash and to golden-test.
+func skillBundle() []skillFile {
+	return []skillFile{
+		{"SKILL.md", renderTmpl("skill", skillTemplate)},
+		{"references/setup.md", renderTmpl("setup", skillSetupTemplate)},
+		{"references/resume.md", renderTmpl("resume", skillResumeTemplate)},
+		{"references/goals.md", renderTmpl("goals", skillGoalsTemplate)},
+	}
+}
+
+// renderTmpl executes one embedded template against the generated sections.
+// Every template sees the same data, so a section can move between files
+// without rewiring anything.
+func renderTmpl(name, text string) string {
+	tmpl := template.Must(template.New(name).Parse(text))
 	var b strings.Builder
 	data := struct {
-		Grammar   string
-		ExitTable string
-	}{Grammar: commandGrammar(), ExitTable: exitTable()}
+		Grammar     string
+		GoalGrammar string
+		ExitTable   string
+	}{
+		Grammar:     commandGrammar(),
+		GoalGrammar: goalGrammar(),
+		ExitTable:   exitTable(),
+	}
 	if err := tmpl.Execute(&b, data); err != nil {
-		// the template is embedded and covered by tests; a runtime failure
-		// here is a programmer error, not a user-facing condition.
-		panic("rendering SKILL.md template: " + err.Error())
+		// the templates are embedded and covered by tests; a runtime
+		// failure here is a programmer error, not a user-facing condition.
+		panic("rendering " + name + " template: " + err.Error())
 	}
 	return b.String()
 }
 
-// skillBodyHash is the content fingerprint stamped into the frontmatter and
-// compared for drift: an installed skill whose body hashes differently than
-// the current binary would generate is stale (older binary) or hand-edited.
-func skillBodyHash() string { return sha256hex(skillBody()) }
+// skillBody is SKILL.md's body — the part the frontmatter sits above.
+func skillBody() string { return skillBundle()[0].body }
+
+// skillBodyHash fingerprints the WHOLE bundle, not just SKILL.md. It is
+// stamped into SKILL.md's frontmatter and compared for drift, so an
+// installed skill whose reference file was edited — or whose reference
+// file a newer binary added — reads as drifted, exactly as an edited
+// SKILL.md does.
+func skillBodyHash() string { return bundleHash(skillBundle()) }
+
+// bundleHash hashes a bundle's paths and bodies in order. Lengths are
+// hashed alongside the bodies so no rearrangement of content between two
+// files can collide with another.
+func bundleHash(files []skillFile) string {
+	h := sha256.New()
+	for _, f := range files {
+		fmt.Fprintf(h, "%s\n%d\n%s", f.path, len(f.body), f.body)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 func sha256hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
@@ -139,114 +212,196 @@ func splitFrontmatter(raw []byte) (front, body string, split bool) {
 	return front, body, true
 }
 
-// installedBodyHash fingerprints an installed file's body the same way
-// skillBodyHash fingerprints the current binary's, so a byte-for-byte
-// comparison detects both staleness and hand-edits.
-func installedBodyHash(raw []byte) string {
-	_, body, _ := splitFrontmatter(raw)
-	return sha256hex(body)
+// --- generated command grammar ----------------------------------------
+
+// The grammar is generated from the live cobra tree (root.go), which is
+// also what parses a real command line. It therefore cannot document a
+// flag the binary rejects, and cannot omit one the binary accepts — both
+// of which it used to do, because it enumerated a second, parallel set of
+// flag declarations that nothing kept in step with cobra's.
+
+// grammarEntry is one block of the rendered grammar: the signature lines
+// to print (two, where one flag surface serves two verbs), the command
+// path to read the flags from, and the flags to leave out of this block.
+type grammarEntry struct {
+	sigs []string
+	path string
+	omit []string
 }
 
-// --- generated command grammar ----------------------------------------
+// coreGrammar is the command surface SKILL.md documents: everything an
+// agent needs to take one card from a description to a verified branch and
+// land it. Goals live in their own reference, and so do their flags.
+func coreGrammar() []grammarEntry {
+	return []grammarEntry{
+		{sigs: []string{`gummi run [flags] "<description>"`}, path: "run"},
+		{sigs: []string{`gummi research [flags] "<brief>"`, `gummi diagnose [flags] "<symptom>"`}, path: "research"},
+		{sigs: []string{"gummi resume <id|ref> [decision]"}, path: "resume", omit: goalResumeFlagNames},
+		{sigs: []string{"gummi verify <id|ref>"}, path: "verify"},
+		{sigs: []string{"gummi merge <id|ref> -m <message|->"}, path: "merge"},
+		{sigs: []string{"gummi squash <id|ref> -m <message|->"}, path: "squash"},
+		{sigs: []string{"gummi commit <id|ref> -m <message|->"}, path: "commit"},
+		{sigs: []string{"gummi handoff <id|ref>"}, path: "handoff"},
+		{sigs: []string{"gummi clean <id|ref>"}, path: "clean"},
+		{sigs: []string{"gummi status <id|ref>"}, path: "status"},
+		{sigs: []string{"gummi watch <id|ref>"}, path: "watch"},
+		{sigs: []string{"gummi spec <id|ref>"}, path: "spec"},
+		{sigs: []string{"gummi diff <id|ref>"}, path: "diff"},
+		{sigs: []string{"gummi doctor"}, path: "doctor"},
+		{sigs: []string{"gummi deps add <dependent> <depends-on>"}, path: "deps add"},
+		{sigs: []string{"gummi deps rm <dependent> <depends-on>"}, path: "deps rm"},
+		{sigs: []string{"gummi deps list <id>"}, path: "deps list"},
+		{sigs: []string{"gummi skill show|install|list"}, path: "skill install"},
+	}
+}
+
+// commandGrammar renders the core grammar, with the driving flags `gummi
+// run` and another verb word identically hoisted into one shared block.
+//
+// Reprinting those ten flags under all five driving verbs was 30% of the
+// whole listing — 2.6KB of byte-identical repeats in a document an agent
+// loads on every invocation. Hoisting them is not just shorter: a flag now
+// appears under a verb precisely when that verb means something different
+// by it, so a real difference (a goal's --envelope is the goal's WHOLE
+// budget) reads as a difference instead of drowning in restatement.
+func commandGrammar() string {
+	var b strings.Builder
+	b.WriteString("Flags shared by run, research, diagnose and resume — listed again under a\nverb only where that verb means something different by one:\n\n")
+	writeFlagLines(&b, sharedFlagLines())
+	for _, e := range coreGrammar() {
+		b.WriteString("\n")
+		writeEntry(&b, e, true)
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// goalGrammar renders the goal surface for the goals reference: `gummi
+// goal` itself plus the `resume` flags that only ever apply to one.
+func goalGrammar() string {
+	var b strings.Builder
+	writeEntry(&b, grammarEntry{sigs: []string{`gummi goal [flags] "<objective>"`}, path: "goal"}, false)
+	b.WriteString("\ngummi resume GL-NNN [decision]   (the goal-only flags; every flag in SKILL.md's\n                                 grammar applies to a goal too)\n")
+	writeFlagLines(&b, flagLines(mustFindCmd("resume"), keepOnly(goalResumeFlagNames)))
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// writeEntry renders one block: its signature lines, then its flags.
+func writeEntry(b *strings.Builder, e grammarEntry, hoistShared bool) {
+	for _, sig := range e.sigs {
+		b.WriteString(sig + "\n")
+	}
+	omit := map[string]bool{}
+	for _, n := range e.omit {
+		omit[n] = true
+	}
+	shared := map[string]string{}
+	if hoistShared {
+		for _, fl := range sharedFlagLines() {
+			shared[fl.Name] = fl.Usage
+		}
+	}
+	writeFlagLines(b, flagLines(mustFindCmd(e.path), func(fl flagLine) bool {
+		if omit[fl.Name] {
+			return false
+		}
+		// A shared flag is printed under a verb only where that verb
+		// words it differently — which is exactly where it means
+		// something different.
+		if u, ok := shared[fl.Name]; ok && u == fl.Usage {
+			return false
+		}
+		return true
+	}))
+}
+
+// sharedFlagLines is the shared driving surface as `gummi run` words it —
+// the reference wording every other verb is compared against.
+func sharedFlagLines() []flagLine {
+	want := map[string]bool{}
+	for _, n := range sharedDriveFlagNames {
+		want[n] = true
+	}
+	return flagLines(mustFindCmd("run"), func(fl flagLine) bool { return want[fl.Name] })
+}
+
+// keepOnly builds a flagLines filter admitting exactly the named flags.
+func keepOnly(names []string) func(flagLine) bool {
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
+	}
+	return func(fl flagLine) bool { return want[fl.Name] }
+}
+
+// mustFindCmd resolves a space-separated command path against the cobra
+// tree. A path that does not resolve is a programmer error in
+// coreGrammar's table, caught by the grammar's own tests.
+func mustFindCmd(path string) *cobra.Command {
+	cmd, _, err := rootCmd.Find(strings.Fields(path))
+	if err != nil || cmd == rootCmd {
+		panic("skill grammar names a command that is not on the tree: " + path)
+	}
+	return cmd
+}
 
 // flagLine is one flag's contribution to the generated grammar.
 type flagLine struct {
 	Name  string
+	Short string // one-letter shorthand, where the flag has one
 	Type  string // "" for bool, else "int"/"string"/"duration"/…
 	Usage string
 }
 
-// flagLines enumerates a command's flags by registering them onto a
-// throwaway FlagSet — the same register funcs the real commands use, so the
-// grammar cannot list a flag the command lacks (or miss one it has).
-func flagLines(register func(*flag.FlagSet)) []flagLine {
-	fs := flag.NewFlagSet("grammar", flag.ContinueOnError)
-	register(fs)
+// flagLines enumerates the flags cobra has bound on cmd, in pflag's sorted
+// order, keeping those keep admits. cobra's own --help is never part of
+// the grammar.
+func flagLines(cmd *cobra.Command, keep func(flagLine) bool) []flagLine {
 	var out []flagLine
-	fs.VisitAll(func(f *flag.Flag) {
-		out = append(out, flagLine{Name: f.Name, Type: flagType(f), Usage: f.Usage})
+	cmd.Flags().VisitAll(func(f *pflag.Flag) {
+		if f.Name == "help" {
+			return
+		}
+		fl := flagLine{Name: f.Name, Short: f.Shorthand, Type: flagType(f), Usage: f.Usage}
+		if keep == nil || keep(fl) {
+			out = append(out, fl)
+		}
 	})
 	return out
 }
 
-// flagType derives a flag's type placeholder from its value (not from the
-// usage string, which carries markdown backticks UnquoteUsage would
-// misread). Bool flags take no placeholder.
-func flagType(f *flag.Flag) string {
-	g, ok := f.Value.(flag.Getter)
-	if !ok {
-		return "value"
-	}
-	switch g.Get().(type) {
-	case bool:
+// flagType is the value placeholder shown after a flag name. Bool flags
+// take none; pflag names every other type itself.
+func flagType(f *pflag.Flag) string {
+	if f.Value.Type() == "bool" {
 		return ""
-	case time.Duration:
-		return "duration"
-	case int, int64:
-		return "int"
-	case uint, uint64:
-		return "uint"
-	case float64:
-		return "float"
-	case string:
-		return "string"
-	default:
-		return "value"
+	}
+	return f.Value.Type()
+}
+
+// writeFlagLines renders a block of flags, aligned on the widest token.
+func writeFlagLines(b *strings.Builder, lines []flagLine) {
+	width := 0
+	for _, fl := range lines {
+		if n := len(flagToken(fl)); n > width {
+			width = n
+		}
+	}
+	for _, fl := range lines {
+		fmt.Fprintf(b, "    %-*s  %s\n", width, flagToken(fl), strings.ReplaceAll(fl.Usage, "`", ""))
 	}
 }
 
-// commandGrammar renders the whole command surface as an aligned block. The
-// run/resume/status/watch flags come from the real register funcs; spec/diff have
-// none; doctor/skill are shown with their fixed shapes.
-func commandGrammar() string {
-	var b strings.Builder
-	writeCmd := func(sig string, lines []flagLine) {
-		b.WriteString(sig + "\n")
-		width := 0
-		for _, fl := range lines {
-			if n := flagToken(fl); len(n) > width {
-				width = len(n)
-			}
-		}
-		for _, fl := range lines {
-			usage := strings.ReplaceAll(fl.Usage, "`", "")
-			fmt.Fprintf(&b, "    %-*s  %s\n", width, flagToken(fl), usage)
-		}
-	}
-	writeCmd(`gummi run [flags] "<description>"`, flagLines(func(fs *flag.FlagSet) { registerRunFlags(fs) }))
-	b.WriteString("\n")
-	writeCmd(`gummi research [flags] "<brief>"`, flagLines(func(fs *flag.FlagSet) { registerResearchFlags(fs) }))
-	writeCmd(`gummi diagnose [flags] "<symptom>"`, flagLines(func(fs *flag.FlagSet) { registerResearchFlags(fs) }))
-	b.WriteString("\n")
-	writeCmd(`gummi goal [flags] "<objective>"`, flagLines(func(fs *flag.FlagSet) { registerGoalFlags(fs) }))
-	b.WriteString("\n")
-	writeCmd("gummi resume <id|ref> [decision]", flagLines(func(fs *flag.FlagSet) { registerResumeFlags(fs) }))
-	b.WriteString("\n")
-	b.WriteString("gummi verify <id|ref>\n\n")
-	writeCmd("gummi merge <id|ref> -m <message|->", flagLines(func(fs *flag.FlagSet) { registerMergeFlags(fs) }))
-	b.WriteString("\n")
-	writeCmd("gummi squash <id|ref> -m <message|->", flagLines(func(fs *flag.FlagSet) { registerSquashFlags(fs) }))
-	b.WriteString("\n")
-	b.WriteString("gummi handoff <id|ref>\n\n")
-	b.WriteString("gummi clean <id|ref>\n\n")
-	writeCmd("gummi status <id|ref>", flagLines(func(fs *flag.FlagSet) { registerStatusFlags(fs) }))
-	b.WriteString("\n")
-	writeCmd("gummi watch <id|ref>", flagLines(func(fs *flag.FlagSet) { registerWatchFlags(fs) }))
-	b.WriteString("\n")
-	b.WriteString("gummi spec <id|ref>\n\n")
-	b.WriteString("gummi diff <id|ref>\n\n")
-	writeCmd("gummi doctor", flagLines(func(fs *flag.FlagSet) { registerDoctorFlags(fs) }))
-	b.WriteString("\n")
-	b.WriteString("gummi skill show|install|list [--agent claude|codex|opencode|copilot|pi] [--scope user|project] [--force] [--dry-run] [--check]")
-	return b.String()
-}
-
-// flagToken formats a flag's --name plus type placeholder.
+// flagToken formats a flag's --name plus type placeholder, with the
+// shorthand where one exists (`-m, --message string`).
 func flagToken(fl flagLine) string {
-	if fl.Type == "" {
-		return "--" + fl.Name
+	tok := "--" + fl.Name
+	if fl.Short != "" {
+		tok = "-" + fl.Short + ", " + tok
 	}
-	return "--" + fl.Name + " " + fl.Type
+	if fl.Type != "" {
+		tok += " " + fl.Type
+	}
+	return tok
 }
 
 // exitTable renders the exit contract with codes pulled straight from
@@ -286,27 +441,29 @@ const (
 	agentPi       skillAgent = "pi"
 )
 
-// installTarget is one SKILL.md destination and a human label for output.
+// installTarget is one skill-bundle destination — the `gummi` skill
+// directory, which holds SKILL.md and its references/ — and a human label
+// for output.
 type installTarget struct {
-	path  string
+	dir   string
 	label string
 }
 
-func skillInstall(args []string) error {
-	fs := flag.NewFlagSet("skill install", flag.ContinueOnError)
-	agentFlag := fs.String("agent", "", "target a specific agent: claude|codex|opencode|copilot|pi (default: detect)")
-	scopeFlag := fs.String("scope", "", "install scope: project|user (default: project, or ask when interactive)")
-	force := fs.Bool("force", false, "overwrite an existing SKILL.md (default: refuse and warn on drift)")
-	dryRun := fs.Bool("dry-run", false, "print what would be written, change nothing")
-	check := fs.Bool("check", false, "verify every target is up to date; write nothing, fail if any is absent/foreign/drifted")
-	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "usage: gummi skill install [--agent a] [--scope s] [--force] [--dry-run] [--check]")
-		fs.PrintDefaults()
-	}
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-	scope, err := resolveScope(*scopeFlag)
+// skillPath is the target's SKILL.md, the file that carries the stamp.
+func (t installTarget) skillPath() string { return filepath.Join(t.dir, "SKILL.md") }
+
+// installBundle is the bundle as it goes to disk: SKILL.md carries the
+// frontmatter stamp, every reference file is its body verbatim.
+func installBundle(version string) []skillFile {
+	files := skillBundle()
+	out := make([]skillFile, len(files))
+	out[0] = skillFile{path: files[0].path, body: string(renderSkill(version))}
+	copy(out[1:], files[1:])
+	return out
+}
+
+func skillInstall(fl cliFlags) error {
+	scope, err := resolveScope(fl.String("scope"))
 	if err != nil {
 		return err
 	}
@@ -323,17 +480,17 @@ func skillInstall(args []string) error {
 			return fmt.Errorf("skill install --scope project: no gummi workspace found at or above %s; run `gummi init` first, or pass --scope user", cwd)
 		}
 	}
-	targets, err := resolveTargets(scope, *agentFlag, ws)
+	targets, err := resolveTargets(scope, fl.String("agent"), ws)
 	if err != nil {
 		return err
 	}
 	curHash := skillBodyHash()
-	if *check {
+	if fl.Bool("check") {
 		return checkTargets(targets, curHash)
 	}
-	content := renderSkill(version())
+	bundle := installBundle(version())
 	for _, t := range targets {
-		if err := installOne(t, content, curHash, *force, *dryRun); err != nil {
+		if err := installOne(t, bundle, curHash, fl.Bool("force"), fl.Bool("dry-run")); err != nil {
 			return err
 		}
 	}
@@ -348,13 +505,13 @@ func skillInstall(args []string) error {
 func checkTargets(targets []installTarget, curHash string) error {
 	var stale []string
 	for _, t := range targets {
-		status := describeInstall(t.path, curHash)
+		status := describeInstall(t.dir, curHash)
 		if status == "up-to-date" {
-			fmt.Printf("  ✓ %s — up to date: %s\n", t.label, t.path)
+			fmt.Printf("  ✓ %s — up to date: %s\n", t.label, t.dir)
 			continue
 		}
-		fmt.Printf("  ✗ %s — %s: %s\n", t.label, status, t.path)
-		stale = append(stale, t.path)
+		fmt.Printf("  ✗ %s — %s: %s\n", t.label, status, t.dir)
+		stale = append(stale, t.dir)
 	}
 	if len(stale) > 0 {
 		return fmt.Errorf("skill install --check: out of date: %s", strings.Join(stale, ", "))
@@ -362,50 +519,74 @@ func checkTargets(targets []installTarget, curHash string) error {
 	return nil
 }
 
-// installOne writes (or reports) one target. It never overwrites an
-// existing file without --force: an identical install is a no-op, a
-// differing one warns about drift and points at --force (S5).
-func installOne(t installTarget, content []byte, curHash string, force, dryRun bool) error {
-	if raw, err := os.ReadFile(t.path); err == nil {
+// installOne writes (or reports) one target's whole bundle. It never
+// overwrites an existing install without --force: an identical one is a
+// no-op, a differing one warns about drift and points at --force (S5).
+func installOne(t installTarget, bundle []skillFile, curHash string, force, dryRun bool) error {
+	if raw, err := os.ReadFile(t.skillPath()); err == nil {
 		_, gummiOwned := parseInstalledStamp(raw)
-		upToDate := gummiOwned && installedBodyHash(raw) == curHash
+		onDisk, complete := installedBundleHash(t.dir)
+		upToDate := gummiOwned && complete && onDisk == curHash
 		switch {
 		case upToDate && !force:
-			fmt.Printf("  ✓ %s — already up to date: %s\n", t.label, t.path)
+			fmt.Printf("  ✓ %s — already up to date: %s\n", t.label, t.dir)
 			return nil
 		case !force:
 			why := "a non-gummi SKILL.md is present"
 			if gummiOwned {
 				why = "installed skill has drifted (stale or edited)"
 			}
-			fmt.Printf("  ! %s — %s; re-run with --force to overwrite: %s\n", t.label, why, t.path)
+			fmt.Printf("  ! %s — %s; re-run with --force to overwrite: %s\n", t.label, why, t.dir)
 			return nil
 		}
 	}
 	if dryRun {
-		fmt.Printf("  · would write %s (%s)\n", t.path, t.label)
+		for _, f := range bundle {
+			fmt.Printf("  · would write %s (%s)\n", filepath.Join(t.dir, f.path), t.label)
+		}
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(t.path), 0o750); err != nil {
-		return err
+	for _, f := range bundle {
+		path := filepath.Join(t.dir, f.path)
+		if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+			return err
+		}
+		// A skill is documentation an agent reads, not a secret; 0644 is
+		// the conventional mode for one in a shared config dir.
+		if err := os.WriteFile(path, []byte(f.body), 0o644); err != nil { //nolint:gosec // G306: a public skill doc, world-readable by design
+			return err
+		}
 	}
-	// SKILL.md is documentation an agent reads, not a secret; 0644 is the
-	// conventional mode for a skill file in a shared config dir.
-	if err := os.WriteFile(t.path, content, 0o644); err != nil { //nolint:gosec // G306: a public skill doc, world-readable by design
-		return err
-	}
-	fmt.Printf("  ✓ wrote %s (%s)\n", t.path, t.label)
+	fmt.Printf("  ✓ wrote %s (%d files, %s)\n", t.dir, len(bundle), t.label)
 	return nil
+}
+
+// installedBundleHash fingerprints what is on disk at dir the same way
+// bundleHash fingerprints what this binary would write, so a byte-for-byte
+// comparison detects staleness and hand-edits — in a reference file as
+// readily as in SKILL.md. complete is false when a file the current bundle
+// has is missing there, which is how an install from an older binary that
+// knew fewer files reads as drift rather than as up to date.
+func installedBundleHash(dir string) (hash string, complete bool) {
+	want := skillBundle()
+	got := make([]skillFile, 0, len(want))
+	for _, f := range want {
+		raw, err := os.ReadFile(filepath.Join(dir, f.path))
+		if err != nil {
+			return "", false
+		}
+		body := string(raw)
+		if f.path == "SKILL.md" {
+			_, body, _ = splitFrontmatter(raw)
+		}
+		got = append(got, skillFile{path: f.path, body: body})
+	}
+	return bundleHash(got), true
 }
 
 // skillList reports every known target's install state (absent / up-to-date
 // / drift), so a caller (or doctor) can see what needs a --force refresh.
-func skillList(args []string) error {
-	fs := flag.NewFlagSet("skill list", flag.ContinueOnError)
-	fs.Usage = func() { fmt.Fprintln(os.Stderr, "usage: gummi skill list") }
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
+func skillList() error {
 	cwd, err := os.Getwd()
 	if err != nil {
 		return err
@@ -416,21 +597,21 @@ func skillList(args []string) error {
 	}
 	curHash := skillBodyHash()
 	rows := []installTarget{
-		{path: projectSkillPath(ws), label: "project (claude/copilot/opencode)"},
-		{path: codexProjectSkillPath(ws), label: "project (codex, pi)"},
-		{path: userSkillPath(agentClaude), label: "user (claude/opencode)"},
-		{path: userSkillPath(agentCopilot), label: "user (copilot)"},
-		{path: userSkillPath(agentCodex), label: "user (codex, pi)"},
+		{dir: projectSkillDir(ws), label: "project (claude/copilot/opencode)"},
+		{dir: codexProjectSkillDir(ws), label: "project (codex, pi)"},
+		{dir: userSkillDir(agentClaude), label: "user (claude/opencode)"},
+		{dir: userSkillDir(agentCopilot), label: "user (copilot)"},
+		{dir: userSkillDir(agentCodex), label: "user (codex, pi)"},
 	}
 	for _, r := range rows {
-		fmt.Printf("  %-32s %-12s %s\n", r.label, describeInstall(r.path, curHash), r.path)
+		fmt.Printf("  %-32s %-12s %s\n", r.label, describeInstall(r.dir, curHash), r.dir)
 	}
 	return nil
 }
 
-// describeInstall classifies one installed file against the current skill.
-func describeInstall(path, curHash string) string {
-	raw, err := os.ReadFile(path)
+// describeInstall classifies one installed bundle against the current one.
+func describeInstall(dir, curHash string) string {
+	raw, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
 	if err != nil {
 		return "absent"
 	}
@@ -442,7 +623,7 @@ func describeInstall(path, curHash string) string {
 	if ver == "" {
 		ver = "?"
 	}
-	if installedBodyHash(raw) == curHash {
+	if h, complete := installedBundleHash(dir); complete && h == curHash {
 		return "up-to-date"
 	}
 	return "drift (" + ver + ")"
@@ -492,7 +673,7 @@ func parseAgent(s string) (skillAgent, error) {
 	case agentClaude, agentCodex, agentOpencode, agentCopilot, agentPi:
 		return skillAgent(s), nil
 	default:
-		return "", fmt.Errorf("--agent must be claude, codex, opencode, copilot, or pi, got %q", s)
+		return "", fmt.Errorf("--agent must be one of %s, got %q", skillAgentList, s)
 	}
 }
 
@@ -523,10 +704,10 @@ func resolveScope(flagVal string) (string, error) {
 func resolveTargets(scope, agentFlag, ws string) ([]installTarget, error) {
 	if scope == "project" {
 		shared := installTarget{
-			path:  projectSkillPath(ws),
+			dir:   projectSkillDir(ws),
 			label: "project (read by claude, copilot, opencode)",
 		}
-		codex := installTarget{path: codexProjectSkillPath(ws), label: "project (read by codex)"}
+		codex := installTarget{dir: codexProjectSkillDir(ws), label: "project (read by codex)"}
 		switch agentFlag {
 		case "":
 			return []installTarget{shared, codex}, nil
@@ -547,52 +728,52 @@ func resolveTargets(scope, agentFlag, ws string) ([]installTarget, error) {
 		}
 		agents = []skillAgent{a}
 	} else if agents = detectAgents(); len(agents) == 0 {
-		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent claude|codex|opencode|copilot|pi (or use --scope project)")
+		return nil, fmt.Errorf("user scope needs an agent, but none was detected; pass --agent %s (or use --scope project)", skillAgentList)
 	}
 	seen := map[string]bool{}
 	var targets []installTarget
 	for _, a := range agents {
-		p := userSkillPath(a)
+		p := userSkillDir(a)
 		if seen[p] {
 			continue
 		}
 		seen[p] = true
-		targets = append(targets, installTarget{path: p, label: "user (" + string(a) + ")"})
+		targets = append(targets, installTarget{dir: p, label: "user (" + string(a) + ")"})
 	}
 	return targets, nil
 }
 
-// projectSkillPath is the shared project-scope install Claude, Copilot, and
+// projectSkillDir is the shared project-scope install Claude, Copilot, and
 // opencode read, rooted at the gummi workspace (beside .gummi).
-func projectSkillPath(ws string) string {
-	return filepath.Join(ws, ".claude", "skills", "gummi", "SKILL.md")
+func projectSkillDir(ws string) string {
+	return filepath.Join(ws, ".claude", "skills", "gummi")
 }
 
-// codexProjectSkillPath is Codex's workspace-scoped skill location, rooted
-// the same way as projectSkillPath.
-func codexProjectSkillPath(ws string) string {
-	return filepath.Join(ws, ".agents", "skills", "gummi", "SKILL.md")
+// codexProjectSkillDir is Codex's workspace-scoped skill location, rooted
+// the same way as projectSkillDir.
+func codexProjectSkillDir(ws string) string {
+	return filepath.Join(ws, ".agents", "skills", "gummi")
 }
 
-// userSkillPath is an agent's user-scope home. Claude and opencode share the
+// userSkillDir is an agent's user-scope home. Claude and opencode share the
 // Claude home ($CLAUDE_CONFIG_DIR, else ~/.claude); Copilot and Codex
 // each have their own native homes.
-func userSkillPath(a skillAgent) string {
+func userSkillDir(a skillAgent) string {
 	if a == agentCopilot {
-		return filepath.Join(homeDir(), ".copilot", "skills", "gummi", "SKILL.md")
+		return filepath.Join(homeDir(), ".copilot", "skills", "gummi")
 	}
 	// pi reads the shared agents-skills locations natively (~/.agents/skills
 	// and project .agents/skills), alongside its own ~/.pi/agent/skills —
 	// the codex install is what a pi user wants, so the two share a target
 	// rather than seeding pi a duplicate of the same skill.
 	if a == agentCodex || a == agentPi {
-		return filepath.Join(homeDir(), ".agents", "skills", "gummi", "SKILL.md")
+		return filepath.Join(homeDir(), ".agents", "skills", "gummi")
 	}
 	base := os.Getenv("CLAUDE_CONFIG_DIR")
 	if base == "" {
 		base = filepath.Join(homeDir(), ".claude")
 	}
-	return filepath.Join(base, "skills", "gummi", "SKILL.md")
+	return filepath.Join(base, "skills", "gummi")
 }
 
 func homeDir() string {

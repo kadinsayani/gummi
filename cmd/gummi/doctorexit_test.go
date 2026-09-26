@@ -18,7 +18,7 @@ func doctorExit(t *testing.T, repo string, args ...string) int {
 	}
 	t.Cleanup(func() { _ = os.Chdir(wd) })
 
-	err = runDoctor(args)
+	err = runCLI(append([]string{"doctor"}, args...)...)
 	if err == nil {
 		return 0
 	}

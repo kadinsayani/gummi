@@ -86,7 +86,7 @@ func TestSquashCommand_Happy(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runSquash([]string{string(f.ID), "-m", "feat(export): collapsed"})
+		runErr = runCLI("squash", string(f.ID), "-m", "feat(export): collapsed")
 	})
 	if runErr != nil {
 		t.Fatalf("runSquash: %v", runErr)
@@ -133,7 +133,7 @@ func TestSquashCommand_StdinMessage(t *testing.T) {
 	os.Stdin = r
 	defer func() { os.Stdin = origStdin }()
 
-	if err := runSquash([]string{string(f.ID), "-m", "-"}); err != nil {
+	if err := runCLI("squash", string(f.ID), "-m", "-"); err != nil {
 		t.Fatalf("runSquash: %v", err)
 	}
 	wtPath := filepath.Join(".gummi", "worktrees", string(f.ID))
@@ -144,7 +144,7 @@ func TestSquashCommand_StdinMessage(t *testing.T) {
 
 // A missing -m fails before touching git.
 func TestSquashCommand_RequiresMessage(t *testing.T) {
-	if err := runSquash([]string{"FD-009"}); err == nil {
+	if err := runCLI("squash", "FD-009"); err == nil {
 		t.Fatal("squash without -m accepted")
 	}
 }
@@ -163,7 +163,7 @@ func TestSquashOpenThreadsGate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := runSquash([]string{string(f.ID), "-m", "feat(export): collapsed"}); err == nil {
+	if err := runCLI("squash", string(f.ID), "-m", "feat(export): collapsed"); err == nil {
 		t.Fatal("squash accepted despite open review threads")
 	} else if !strings.Contains(err.Error(), "open review threads") {
 		t.Fatalf("error %q does not name the open-threads refusal", err)
@@ -179,7 +179,7 @@ func TestSquashOpenThreadsGate(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Stderr = w
-	runErr := runSquash([]string{string(f.ID), "-m", "feat(export): collapsed", "--force"})
+	runErr := runCLI("squash", string(f.ID), "-m", "feat(export): collapsed", "--force")
 	w.Close()
 	os.Stderr = origStderr
 	var buf bytes.Buffer

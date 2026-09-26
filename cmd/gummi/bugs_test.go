@@ -147,7 +147,7 @@ func TestRunBugIngestIssueMaterializesExactlyOne(t *testing.T) {
 	store := bugIngestRepoFixture(t)
 	fakeGHOnPath(t, twoGHIssues)
 
-	if err := runBugIngest([]string{"--issue", "42", "--yes"}); err != nil {
+	if err := runCLI("bugs", "ingest", "--issue", "42", "--yes"); err != nil {
 		t.Fatalf("runBugIngest --issue 42: %v", err)
 	}
 

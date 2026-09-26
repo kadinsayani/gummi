@@ -7,6 +7,9 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 // repoRoot walks up from the test's working directory (the package dir) to
@@ -149,6 +152,70 @@ func TestConfigDocEnvCoversOperatorVars(t *testing.T) {
 	for v := range nonOperatorVars {
 		if !inSource[v] {
 			t.Errorf("nonOperatorVars still excuses %s, which no non-test source reads any more; drop the entry", v)
+		}
+	}
+}
+
+// --- docs vs. the real command surface --------------------------------
+
+// gummiInvocationRe matches a `gummi …` command line as the docs write one:
+// everything from the word to the end of the line or the closing backtick.
+var gummiInvocationRe = regexp.MustCompile("\\bgummi\\s+[^\\n`]*")
+
+// argumentRe strips the parts of an invocation that are a VALUE rather than
+// a flag of gummi's — a quoted description, a `<placeholder>` — so a
+// documented `gummi run "Add a --format=json flag"` is not read as a claim
+// that gummi has a --format flag. It is exactly the flag of the command the
+// example asks gummi to build.
+var argumentRe = regexp.MustCompile(`"[^"]*"|'[^']*'|<[^>]*>`)
+
+var longFlagRe = regexp.MustCompile(`--([a-z][a-z0-9-]*[a-z0-9])\b`)
+
+// declaredFlags is every long flag anywhere on the cobra tree.
+func declaredFlags() map[string]bool {
+	out := map[string]bool{}
+	var walk func(*cobra.Command)
+	walk = func(c *cobra.Command) {
+		c.Flags().VisitAll(func(f *pflag.Flag) { out[f.Name] = true })
+		for _, sub := range c.Commands() {
+			walk(sub)
+		}
+	}
+	walk(rootCmd)
+	return out
+}
+
+// TestDocsNameNoFlagTheBinaryLacks reads every `gummi …` invocation in the
+// user-facing docs and proves each flag it types is one the binary really
+// accepts.
+//
+// A doc that tells a reader to type a flag gummi rejects is worse than one
+// that omits it: the reader follows it and gets "unknown flag". That was
+// live — the generated skill grammar documented `gummi merge --m`, which
+// the binary has never accepted, because the grammar was built from a
+// second set of flag declarations that nothing kept in step with the set
+// cobra parses. There is one set now, and this keeps the hand-written
+// prose honest about it too.
+func TestDocsNameNoFlagTheBinaryLacks(t *testing.T) {
+	known := declaredFlags()
+	root := repoRoot(t)
+	for _, doc := range []string{
+		"README.md",
+		filepath.Join("docs", "HEADLESS.md"),
+		filepath.Join("docs", "CONFIGURATION.md"),
+		"AGENTS.md",
+	} {
+		b, err := os.ReadFile(filepath.Join(root, doc))
+		if err != nil {
+			t.Fatalf("reading %s: %v", doc, err)
+		}
+		for _, inv := range gummiInvocationRe.FindAllString(string(b), -1) {
+			for _, m := range longFlagRe.FindAllStringSubmatch(argumentRe.ReplaceAllString(inv, " "), -1) {
+				if !known[m[1]] {
+					t.Errorf("%s documents `%s`, but no gummi command declares --%s",
+						doc, strings.TrimSpace(inv), m[1])
+				}
+			}
 		}
 	}
 }
