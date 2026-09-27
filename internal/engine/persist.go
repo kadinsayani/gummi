@@ -38,19 +38,7 @@ func (e *Engine) persist(s *Session) {
 	if s.finalizedState() {
 		return
 	}
-	// Neither does a freeform card's session, which is not a stage run and
-	// must never be restored as one: Restore rebuilds e.live from these
-	// rows, and a freeform card appearing there would hand every surface
-	// that asks Engine.Get a stage-shaped session for a card that has no
-	// stage. It reaches here at all only because it shares the client-tool
-	// path with stage sessions (resolve_annotation persists after the
-	// write), so the exclusion belongs here, where the row is written,
-	// rather than in that tool. Its own absences are BoardSession's and
-	// ConsultSession's: no persisted row, and a transcript that lives as
-	// long as the board does.
-	if s.Feature.IsFreeform() {
-		return
-	}
+
 	snap := s.Snapshot()
 	rec := state.SessionSnapshot{
 		Feature:      snap.Feature.ID,
@@ -93,7 +81,16 @@ func (e *Engine) persist(s *Session) {
 		})
 	}
 	_ = e.cfg.Store.SaveSession(context.Background(), rec)
-	_ = e.mirrorEvents(s, snap)
+	// A freeform card's events are NOT mirrored into the card-event log,
+	// and its row above is the whole of its durable record instead. The log
+	// is what a card's thread renders for a stage that is no longer live,
+	// and a freeform card's thread renders its session — so mirroring would
+	// draw the same conversation twice, once from each. Nothing else reads
+	// the log for such a card either: cardrun files events under the stage
+	// passes a freeform card never has (DESIGN §19.3).
+	if !s.Feature.IsFreeform() {
+		_ = e.mirrorEvents(s, snap)
+	}
 }
 
 // mirrorEvents appends this save's new card-event-log entries: the
@@ -286,6 +283,14 @@ func (e *Engine) Restore(ctx context.Context) error {
 		f, err := e.cfg.Store.GetFeature(ctx, snap.Feature)
 		if err != nil || f.Stage != snap.Stage {
 			continue // stale session for a since-advanced feature
+		}
+		// A freeform card's row rebuilds its own session, not a stage one:
+		// it has no stage, so roleForStage below would skip it and the
+		// conversation — which for such a card is the whole context a
+		// person comes back to — would be lost on every restart.
+		if f.IsFreeform() {
+			e.restoreFreeformLocked(f, snap)
+			continue
 		}
 		role, ok := roleForStage(f)
 		if !ok {

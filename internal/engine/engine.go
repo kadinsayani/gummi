@@ -2435,9 +2435,10 @@ func (e *Engine) Close() error {
 	for _, c := range consults {
 		c.stopBackend()
 	}
-	// A freeform session's teardown commits what its last turn left, then
-	// drops the card lock it holds so another gummi process can drive the
-	// card once this board is gone.
+	// A freeform session's teardown commits what its last turn left, saves
+	// the conversation, and drops the card lock with the backend — so
+	// another gummi process can drive the card once this board is gone, and
+	// so the person who comes back finds the conversation they left.
 	//
 	// The checkpoint is not optional politeness. Every other card's work
 	// reaches its branch through a stage that ends; a freeform card's
@@ -2449,7 +2450,6 @@ func (e *Engine) Close() error {
 	for _, ff := range freeforms {
 		ff.settle()
 		ff.stopBackend()
-		ff.releaseLock()
 	}
 	// Join the pump and kickoff goroutines so no git subprocess or persist
 	// write is still in flight against the workspace when Close returns.

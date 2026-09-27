@@ -1953,14 +1953,16 @@ func (m *Shell) freeformAbsentLines(s *theme.Styles, r featureRow, w int) []stri
 	// been worked on": a freeform card's tree is cut on its first turn, so
 	// a card without one has never had a session at all.
 	//
-	// Two short lines rather than one long one: the second is the reason,
-	// and a reason truncated at the window's edge is worse than no reason,
-	// which is what a single sentence became at 120 columns.
+	// The conversation is persisted now (Engine.restoreFreeformLocked), so
+	// reaching here on a card that HAS a tree means its row is gone rather
+	// than that the transcript did not survive — a card whose session was
+	// dropped, or one worked on by a gummi that predates the row. Say what
+	// is true either way: the work is on the branch.
 	said := []string{"type below to start — it works in " + r.F.BranchName() + ", committing every turn"}
 	if r.HasWorktree {
 		said = []string{
 			"its work is on " + r.F.BranchName() + " — alt+d to read the diff",
-			"this conversation lives as long as the board does, so it starts fresh here",
+			"no conversation on record here; say what you want next and it picks the branch up",
 		}
 	}
 	out := make([]string, 0, len(said))

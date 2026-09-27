@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // A freeform card is a coding agent that happens to be a card (DESIGN
@@ -70,14 +72,21 @@ type FreeformSession struct {
 	mu   sync.Mutex
 	sess *Session
 
-	// release drops this engine's hold on the card's per-card lock. Taken
-	// once at OpenFreeform and dropped by Close (or Engine.Close), because
-	// the hold has to span the whole conversation, not one turn: between
-	// two turns the worktree holds uncommitted work and the branch holds
-	// commits nothing has reviewed, and a `gummi merge` or a second board
-	// arriving in that window is exactly what the lock exists to exclude.
-	releaseOnce sync.Once
-	release     func()
+	// lockMu guards release, this engine's hold on the card's per-card
+	// lock. The hold spans a BACKEND's life, not the conversation's: a
+	// backend is what drives the card, and while one exists the worktree
+	// may hold work that is not committed yet, which is what a `gummi
+	// merge` or a second board arriving must be excluded from.
+	//
+	// It is deliberately not the conversation's life. A freeform card's
+	// session outlives its backend — across the idle timeout, and now
+	// across a restart (restoreFreeformLocked) — and a lock held for all of
+	// that would mean a board left open overnight blocks every CLI landing
+	// of every freeform card on it, including ones nobody has touched.
+	// Between turns there is no backend and the worktree is committed (each
+	// turn ends in a checkpoint), so there is nothing left to exclude.
+	lockMu  sync.Mutex
+	release func()
 
 	idleMu    sync.Mutex
 	idleTimer *time.Timer
@@ -121,14 +130,7 @@ func (e *Engine) OpenFreeform(ctx context.Context, f domain.Feature) (*FreeformS
 	rc, backend := e.resolveRole(f.Profile, agent.RoleImplementer)
 	ff := &FreeformSession{engine: e, id: f.ID, rc: rc, backend: backend}
 
-	release, err := e.lockCard(f.ID)
-	if err != nil {
-		return nil, fmt.Errorf("%s is being driven elsewhere: %w", f.ID, err)
-	}
-	ff.release = release
-
-	if err := ff.spawn(ctx, nil); err != nil {
-		ff.releaseLock()
+	if err := ff.spawn(ctx, nil, ""); err != nil {
 		return nil, err
 	}
 
@@ -136,7 +138,6 @@ func (e *Engine) OpenFreeform(ctx context.Context, f domain.Feature) (*FreeformS
 	if e.closed {
 		e.mu.Unlock()
 		ff.stopBackend()
-		ff.releaseLock()
 		return nil, errors.New("engine is closed")
 	}
 	e.freeform[f.ID] = ff
@@ -160,14 +161,21 @@ func (e *Engine) Freeform(id domain.FeatureID) *FreeformSession {
 // It installs the new *Session on ff and starts its pump, but never
 // touches e.freeform: the caller decides whether this is a first install
 // or a respawn of an already-registered session.
-func (ff *FreeformSession) spawn(ctx context.Context, seed []Message) error {
+func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID string) error {
 	e := ff.engine
 	ag := e.agentFor(ff.backend)
 	if ag == nil {
 		return fmt.Errorf("no agent configured for %s's freeform session", ff.id)
 	}
+	// The card lock, for as long as this backend exists. A second gummi
+	// driving the card is excluded from here until the backend stops, and
+	// the refusal names that rather than a git failure further in.
+	if err := ff.takeLock(); err != nil {
+		return fmt.Errorf("%s is being driven elsewhere: %w", ff.id, err)
+	}
 	f, err := e.feature(ctx, ff.id)
 	if err != nil {
+		ff.dropLock()
 		return err
 	}
 	// The worktree, ensured here: this is what "gets its worktree/branch"
@@ -176,6 +184,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message) error {
 	// the same way. A freeform card comes back with no artifact path.
 	workDir, _, err := e.locate(ctx, f)
 	if err != nil {
+		ff.dropLock()
 		return err
 	}
 
@@ -204,6 +213,20 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message) error {
 	e.seedCardSpend(sess)
 
 	hints := e.freeformHints(ctx, f, workDir, budget, ag)
+	// The context a person comes back to. Two ways, and which one applies
+	// is the backend's to decide, not ours to guess:
+	//
+	//   - A backend that can continue its OWN conversation is asked to
+	//     (ResumeID below, from the row this session was restored from).
+	//     Full fidelity, nothing replayed, nothing paid for twice.
+	//   - One that cannot — no Resume capability (headless/BYOK), or no
+	//     recorded conversation to continue — is handed the conversation as
+	//     text instead. Without this the transcript on screen would be a
+	//     record the model does not share, and the first turn after a
+	//     restart would answer as though nothing had been said.
+	if replay := freeformReplayHint(seed, ag.Capabilities().Resume && resumeID != ""); replay != "" {
+		hints = append(hints, replay)
+	}
 
 	// gummi's one client tool here is resolve_annotation, so the agent can
 	// mark each of the reader's diff comments addressed and the open count
@@ -237,16 +260,23 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message) error {
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
 		SkillDirs:      e.skillDirsFor(ag, backendLabel(ff.backend)),
-		// No ArtifactPath: there is no document. No ResumePath/ResumeID
-		// either — this session's continuity is its transcript, carried
-		// into each respawn by ensureBackend, not a backend conversation
-		// id gummi stored.
+		// No ArtifactPath: there is no document.
+		//
+		// ResumePath and ResumeID are how a freeform conversation survives
+		// a restart on a backend that keeps its own: the path is stable per
+		// card (one session, for the card's whole life, so there is no
+		// flavor to distinguish), and the id is whatever the last backend
+		// reported, restored with the row. A backend that cannot resume
+		// ignores both and reads the replay hint instead.
+		ResumePath: resumeSessionPath(e.cfg.Workspace, ff.id, agent.RoleImplementer, flavorStage),
+		ResumeID:   resumeID,
 	})
 	if err != nil {
 		if mcpTeardown != nil {
 			mcpTeardown()
 		}
 		cancel()
+		ff.dropLock()
 		return fmt.Errorf("starting %s's freeform session: %w", ff.id, err)
 	}
 	sess.setMCPTeardown(mcpTeardown)
@@ -256,6 +286,7 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message) error {
 			mcpTeardown()
 		}
 		cancel()
+		ff.dropLock()
 		return errors.New("engine is closed")
 	}
 	sess.setState(StateInteractive)
@@ -353,8 +384,14 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		}
 	}
 	var seed []Message
+	var resumeID string
 	if sess != nil {
-		seed = sess.Snapshot().Transcript
+		snap := sess.Snapshot()
+		seed = snap.Transcript
+		// The conversation the last backend was keeping, so a backend that
+		// can pick its own up is asked to. It survives a restart because
+		// the row carries it (restoreFreeformLocked).
+		resumeID = snap.AgentSessionID
 	}
 	if spent && sess.Live() {
 		// A spent backend is still running — exhaustFreeform stops the turn,
@@ -364,7 +401,7 @@ func (ff *FreeformSession) ensureBackend(ctx context.Context) (*Session, error) 
 		sess.setState(StateDone)
 		sess.stop()
 	}
-	if err := ff.spawn(ctx, seed); err != nil {
+	if err := ff.spawn(ctx, seed, resumeID); err != nil {
 		return nil, err
 	}
 	ff.mu.Lock()
@@ -391,6 +428,7 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 		return fmt.Errorf("%s's freeform session has no live agent", ff.id)
 	}
 	sess.appendUser(msg)
+	ff.engine.persist(sess)
 	sess.setBusy(true)
 	ff.armIdleTimer()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
@@ -462,6 +500,7 @@ func (e *Engine) InterruptFreeform(ctx context.Context, id domain.FeatureID) err
 		sess.appendActivity("the worktree is gone — nothing the interrupted turn wrote could be committed: " + err.Error())
 	}
 	sess.appendActivity("stopped mid-turn by the reader")
+	e.persist(sess)
 	e.send(Event{Feature: id, Stage: domain.StageOpen, Kind: EventUpdated})
 	return nil
 }
@@ -494,7 +533,6 @@ func (ff *FreeformSession) Close() error {
 		delete(ff.engine.freeform, ff.id)
 	}
 	ff.engine.mu.Unlock()
-	ff.releaseLock()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventStopped})
 	return nil
 }
@@ -511,6 +549,10 @@ func (ff *FreeformSession) settle() {
 		return
 	}
 	_ = ff.engine.checkpoint(sess)
+	// And the conversation, which is the other half of what a person comes
+	// back to: the tree carries what the turns wrote, the row carries what
+	// was said about it and the backend conversation to continue.
+	ff.engine.persist(sess)
 }
 
 // stopBackend stops ff's current backend and cancels its idle timer,
@@ -530,16 +572,39 @@ func (ff *FreeformSession) stopBackend() {
 	if sess != nil {
 		sess.stop()
 	}
+	// The lock goes with the backend: with none running, nothing here is
+	// driving the card.
+	ff.dropLock()
 }
 
-// releaseLock drops the card lock exactly once, however many teardown
-// paths reach it (Close, Engine.Close, a failed spawn).
-func (ff *FreeformSession) releaseLock() {
-	ff.releaseOnce.Do(func() {
-		if ff.release != nil {
-			ff.release()
-		}
-	})
+// takeLock acquires this engine's hold on the card's per-card lock, or
+// reports why it could not. Idempotent: a session that already holds it
+// (a respawn inside one board's life) keeps the one hold rather than
+// nesting a second, so every acquire has exactly one release.
+func (ff *FreeformSession) takeLock() error {
+	ff.lockMu.Lock()
+	defer ff.lockMu.Unlock()
+	if ff.release != nil {
+		return nil
+	}
+	release, err := ff.engine.lockCard(ff.id)
+	if err != nil {
+		return err
+	}
+	ff.release = release
+	return nil
+}
+
+// dropLock releases the hold if this session has one. Safe to call from
+// every teardown path, and from one that never took it.
+func (ff *FreeformSession) dropLock() {
+	ff.lockMu.Lock()
+	defer ff.lockMu.Unlock()
+	if ff.release == nil {
+		return
+	}
+	ff.release()
+	ff.release = nil
 }
 
 // armIdleTimer (re)starts the idle-close timer, called on spawn and on
@@ -571,6 +636,10 @@ func (ff *FreeformSession) onIdleTimeout() {
 	}
 	sess.setState(StateDone)
 	sess.stop()
+	// A card whose backend has idled out is not being driven, so it stops
+	// excluding the verbs that would drive it. The next turn respawns and
+	// takes the lock again.
+	ff.dropLock()
 }
 
 // pumpFreeform relays one freeform backend's agent events into
@@ -609,6 +678,10 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 		sess.appendDelta(ev.Text)
 	case agent.EventMessage:
 		sess.finishAssistant(ev.Text)
+		// Saved as it is said, not only at the end: a board that dies
+		// mid-turn must not lose the reply it had already streamed, and this
+		// row is the only place a freeform card's conversation lives.
+		e.persist(sess)
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
 	case agent.EventToolResult:
@@ -644,6 +717,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 			sess.appendActivity("the worktree is gone — nothing this turn wrote could be committed: " + err.Error())
 		}
 		sess.setBusy(false)
+		e.persist(sess)
 		ff.armIdleTimer() // a reply landing resets the idle clock
 	case agent.EventError:
 		sess.setError(ev.Err)
@@ -695,4 +769,133 @@ func (e *Engine) dispatchFreeformClientTool(ff *FreeformSession, sess *Session, 
 	sess.appendToolCall(tc.ID, tc.Name, tc.Name, "")
 	e.handleClientTool(sess, tc)
 	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventUpdated})
+}
+
+// restoreFreeformLocked rebuilds a freeform card's session from its
+// persisted row, so the conversation a person left is the conversation
+// they come back to. The caller holds e.mu (Engine.Restore does).
+//
+// It deliberately starts NO backend and takes NO card lock. A board that
+// opens with eight freeform cards on it must not spawn eight agents and
+// hold eight locks for cards nobody has touched yet: the session carries
+// its transcript, and the next turn is what spawns a backend (ensureBackend
+// treats a session with no agent exactly as it treats one whose backend
+// idled out). Until then the card costs nothing and blocks nothing.
+//
+// The backend's own conversation id comes back with the row, so a backend
+// that can continue its own conversation is asked to (SessionOpts.ResumeID);
+// one that cannot is handed the transcript instead (freeformReplayHint).
+func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnapshot) {
+	rc, backend := e.resolveRole(f.Profile, agent.RoleImplementer)
+	sctx, cancel := context.WithCancel(context.Background())
+	sess := &Session{
+		Feature:     f,
+		Role:        agent.RoleImplementer,
+		Interactive: true,
+		state:       StateInteractive,
+		done:        make(chan struct{}),
+		ctx:         sctx,
+		cancel:      cancel,
+		startedAt:   restoredStart(snap.StartedAt),
+	}
+	for _, m := range snap.Transcript {
+		sess.transcript = append(sess.transcript, Message{
+			Author: Author(m.Author), Content: m.Content,
+			ToolStatus: ToolStatus(m.ToolStatus), ToolOutput: m.ToolOutput,
+			AnsweredBy: m.AnsweredBy,
+		})
+	}
+	sess.activity = append(sess.activity, snap.Activity...)
+	sess.spend = usageFrom(snap)
+	sess.exhausted = snap.Exhausted
+	sess.setAgentSessionID(snap.AgentSession)
+	e.stampSpawnInfo(sess)
+	e.freeform[f.ID] = &FreeformSession{
+		engine: e, id: f.ID, rc: rc, backend: backend, sess: sess,
+	}
+}
+
+// restoredStart parses a persisted generation stamp, falling back to now
+// for a legacy row that carries none.
+func restoredStart(stamp string) time.Time {
+	if at, err := time.Parse(time.RFC3339Nano, stamp); err == nil {
+		return at
+	}
+	return time.Now()
+}
+
+// freeformReplayBudget bounds how much of a conversation is replayed into
+// a backend that cannot continue its own. It is a character budget rather
+// than a turn count because what matters is the prompt it becomes: a long
+// card can hold hundreds of turns, and a replay that grows without limit
+// turns every turn after a restart into the most expensive one of the
+// card. The newest turns are the ones kept — the work in front of the
+// person is what the next turn is about, and the branch's diff carries
+// everything older.
+const freeformReplayBudget = 8000
+
+// freeformReplayHint is the conversation so far, as text, for a backend
+// that cannot continue its own. Empty when there is nothing to replay or
+// when the backend was handed a conversation id to resume instead —
+// replaying on top of a native resume would state the same turns twice,
+// once as history and once as the model's own memory of them.
+func freeformReplayHint(seed []Message, resuming bool) string {
+	if resuming || len(seed) == 0 {
+		return ""
+	}
+	// Walked newest-first and reversed, so what gets dropped when the
+	// budget runs out is the OLDEST turn rather than whatever happened to
+	// come last.
+	var kept []string
+	used := 0
+	for i := len(seed) - 1; i >= 0; i-- {
+		line := replayLine(seed[i])
+		if line == "" {
+			continue
+		}
+		if used+len(line) > freeformReplayBudget && len(kept) > 0 {
+			kept = append(kept, "  […] earlier turns are not replayed; the branch's diff carries what they wrote.")
+			break
+		}
+		used += len(line)
+		kept = append(kept, line)
+	}
+	if len(kept) == 0 {
+		return ""
+	}
+	slices.Reverse(kept)
+	return "This card's conversation so far, which you are continuing. It happened in an\n" +
+		"earlier session of yours — treat it as your own work, not as someone else's\n" +
+		"report of it, and do not redo what it already did:\n\n" +
+		strings.Join(kept, "\n\n")
+}
+
+// replayLine renders one transcript entry for the replay: what was SAID,
+// and only that.
+//
+// Tool lines are left out, and the pty drive is why. The transcript keeps
+// them for the reader, but two kinds of line live there — the backend's own
+// calls, and gummi's activity notes (the checkpoint commit, a budget nudge,
+// "stopped mid-turn by the reader") — and a restored transcript cannot tell
+// them apart, because the persisted row carries each line's text without
+// the tool name that would. Replayed indiscriminately they came out as "you
+// ran: worktree committed", which is not something the session did and
+// directly contradicts the contract telling it gummi commits for it.
+//
+// Nothing is lost by dropping them. What a tool DID is in the worktree the
+// session is standing in and in the branch's diff; what it was for is in
+// the reply beside it, which is replayed. The conversation is the context;
+// the tree is the state.
+func replayLine(m Message) string {
+	body := strings.TrimSpace(m.Content)
+	if body == "" {
+		return ""
+	}
+	switch m.Author {
+	case AuthorUser:
+		return "  them: " + body
+	case AuthorAssistant:
+		return "  you: " + body
+	}
+	return ""
 }

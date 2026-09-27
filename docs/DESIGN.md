@@ -3432,9 +3432,61 @@ What it has that neither of them does is that it **writes**:
   read its diff.
 
 It has **no artifact**: `Kind.ArtifactNoun` and `ArtifactPath` are empty
-for it, nothing is seeded at mint, and the thread is the record. It is not
-persisted as a session row either, for the same reason `BoardSession` is
-not: it must never be restored as a stage run.
+for it, nothing is seeded at mint, and the thread is the record.
+
+### 19.3a The conversation is the context, so the conversation is persisted
+
+Because the thread is the record, losing it loses the card. A freeform
+card's session therefore has a durable row like a stage session's — its
+transcript, its spend, its activity, and the backend conversation id it was
+keeping — written as the conversation grows (each user turn, each completed
+reply, each turn's end) rather than only at shutdown.
+
+`Engine.Restore` rebuilds it as a `FreeformSession`, not as a stage run:
+the row's stage is `open`, which `roleForStage` answers nothing for, so
+without an explicit branch every restart would silently drop exactly the
+thing a person came back for. What comes back is the session and its
+transcript, and **nothing else**: no backend is started and no card lock is
+taken, because a board that opens on eight freeform cards must not spawn
+eight agents and block eight cards for work nobody has touched yet. The
+next turn is what spawns one — `ensureBackend` treats a restored session
+with no agent exactly as it treats one whose backend idled out.
+
+**What the model gets back is a separate question from what the reader
+gets back**, and the answer has two layers because backends differ:
+
+- A backend that can continue its own conversation is asked to, with
+  `SessionOpts.ResumeID` (the id the row carried) and a stable per-card
+  `ResumePath`. Full fidelity, nothing replayed, nothing paid for twice.
+- One that cannot — no `Resume` capability (headless/BYOK), or no recorded
+  conversation — is handed the conversation as text instead
+  (`freeformReplayHint`), framed as its own earlier work rather than as a
+  report of someone else's. Without this the transcript on screen would be
+  a record the model does not share, and the first turn after a restart
+  would answer as though nothing had been said.
+
+  The replay carries **what was said and nothing else** — the person's
+  turns and the agent's replies. Tool lines stay out: a restored row cannot
+  tell the backend's own calls from gummi's activity notes, and replayed
+  indiscriminately they came out as "you ran: worktree committed", which
+  the session did not do and which contradicts the contract telling it
+  gummi commits for it. Nothing is lost — what the tools did is in the
+  worktree and the diff. It is bounded by a character budget that keeps the
+  newest turns, and says so when it drops the rest.
+
+The card's **events are still not mirrored** into the card-event log. That
+log is what a thread renders for a stage that is no longer live, and a
+freeform card's thread renders its session — mirroring would draw the same
+conversation twice, once from each. The cost is that `cardrun` has no
+passes to fold for such a card, which is why its stats tab reports the
+money and the envelope and not a pass list (§19.6).
+
+**The card lock spans a backend, not the conversation.** A backend is what
+drives the card, and while one exists the worktree may hold work that is
+not committed yet — which is what a `gummi merge` or a second board must be
+excluded from. Between turns there is no backend and the tree is committed,
+so there is nothing left to exclude, and a board left open overnight stops
+blocking every CLI landing of every freeform card on it.
 
 Its tool surface is `resolve_annotation` and nothing else — the review
 loop needs it, there is no document for the spec tools to reach, and
@@ -3508,7 +3560,9 @@ The TUI treats a freeform card as a card and withholds the workflow:
 ### 19.7 Deferred
 
 A `gummi ff` CLI verb and `card_turn` for a hosted agent — a freeform card
-is an inside-path concept until then. The third ending, discard, which
+is an inside-path concept until then. A pass list on its stats tab, which
+needs its turns in the card-event log without the thread drawing them
+twice (§19.3a). The third ending, discard, which
 would delete the branch and worktree the way `clean` does for a landed
 card; today a freeform card's branch is cleaned up after it lands, or kept
 on purpose after a hand-off, exactly like any other card's. The PR

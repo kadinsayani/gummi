@@ -77,17 +77,17 @@ func TestAFreeformCardSaysHowToStartIt(t *testing.T) {
 	}
 }
 
-// TestAStartedFreeformCardPointsAtItsDiff is the other half: after a
-// restart the conversation is gone (a freeform session is not persisted)
-// but the work is on the branch, and saying nothing there is what would
-// read as "my card is gone".
+// TestAStartedFreeformCardPointsAtItsDiff is the other half: a card whose
+// work is on its branch but whose conversation is not on record — its row
+// dropped, or a gummi that predates the row — must say so and point at the
+// branch. Saying nothing there is what would read as "my card is gone".
 func TestAStartedFreeformCardPointsAtItsDiff(t *testing.T) {
 	m := freeformShell(t, 120, 34, true)
 	out := ansi.Strip(m.threadView(120, 34))
 	if !strings.Contains(out, "alt+d") {
 		t.Errorf("a worked-on freeform card does not point at its diff:\n%s", out)
 	}
-	if !strings.Contains(out, "as long as the board does") {
+	if !strings.Contains(out, "no conversation on record here") {
 		t.Errorf("nothing explains why the conversation is not here:\n%s", out)
 	}
 }

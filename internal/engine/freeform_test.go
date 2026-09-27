@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -577,6 +578,176 @@ func waitForFile(t *testing.T, path string) {
 		case <-deadline:
 			t.Fatalf("%s never appeared", path)
 		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// TestAFreeformConversationSurvivesARestart is the requirement this
+// persistence exists for: a person who comes back finds the conversation
+// they left, and — the half that matters more — the agent continues with
+// it rather than answering as though nothing had been said.
+//
+// It drives two engines over one store, which is what a board restart is.
+func TestAFreeformConversationSurvivesARestart(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(20, "remember me")
+	createFeature(t, store, f)
+
+	// --- the board that does the work
+	first := agent.NewFake("Added pty.go — the fd is still leaked on the error path.")
+	first.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	e1 := New(Config{
+		Agents: singleAgent(first), Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", Persist: true,
+	})
+	ff, err := e1.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "drop the leaked pty fd"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if err := e1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// --- the board that comes back
+	second := recordingAgent()
+	second.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true} // no Resume: a BYOK backend
+	e2 := New(Config{
+		Agents: singleAgent(second), Store: store, Worktrees: wt, Workspace: ws,
+		Model: "m", Persist: true,
+	})
+	t.Cleanup(func() { e2.Close() })
+	if err := e2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// The session is back, with the conversation, and nothing was spawned
+	// to get it: a board that opens on ten freeform cards must not start
+	// ten agents.
+	back := e2.Freeform(f.ID)
+	if back == nil {
+		t.Fatal("the freeform session did not survive the restart")
+	}
+	if second.count() != 0 {
+		t.Errorf("restoring spawned %d backend(s); it must wait for a turn", second.count())
+	}
+	said := transcriptText(back.Snapshot())
+	for _, want := range []string{"drop the leaked pty fd", "Added pty.go"} {
+		if !strings.Contains(said, want) {
+			t.Errorf("the restored conversation is missing %q:\n%s", want, said)
+		}
+	}
+	// The card lock is free while no backend runs, so a landing from
+	// elsewhere is not blocked by a board that merely has the card open.
+	if release, err := state.AcquireLock(ws.CardLockFile(f.ID)); err != nil {
+		t.Errorf("a restored session with no backend still holds the card lock: %v", err)
+	} else {
+		release()
+	}
+
+	// And the next turn carries the context to the model. This backend
+	// cannot resume its own conversation, so the transcript is replayed
+	// into its prompt — without that the thread would show a history the
+	// model does not share.
+	if err := back.Send(ctx, "now fix it"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, back)
+	hints := strings.Join(second.opts().SystemHints, "\n")
+	if !strings.Contains(hints, "conversation so far") {
+		t.Errorf("the respawned backend was given no conversation:\n%s", hints)
+	}
+	for _, want := range []string{"drop the leaked pty fd", "Added pty.go"} {
+		if !strings.Contains(hints, want) {
+			t.Errorf("the replayed conversation is missing %q:\n%s", want, hints)
+		}
+	}
+}
+
+// TestAResumingBackendIsNotAlsoHandedTheReplay: a backend that continues
+// its OWN conversation already has these turns; replaying them on top
+// would state everything twice, once as history and once as its own
+// memory, and pay for the larger prompt every turn after a restart.
+func TestAResumingBackendIsNotAlsoHandedTheReplay(t *testing.T) {
+	seed := []Message{
+		{Author: AuthorUser, Content: "drop the leaked pty fd"},
+		{Author: AuthorAssistant, Content: "Added pty.go."},
+	}
+	if got := freeformReplayHint(seed, true); got != "" {
+		t.Errorf("a resuming backend was handed a replay:\n%s", got)
+	}
+	got := freeformReplayHint(seed, false)
+	if !strings.Contains(got, "them: drop the leaked pty fd") || !strings.Contains(got, "you: Added pty.go.") {
+		t.Errorf("the replay does not read as the session's own conversation:\n%s", got)
+	}
+	if freeformReplayHint(nil, false) != "" {
+		t.Error("an empty conversation produced a replay hint")
+	}
+}
+
+// TestTheReplayKeepsTheNewestTurnsWithinItsBudget: a long card can hold
+// hundreds of turns, and a replay that grows without limit makes every
+// turn after a restart the most expensive one of the card. What survives
+// the budget is the newest end — the work in front of the person — and the
+// reader is told the rest was dropped rather than left to assume it was
+// all there.
+func TestTheReplayKeepsTheNewestTurnsWithinItsBudget(t *testing.T) {
+	var seed []Message
+	for i := range 200 {
+		seed = append(seed,
+			Message{Author: AuthorUser, Content: fmt.Sprintf("turn %d: %s", i, strings.Repeat("x", 80))},
+			Message{Author: AuthorAssistant, Content: fmt.Sprintf("done %d", i)})
+	}
+	got := freeformReplayHint(seed, false)
+	if len(got) > freeformReplayBudget*2 {
+		t.Errorf("the replay is %d bytes for a %d-byte budget", len(got), freeformReplayBudget)
+	}
+	if !strings.Contains(got, "done 199") {
+		t.Errorf("the newest turn was dropped:\n%s", got[:min(len(got), 400)])
+	}
+	if strings.Contains(got, "turn 0:") {
+		t.Error("the oldest turn survived a budget that should have dropped it")
+	}
+	if !strings.Contains(got, "earlier turns are not replayed") {
+		t.Error("the replay does not say that it is partial")
+	}
+}
+
+// transcriptText flattens a snapshot's transcript for assertions.
+func transcriptText(snap Snapshot) string {
+	var b strings.Builder
+	for _, m := range snap.Transcript {
+		b.WriteString(string(m.Author) + ": " + m.Content + "\n")
+	}
+	return b.String()
+}
+
+// TestTheReplayCarriesWhatWasSaidAndNotWhatGummiDid: the transcript keeps
+// tool lines for the reader, and two kinds live there — the backend's own
+// calls and gummi's own activity notes. A restored row cannot tell them
+// apart, and the pty drive caught the consequence: "you ran: worktree
+// committed", which the session did not do and which contradicts the
+// contract telling it gummi commits for it.
+func TestTheReplayCarriesWhatWasSaidAndNotWhatGummiDid(t *testing.T) {
+	seed := []Message{
+		{Author: AuthorUser, Content: "drop the leaked pty fd"},
+		{Author: AuthorTool, Content: "write  pty.go"},
+		{Author: AuthorAssistant, Content: "Added pty.go."},
+		{Author: AuthorTool, Content: "worktree committed: FF-001: turn checkpoint"},
+	}
+	got := freeformReplayHint(seed, false)
+	for _, want := range []string{"them: drop the leaked pty fd", "you: Added pty.go."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the replay drops what was said (%q):\n%s", want, got)
+		}
+	}
+	for _, unwanted := range []string{"worktree committed", "write  pty.go"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("the replay carries %q, which is not conversation:\n%s", unwanted, got)
 		}
 	}
 }
