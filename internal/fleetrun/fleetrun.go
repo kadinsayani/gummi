@@ -301,7 +301,7 @@ func Fold(in Input) Report {
 		}
 	}
 	rep.PeakLanes, rep.Busiest, rep.BusiestLen, rep.BusiestAgent =
-		concurrency(rep.Lanes, in.Window, busiestLen(in.Window))
+		concurrency(rep.Lanes, in.Window, rep.RateSpan, busiestLen(in.Window))
 	rep.Top = topCards(rep.Lanes, 3)
 	rep.AllTime = allTime(in.Rows)
 	return rep
@@ -610,7 +610,14 @@ func windowBuckets(in Input) (stage, model []cardrun.Bucket) {
 // the most agent time. The sweep counts a session as running over its
 // half-open interval, so a lane ending exactly as another starts is one
 // lane, not two.
-func concurrency(lanes []Lane, w Window, bucket time.Duration) (peak int, busiest time.Time, busiestLen, busiestAgent time.Duration) {
+//
+// The stretches are read inside the window. An all-history window (no
+// From) starts where the history does — history before its end, the
+// span the burn rate is read over — and its stretches fall on the
+// bucket's own grid (whole days, whole hours), the first of them clipped
+// to where the history starts: a busiest day is never reported as
+// beginning before anything ran.
+func concurrency(lanes []Lane, w Window, history, bucket time.Duration) (peak int, busiest time.Time, busiestLen, busiestAgent time.Duration) {
 	type ev struct {
 		at time.Time
 		up bool
@@ -643,8 +650,16 @@ func concurrency(lanes []Lane, w Window, bucket time.Duration) (peak int, busies
 	if bucket <= 0 {
 		return peak, busiest, busiestLen, busiestAgent
 	}
-	for from := w.From; from.Before(w.To); from = from.Add(bucket) {
-		to := from.Add(bucket)
+	start, grid := w.From, w.From
+	if start.IsZero() {
+		if history <= 0 {
+			return peak, busiest, busiestLen, busiestAgent
+		}
+		start = w.To.Add(-history)
+		grid = start.Truncate(bucket)
+	}
+	for at := grid; at.Before(w.To); at = at.Add(bucket) {
+		from, to := later(at, start), at.Add(bucket)
 		if to.After(w.To) {
 			to = w.To
 		}

@@ -349,6 +349,32 @@ func TestAnAllHistoryRateRunsFromFirstActivity(t *testing.T) {
 	}
 }
 
+// TestAnAllHistoryBusiestStretchStartsInTheHistory: an all-history window
+// reads its busiest stretch in whole days, and the first day is clipped
+// to where the history begins — a stretch reported from midnight, hours
+// before anything ran, would say the board was busy while it was empty.
+func TestAnAllHistoryBusiestStretchStartsInTheHistory(t *testing.T) {
+	c := wsCard(7, "today only")
+	start := base.Add(90 * time.Minute) // 11:30, the history's first activity
+	now := base.Add(3 * time.Hour)
+	c.Events = append(c.Events,
+		ev(c, domain.StageImplement, state.EventStageEnter, enterFor("implementer"), start),
+		ev(c, domain.StageImplement, state.EventStageExit, exitPayloadFor(2), start.Add(30*time.Minute)),
+	)
+	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Events: c.Events})
+
+	rep := Fold(Input{Now: now, Window: Window{To: now}, Cards: []Card{c}})
+	if !rep.Busiest.Equal(start) {
+		t.Errorf("busiest from %v, want the history's start %v", rep.Busiest, start)
+	}
+	if rep.BusiestLen != now.Sub(start) {
+		t.Errorf("busiest stretch %v long, want the history so far (%v)", rep.BusiestLen, now.Sub(start))
+	}
+	if rep.BusiestAgent != 30*time.Minute {
+		t.Errorf("busiest agent time %v, want 30m", rep.BusiestAgent)
+	}
+}
+
 // TestTokensAreChargedWhereTheCreditsAre pins the token side to the
 // credit side at both scales. The window's tokens must cover exactly
 // the spend its credit figure covers — a pass that started before the
