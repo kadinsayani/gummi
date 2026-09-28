@@ -248,6 +248,19 @@ func (m *Shell) syncWebLive() {
 	}
 }
 
+// toastDetached says on every open page what the status bar said while a
+// detached intent's flow went on: the request that started it has
+// answered already, so its outcome can no longer carry the sentence (a
+// read that took longer than the request waited, ending in "can't go on
+// yet — …"). A notice message reports itself (emitChanges); this is for
+// the notice a handler set in passing.
+func (m *Shell) toastDetached(inner tea.Msg, before noticeMsg) {
+	if _, ok := inner.(noticeMsg); ok || m.notice == before || m.notice.text == "" {
+		return
+	}
+	m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(m.notice.id), Text: m.notice.text, Err: m.notice.isErr})
+}
+
 // watchCard records that a page read card f, so the probe watches its
 // branch head and artifact for writes the store never hears of.
 func (m *Shell) watchCard(f domain.Feature) {

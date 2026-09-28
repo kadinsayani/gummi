@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -362,5 +363,52 @@ func TestAQueuedCardIsCountedApartAndSaysWhy(t *testing.T) {
 		if want := "queued — the autopilot lane is busy with FD-001"; r.Running.Why != want {
 			t.Errorf("why = %q, want %q", r.Running.Why, want)
 		}
+	}
+}
+
+// What the status bar says once a slow read comes back — after the request
+// that sent the line has answered — reaches the open pages as a toast: the
+// request's own outcome can no longer carry it.
+func TestANoticeFromADetachedFlowIsToasted(t *testing.T) {
+	gate := make(chan struct{})
+	var release sync.Once
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "INTENT: <one of the words above>") {
+			<-gate
+			return []agent.Event{{Kind: agent.EventError, Err: errors.New("model unavailable")}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
+	}}
+	t.Cleanup(func() { release.Do(func() { close(gate) }) })
+	b, log, _, f, _ := headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	withWorktree(t, b, f)
+	ctx := context.Background()
+	if _, err := b.intent(ctx, f.ID, webInput{}, 20*time.Millisecond, func(m *Shell, r featureRow) (tea.Cmd, error) {
+		return m.routeReentry(r, "bounce", "the persistence step was never in the spec"), nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	log.mu.Lock()
+	mark := len(log.all)
+	log.mu.Unlock()
+	release.Do(func() { close(gate) })
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		log.mu.Lock()
+		var said string
+		for _, c := range log.all[mark:] {
+			if c.Kind == webapi.ChangeToast && strings.Contains(c.Text, "could not read the card") {
+				said = c.Text
+			}
+		}
+		log.mu.Unlock()
+		if said != "" {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the read failed after the request returned, and no page was told: %+v", log.all[mark:])
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }

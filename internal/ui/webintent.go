@@ -217,7 +217,10 @@ func (m *Shell) updateTracked(tm webTrackedMsg) (tea.Model, tea.Cmd) {
 	t := tm.intent
 	defer t.add(-1)
 	if t.detached {
-		return m.Update(tm.inner)
+		before := m.notice
+		model, cmd := m.Update(tm.inner)
+		m.toastDetached(tm.inner, before)
+		return model, cmd
 	}
 	prev := m.intent
 	m.intent = t
