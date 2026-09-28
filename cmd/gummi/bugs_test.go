@@ -17,7 +17,7 @@ func TestRenderBugProposals(t *testing.T) {
 	res := engine.BugIngestResult{
 		Source: "github",
 		Proposals: []domain.BugProposal{
-			{Title: "Login loops", OneLiner: "SSO bounce", Severity: domain.SeverityHigh, ExternalRef: "https://x/42"},
+			{Title: "Login loops", OneLiner: "SSO bounce", Severity: domain.SeverityHigh, ExternalRef: "https://x/42", Author: "octo"},
 			{Title: "Typo in footer"},
 		},
 		Skipped: []engine.SkippedBug{{Proposal: domain.BugProposal{Title: "old one", ExternalRef: "https://x/1"}, LocalID: "BG-041"}},
@@ -31,6 +31,7 @@ func TestRenderBugProposals(t *testing.T) {
 		"SSO bounce",
 		"severity high",
 		"https://x/42",
+		"by @octo",
 		"2. Typo in footer",
 		"Skipped 1 already on the board:",
 		"→ BG-041  old one",

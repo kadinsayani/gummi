@@ -407,6 +407,9 @@ func TestGitHubSourceFetchIssue(t *testing.T) {
 	if p.State != "open" || strings.Join(p.Labels, ",") != "bug,P1" {
 		t.Errorf("state/labels = %q %v", p.State, p.Labels)
 	}
+	if p.Author != "a" {
+		t.Errorf("author = %q, want the login gh returned", p.Author)
+	}
 	if p.Report.Reproduction != "1. log in" {
 		t.Errorf("body not split: %+v", p.Report)
 	}

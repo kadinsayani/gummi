@@ -87,6 +87,9 @@ type BugProposal struct {
 	// reported to the person, never applied for them.
 	State  string
 	Labels []string
+	// Author is who opened the issue (its login), for display beside the
+	// reference; empty when the source does not say. Not persisted either.
+	Author string
 	// Body is the source's raw text — an issue body as written — for a
 	// surface that shows it verbatim before it is parsed into Report.
 	Body string

@@ -216,6 +216,7 @@ func proposalFor(is ghIssue) (domain.BugProposal, bool) {
 		Body:        is.Body,
 		State:       strings.ToLower(is.State),
 		Labels:      labels,
+		Author:      strings.TrimSpace(is.Author.Login),
 	}, true
 }
 

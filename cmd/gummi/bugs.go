@@ -275,6 +275,9 @@ func renderBugProposals(w io.Writer, res engine.BugIngestResult) {
 		if p.ExternalRef != "" {
 			tags = append(tags, clean(p.ExternalRef))
 		}
+		if p.Author != "" {
+			tags = append(tags, "by @"+clean(p.Author))
+		}
 		if len(tags) > 0 {
 			fmt.Fprintf(w, "      [%s]\n", strings.Join(tags, " · "))
 		}
