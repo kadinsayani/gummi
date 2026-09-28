@@ -374,7 +374,11 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 			m.notice = noticeMsg{text: string(id) + " " + noun + " critique escalated after " + itoa(maxRounds) + " rounds", isErr: true}
 			return nil
 		}
-		m.raiseEscalation(id, noun+" critique finished with no clear verdict — review it manually")
+		// the verdict gatepolicy could not act on is not always an unclear
+		// one: a pass gummi floored (a check the critique ran failed)
+		// reaches here as fail or blocked, and saying "no clear verdict"
+		// beside the reviewer's own "VERDICT: pass" read as a bug
+		m.raiseEscalation(id, noun+" "+critiqueVerdictWords(sessionVerdict(snap), snap.VerdictFloorReason)+" — review it manually")
 		return nil
 	}
 }
@@ -584,7 +588,7 @@ func unsettledCritique(snap engine.Snapshot) bool {
 		return false
 	}
 	v := sessionVerdict(snap)
-	return v == verdictChanges || v == verdictUnclear
+	return v != verdictPass
 }
 
 // unsettledGateReason is gateReason's wording for such a stop: what the
@@ -596,7 +600,7 @@ func unsettledGateReason(stage domain.Stage, v reviewVerdict) string {
 	if v == verdictChanges {
 		return string(stage) + " critique asked for changes — nothing has acted on them"
 	}
-	return string(stage) + " critique gave no clear verdict — review it manually"
+	return string(stage) + " " + critiqueVerdictWords(v, "") + " — review it manually"
 }
 
 // verifyGateReason is what a clean verify asks the reader to do, in the

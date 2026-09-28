@@ -301,7 +301,11 @@ func (in nextInput) finished() bool {
 // The predicate is the verify arm's, minus the verify-only verdicts: a
 // critique submits pass or changes, never fail/blocked.
 func critiqueUnsettled(in nextInput) bool {
-	return in.verdict == verdictChanges || (in.verdict == verdictUnclear && in.escalated)
+	// a pass gummi floored (a check the critique ran failed) reaches here
+	// as fail or blocked: that is not a critique that passed, whatever the
+	// reviewer wrote, and the row under it must not say it did
+	return in.verdict == verdictChanges || in.verdict == verdictFail || in.verdict == verdictBlocked ||
+		(in.verdict == verdictUnclear && in.escalated)
 }
 
 // critiqueVerdict names what the critique behind an unsettled gate
@@ -312,8 +316,23 @@ func critiqueUnsettled(in nextInput) bool {
 // name different verdicts — and the advance row underneath, which says
 // only that crossing overrules the critique, never has to.
 func critiqueVerdict(in nextInput) string {
-	if in.verdict == verdictChanges {
+	return critiqueVerdictWords(in.verdict, in.verdictFloorReason)
+}
+
+// critiqueVerdictWords is critiqueVerdict's sentence for a verdict and
+// the reason gummi floored it, if it did — shared with the loop's own
+// escalation (reviewloop.go), so the gate's reason, its question and the
+// rows under it name one verdict. A pass floored by a failing check used
+// to be reported as "no clear verdict" beside a reviewer's plain
+// "VERDICT: pass" and a row saying the critique passed.
+func critiqueVerdictWords(v reviewVerdict, floor string) string {
+	switch {
+	case v == verdictChanges:
 		return "critique asked for changes"
+	case (v == verdictFail || v == verdictBlocked) && floor != "":
+		return "critique was overruled — " + floor
+	case v == verdictFail || v == verdictBlocked:
+		return "critique found blocking problems"
 	}
 	return "critique gave no clear verdict"
 }
