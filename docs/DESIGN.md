@@ -1130,6 +1130,13 @@ for the closed case — those two records already exist and are already
 durable; what has never existed is a record of a decision that is still
 open, which is why an unanswered `ask_user` evaporates when the process
 exits and why the inbox has to be reconstructed by inference at startup.
+A stage that could not run (its session errored or never started) opens
+one of kind `failure`; like a budget stop it has no answer event, and
+what closes it is the stage running again. Its answers are a retry,
+another profile when the board has one, and "stop here", which takes the
+card out of the needs-you queue and leaves the failure on record; the
+same failure raised again with nothing run in between is the one stop
+and writes nothing new.
 
 Rules that make the control safe:
 
