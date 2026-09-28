@@ -459,26 +459,35 @@ func TestCardActionsForSessionState(t *testing.T) {
 		name    string
 		sess    engine.SessionState
 		hasPaus bool // pause id expected
-		hasDeps bool // deps id expected
+		hasDeps bool // deps on p expected (p pauses while a stage session exists)
 	}{
 		{"no session offers deps not pause", "", false, true},
-		{"queued session offers pause not deps", engine.StateQueued, true, false},
-		{"running session offers pause not deps", engine.StateRunning, true, false},
-		{"paused session offers pause not deps", engine.StatePaused, true, false},
+		{"queued session offers pause, and deps only from the list", engine.StateQueued, true, false},
+		{"running session offers pause, and deps only from the list", engine.StateRunning, true, false},
+		{"paused session offers pause, and deps only from the list", engine.StatePaused, true, false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			in := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: c.sess}
 			r := cardRow(domain.KindFeature, domain.StageImplement, false, true)
 			acts := cardActionsFor(in, r)
-			var gotPause, gotDeps bool
+			var gotPause, gotDeps, anyDeps bool
 			for _, a := range acts {
 				if a.id == "pause" {
 					gotPause = true
 				}
-				if a.id == "deps" {
+				if a.id == "deps" && a.key == "p" {
 					gotDeps = true
 				}
+				if a.id == "deps" {
+					anyDeps = true
+				}
+			}
+			// the picker itself is reachable in every one of these states:
+			// a card at its design gate still holds its finished session,
+			// and that gate is where a plan finds out what it waits on
+			if !anyDeps {
+				t.Error("no dependencies entry at all")
 			}
 			if gotPause != c.hasPaus {
 				t.Errorf("pause present = %v, want %v", gotPause, c.hasPaus)

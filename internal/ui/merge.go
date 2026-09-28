@@ -13,6 +13,16 @@ import (
 	"github.com/morphis/gummi/internal/worktree"
 )
 
+// landConflictMsg reports a landing git refused on conflicts with the
+// base. Update records the files (Shell.landConflicts) so the card's
+// decision leads with the rebase that resolves them instead of the
+// landing that just failed, and shows the notice.
+type landConflictMsg struct {
+	id     domain.FeatureID
+	files  []string
+	notice noticeMsg
+}
+
 // mergeReadyMsg carries a squash merge that passed its preconditions and
 // awaits the user's commit message, or the guard error that stops it.
 // thenDone marks a merge of a card that is AT verify: landing it also
@@ -165,7 +175,18 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 			if errors.As(err, &ce) {
 				// ce carries git-derived file names; sanitize like every
 				// other notice before it reaches the terminal.
-				return noticeMsg{text: sanitize(string(f.ID) + ": " + ce.Error() + " — rebase (r) to resolve, then retry"), isErr: true}
+				//
+				// The decision then leads with the rebase that resolves
+				// them (landConflictMsg), and the notice names the act, not
+				// a key: the web face shows this sentence too.
+				files := make([]string, 0, len(ce.Files))
+				for _, f := range ce.Files {
+					files = append(files, sanitize(f))
+				}
+				return landConflictMsg{id: f.ID, files: files, notice: noticeMsg{
+					text:  sanitize(string(f.ID) + ": " + ce.Error() + " — rebase it onto " + m.baseBranch(f) + " to resolve them, then land again"),
+					isErr: true, id: f.ID,
+				}}
 			}
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

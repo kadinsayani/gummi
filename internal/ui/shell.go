@@ -158,6 +158,12 @@ type Shell struct {
 	// that ends without resolving puts it back, since that decision still
 	// stands.
 	rebaseHeld map[domain.FeatureID]attnItem
+	// landConflicts are the files a card's last landing conflicted in
+	// (merge.go's squashMergeFeature), so its decision offers the rebase
+	// that resolves them rather than the landing that just failed. A
+	// rebase clears it (rebaseFeature); one that resolves nothing sets it
+	// again (rebaseSettled).
+	landConflicts map[domain.FeatureID][]string
 
 	// bounceNotes holds the line the composer aimed at a decision's
 	// bounce answer: the card is rewound now, but its reborn work stage
@@ -2100,6 +2106,15 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.notice = noticeMsg{text: msg.note}
 		m.inbox.remove(msg.id)
 		return m, tea.Batch(m.loadRows, m.autopilotRun(msg.id, msg.to))
+
+	case landConflictMsg:
+		// the landing hit conflicts: the decision leads with the rebase
+		// that resolves them (merge.go's landConflictMsg)
+		if m.landConflicts == nil {
+			m.landConflicts = map[domain.FeatureID][]string{}
+		}
+		m.landConflicts[msg.id] = msg.files
+		return m.update(msg.notice)
 
 	case sentBackMsg:
 		// the send-back landed; on autopilot the stage it reached runs

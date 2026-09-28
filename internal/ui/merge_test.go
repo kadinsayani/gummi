@@ -498,8 +498,12 @@ func TestSquashMergeConflictNoticeNamesFile(t *testing.T) {
 	}
 	typeMessage(t, m, "FD-001: rebase me")
 	m = press(t, m, tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if !m.notice.isErr || !strings.Contains(m.notice.text, "README.md") || !strings.Contains(m.notice.text, "rebase (r)") {
+	if !m.notice.isErr || !strings.Contains(m.notice.text, "README.md") || !strings.Contains(m.notice.text, "rebase it onto main") ||
+		strings.Contains(m.notice.text, "(r)") {
 		t.Fatalf("conflict notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if m.landConflicts["FD-001"] == nil {
+		t.Error("the conflict was not recorded for the decision")
 	}
 	// main is unwound and clean
 	if out := gitOut(t, root, "status", "--porcelain", "--untracked-files=no"); out != "" {

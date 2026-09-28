@@ -1018,6 +1018,10 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 // leaving the worktree untouched) it offers the agent hand-off — or,
 // with no engine, reports the conflicted files to resolve by hand.
 func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
+	// the rebase is the answer to a landing's conflicts: once it is under
+	// way the decision stops leading with it (an agent rebase that
+	// resolves nothing puts it back — rebase.go's rebaseSettled)
+	delete(m.landConflicts, f.ID)
 	return m.rebaseFeatureLocked(f)
 }
 

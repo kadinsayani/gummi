@@ -67,6 +67,10 @@ func stopForward(in nextInput) (fwd domain.Stage, rerun bool, blocked, label str
 		blocked = "open diff comments"
 	case len(in.undrafted) > 0:
 		blocked = "undrafted sections"
+	case in.stage == domain.StagePlan && len(in.depBlockers) > 0:
+		blocked = waitOnDeps(in).why
+	case in.stage == domain.StageVerify && in.stackBlocker != "":
+		blocked = string(in.stackBlocker) + " has to land first — it sits below this card in its stack"
 	}
 	acts := stageActions(in)
 	for _, a := range acts {

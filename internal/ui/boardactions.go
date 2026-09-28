@@ -271,6 +271,14 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "deps":
+		// the keyless dependency entry (cardactions.go): p pauses while a
+		// stage session exists, so the menu is how the picker is reached
+		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
+			return m.openDeps(r.F)
+		}
+		return nil
 	case "newbug":
 		if r, ok := m.selected(); ok {
 			return m.openBugFromCard(r)
@@ -349,6 +357,21 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 		}
 	case "duplicate":
 		return m.confirmDuplicate()
+	case "wait":
+		// the row a held gate leads with (nextsteps.go's waitOnDeps, the
+		// stack's "lands after"): nothing to do but wait, and it says what
+		// for rather than answering with silence
+		if r, ok := m.selected(); ok {
+			m.notice = noticeMsg{text: string(r.F.ID) + ": " + a.label + " — " + a.why, id: r.F.ID}
+		}
+		return nil
+	case "deps":
+		// the dependency picker, reached from the list while a stage
+		// session exists — where p pauses instead (cardactions.go)
+		if r, ok := m.selected(); ok {
+			m.clearTransientNotice()
+			return m.openDeps(r.F)
+		}
 	case "newbug":
 		// keyless by construction (closedActions), so the a.key shortcut
 		// above cannot catch it — the same shape topup has.

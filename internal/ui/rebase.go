@@ -125,6 +125,14 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 			// new stop that replaces it
 			m.inbox.put(held)
 			m.logPark(id, state.ParkReasonNeedsYou, text)
+			if msg.f.Stage == domain.StageVerify {
+				// a landing from here would hit the same conflicts, so
+				// the decision leads with the rebase again
+				if m.landConflicts == nil {
+					m.landConflicts = map[domain.FeatureID][]string{}
+				}
+				m.landConflicts[id] = []string{}
+			}
 		} else {
 			m.raiseEscalation(id, text)
 		}

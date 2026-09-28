@@ -298,6 +298,15 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"deps", "p", "dependencies", "open the dependency picker for this card", false,
 			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy,
 		},
+		// The same picker while a stage session exists, where p pauses: a
+		// card at its design gate still holds its finished session, and
+		// the gate is exactly where a plan finds out what the card has to
+		// wait for. Keyless, so p keeps its one meaning there; the list
+		// (and the menu built from it) is the way in.
+		{
+			"deps", "", "dependencies", "open the dependency picker for this card", false,
+			in.sess != "" && in.sess != engine.StateInteractive && !in.freeformBusy && !doneStage,
+		},
 		{
 			// the label is the interface, so it takes the card's own noun
 			// for its document the way the why-line beneath it always has

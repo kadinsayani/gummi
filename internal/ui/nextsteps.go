@@ -192,6 +192,22 @@ type nextInput struct {
 	corrective int
 	// droppedBy names the goal that dropped the card, empty otherwise.
 	droppedBy domain.FeatureID
+
+	// --- answers the server would refuse --------------------------------
+	//
+	// Each of these names a reason the gate's forward answer cannot be
+	// taken right now, so the picker says so instead of offering a row
+	// that comes back refused.
+
+	// depBlockers are the unmet dependencies that hold the design gate
+	// shut (featureRow.DepBlockers).
+	depBlockers []domain.FeatureID
+	// stackBlocker is the unlanded card below this one in its stack,
+	// which has to land first (stack.LandBlocker).
+	stackBlocker domain.FeatureID
+	// landConflicts are the files the last landing attempt conflicted
+	// in; non-nil once a landing hit conflicts, until a rebase clears it.
+	landConflicts []string
 }
 
 // closed reports whether the card has ended — landed, or at done by any
@@ -387,6 +403,9 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		corrective:       m.round(r.F.ID, domain.RoundKindCorrective),
 		droppedBy:        r.F.GoalID,
 		endedAt:          doneAt(r.History),
+		depBlockers:      r.DepBlockers,
+		stackBlocker:     m.stackLandBlocker(r.F.ID),
+		landConflicts:    m.landConflicts[r.F.ID],
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
 		in.attn, in.escalated = it.Kind, it.Escalated
@@ -437,6 +456,29 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	}
 	in.verdict = escalatedGateVerdict(in.verdict, in.escalated)
 	return in
+}
+
+// stackLandBlocker is the unlanded card below id in its stack — the one
+// stack.LandBlocker names, and merge.go's landing refuses on — read from
+// the board's own per-card stack rows rather than asked of the engine on
+// the render path. "" when id is at the bottom, in no stack, or every
+// card below it has landed.
+func (m *Shell) stackLandBlocker(id domain.FeatureID) domain.FeatureID {
+	me, ok := m.stackRows[id]
+	if !ok || me.Pos <= 1 {
+		return ""
+	}
+	var blocker domain.FeatureID
+	pos := me.Pos
+	for other, sr := range m.stackRows {
+		if sr.ID != me.ID || sr.Pos >= me.Pos || sr.Landed {
+			continue
+		}
+		if blocker == "" || sr.Pos < pos {
+			blocker, pos = other, sr.Pos
+		}
+	}
+	return blocker
 }
 
 // escalatedGateVerdict refuses to read an escalated gate as a clean pass.
@@ -862,6 +904,13 @@ func stageActions(in nextInput) []nextAction {
 			// way forward: it leads, and the rest still follows it.
 			return append(append([]nextAction{*b}, talk...), stopHere(in)...)
 		}
+		if finished && len(in.depBlockers) > 0 && in.kind != domain.KindGoal {
+			// an unmet dependency holds the gate the same way: approving
+			// is refused until it lands (engine.Advance), so the row that
+			// leads says what the card waits on instead of offering the
+			// approval that would come back refused
+			return append(append([]nextAction{waitOnDeps(in)}, talk...), stopHere(in)...)
+		}
 		// §3.2: approve's arm is also advance — it moves the card into
 		// implement and stops there, the same promise-only-what-happens
 		// fix as §3.1's todo row above. "hands the card to the agent
@@ -1142,13 +1191,61 @@ func stageActions(in nextInput) []nextAction {
 				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
 			}, stopOrResume(in)...)
 		}
-		return append([]nextAction{
-			gate,
-			keep,
-			sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
-		}, stopOrResume(in)...)
+		if in.stackBlocker != "" {
+			// the landing would be refused (merge.go): this card's branch
+			// carries the unlanded card below it, so it lands after that
+			// one does — said on the row that would have been the landing
+			gate = nextStep("wait", "", "lands after "+string(in.stackBlocker),
+				"it sits on "+string(in.stackBlocker)+" in its stack — "+string(in.stackBlocker)+
+					" lands first, or its commits would ride in under this card")
+		}
+		acts := []nextAction{gate, keep, sendBackStep("bounce", "b", "not convinced — your line goes back with it")}
+		if in.landConflicts != nil {
+			// the last landing hit conflicts with the base: landing again
+			// would hit them again, so the rebase that resolves them leads
+			acts = append([]nextAction{rebaseToLand(in)}, acts...)
+		}
+		return append(acts, stopOrResume(in)...)
 	}
 	return nil
+}
+
+// waitOnDeps is the row a design gate held shut by unmet dependencies
+// leads with: what it waits on, and that the gate opens by itself once
+// they land. Taking it answers nothing; it says so (runCardAction's
+// "wait").
+func waitOnDeps(in nextInput) nextAction {
+	names := make([]string, 0, len(in.depBlockers))
+	for _, id := range in.depBlockers {
+		names = append(names, string(id))
+	}
+	list := joinList(names)
+	verb := "has"
+	if len(names) > 1 {
+		verb = "have"
+	}
+	return nextStep("wait", "", "waits on "+list,
+		list+" "+verb+" not landed yet — approving is refused until "+pronounFor(len(names))+" do; the gate opens then")
+}
+
+// pronounFor is "it" for one, "they" for more.
+func pronounFor(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "they"
+}
+
+// rebaseToLand is the row a verify gate leads with once a landing hit
+// conflicts with the base: the rebase that resolves them, with the agent
+// offered when git cannot.
+func rebaseToLand(in nextInput) nextAction {
+	why := "the last landing conflicted with " + in.landBase()
+	if len(in.landConflicts) > 0 {
+		why += " in " + joinList(in.landConflicts)
+	}
+	return nextStep("rebase", "r", "rebase onto "+in.landBase(),
+		why+" — rebase first; an agent can resolve what git cannot")
 }
 
 // closedActions is the answer set for a card that has ended.
