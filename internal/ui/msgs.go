@@ -744,10 +744,7 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 		// the deterministic citation/coverage floor (internal/verifydoc)
 		// failed — the document stays at verify rather than reaching done
 		// on a broken citation or an unmapped brief question.
-		rep := res.DocumentReport
-		text := fmt.Sprintf("%s: document floor failed — %d open thread(s), %d broken citation(s), %d unmapped question(s)",
-			id, rep.OpenThreads, len(rep.Citations), len(rep.Coverage))
-		return blockedMsg(actor, id, text)
+		return blockedMsg(actor, id, docFloorRefusal(res.Feature, res.DocumentReport))
 	case engine.StatusNeedsMerge:
 		// verify→done is the user's "this feature is done" decision: the
 		// merge flow (user-written message → squash merge) finishes the

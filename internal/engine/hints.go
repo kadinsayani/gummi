@@ -6,6 +6,8 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/verifydoc"
 )
 
 // The artifact section lists the contract states so an agent never has
@@ -259,6 +261,8 @@ func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []
 		h := []string{contractHint(f, specPath, agent.RoleReviewer, flavorCritique), critiqueHint(f)}
 		if f.Kind != domain.KindResearch {
 			h = append(h, worktreeBoundaryHint(scratch))
+		} else {
+			h = append(h, researchFloorHint(f))
 		}
 		if gate := gateAskHint(f); gate != "" {
 			h = append(h, gate)
@@ -281,11 +285,19 @@ func stageHints(f domain.Feature, specPath, scratch string, flavor runFlavor) []
 	case domain.StageImplement:
 		hints = append(hints, buildHints(f)...)
 	case domain.StageVerify:
-		if f.Kind == domain.KindGoal {
+		switch f.Kind {
+		case domain.KindGoal:
 			hints = append(hints, goalVerifyHint())
-		} else {
+		case domain.KindResearch:
+			hints = append(hints, researchVerifyHint())
+		default:
 			hints = append(hints, verifyHint(f.Kind))
 		}
+	}
+	// Every research stage writes toward one deterministic floor, and a
+	// rule a stage is never told is one it meets only as a refusal.
+	if f.Kind == domain.KindResearch {
+		hints = append(hints, researchFloorHint(f))
 	}
 	// An adopted card's every stage opens onto work it did not write, and
 	// the contract above was written for a branch that started empty. This
@@ -743,6 +755,59 @@ You run with no worktree and cannot modify the artifact: record your
 findings in your final message and submit a verdict via the
 submit_verdict tool (pass or changes), exactly once, instead of writing
 to the document.`)
+}
+
+// researchFloorHint states the research document's deterministic floor
+// (internal/verifydoc) to every stage that writes toward it.
+//
+// The floor decides whether a research card may be marked done, and it
+// used to be stated nowhere a stage could read: a real drive's verify
+// passed, "mark done" was refused for five unmapped questions, and two
+// re-runs "mapped" them with notes citing Findings — an answer in
+// substance that the floor, by design, does not read. The rule is the
+// same sentence the refusal and the report print (verifydoc.CoverageRule),
+// so the stage and the person are told one rule.
+func researchFloorHint(f domain.Feature) string {
+	l := spec.LayoutOf(&f)
+	return strings.TrimSpace(fmt.Sprintf(`
+The research document is held to a deterministic floor before it can
+be marked done, checked by gummi, not by a reviewer's judgement:
+  - no open `+"`%%%% @user`"+` thread;
+  - every `+"`path:line`"+` / `+"`path:start-end`"+` citation under
+    `+"`## %s`"+` resolves against the repository (and a fenced snippet
+    right after one still matches the file);
+  - coverage: %s.
+Whichever stage finishes the document, leave it meeting all three.`, l.Evidence, verifydoc.CoverageRule(l)))
+}
+
+// researchVerifyHint is the research verify contract. A research card's
+// verify used to be served the FEATURE verify hint — gummi-checks, a
+// branch, INV- lines, "ready to land on main" — for a document with none
+// of those, and nothing in it about the one floor its verify is actually
+// held to.
+func researchVerifyHint() string {
+	return strings.TrimSpace(`
+Stage: Verify (autonomous) — the research document. There is no
+branch and nothing to build or run: what you verify is the document.
+Judge whether it answers its brief — every finding grounded in a
+citation that says what the finding claims, every question answered,
+and the direction following from the evidence rather than asserted.
+gummi runs the document's deterministic floor itself (stated below)
+and puts its report as it stands in your kickoff; when this stage
+ends it runs the floor again, and a document that fails it fails
+verify whatever your verdict says. If the report lists unmapped
+questions or broken citations, fix the document with
+spec_replace_section — quote each question in a slice's requirements
+or give it an Out of scope line, correct each citation — and record
+what you changed in the Review section.
+You are autonomous: no one can answer questions, so never end with
+one. End your final message with a verdict on its own line, exactly
+one of:
+  VERDICT: pass       — the document answers its brief and meets the floor
+  VERDICT: fail       — it does not; name what is missing
+  VERDICT: blocked    — the repository cannot be read well enough to judge
+gummi parses this exact line; without it the stage escalates to the
+human as unclear.`)
 }
 
 // reviewHint is the Review stage contract. Review is shared by both

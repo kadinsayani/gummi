@@ -260,3 +260,55 @@ func TestDiagnosisCitationsStillResolve(t *testing.T) {
 		t.Fatalf("citations = %+v, want one unresolved", r.Citations)
 	}
 }
+
+// TestCoverageIgnoresTypographyNotWording pins the tolerance the coverage
+// match allows and the line it stops at. A real research drive failed the
+// floor twice with every question answered in substance: the questions
+// were numbered and ended in "?", the slices quoted them without either,
+// and one out-of-scope question carried a colon of its own. Those are the
+// same question and must map; a reworded one is not and must not.
+func TestCoverageIgnoresTypographyNotWording(t *testing.T) {
+	doc := "# RS-003: lines\n\n## Questions\n\n" +
+		"- 1. Does **Lines** count a trailing newline as a line?\n" +
+		"- Q2: How  should `Words` treat tabs?\n" +
+		"- Scope: should CRLF be handled?\n" +
+		"- Is the API stable?\n\n" +
+		"## Slices\n\n```yaml\n" +
+		"- title: lines\n  requirements:\n" +
+		"    - does lines count a trailing newline as a line\n" +
+		"    - How should Words treat tabs\n" +
+		"```\n\n" +
+		"## Out of scope\n\n" +
+		"- Scope: should CRLF be handled: the tool only reads Unix text\n" +
+		"- API stability: covered elsewhere\n"
+	r := Check(doc, nil, survey)
+	if len(r.Coverage) != 1 {
+		t.Fatalf("coverage issues = %+v, want exactly the reworded API question", r.Coverage)
+	}
+	if got := r.Coverage[0].Item; got != "Is the API stable?" {
+		t.Errorf("unmapped item = %q, want the verbatim bullet %q", got, "Is the API stable?")
+	}
+}
+
+// TestExplainNamesEachItemAndTheRule is the refusal a person reads: it
+// must say which questions are unmapped and what mapping one means, or
+// the floor is a rule nobody can satisfy without reading the source.
+func TestExplainNamesEachItemAndTheRule(t *testing.T) {
+	doc := "# RS-003: lines\n\n## Questions\n\n- Does Lines count the last line?\n"
+	r := Check(doc, nil, survey)
+	if r.Pass() {
+		t.Fatal("an unmapped question passed the floor")
+	}
+	if got, want := r.Summary(survey), "0 open threads, 0 broken citations, 1 unmapped question"; got != want {
+		t.Errorf("Summary = %q, want %q", got, want)
+	}
+	ex := r.Explain(survey)
+	for _, want := range []string{"Does Lines count the last line?", "## Slices", "requirements", "## Out of scope"} {
+		if !strings.Contains(ex, want) {
+			t.Errorf("Explain does not mention %q:\n%s", want, ex)
+		}
+	}
+	if (Report{}).Explain(survey) != "" {
+		t.Error("a passing report explained something")
+	}
+}

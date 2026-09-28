@@ -221,6 +221,46 @@ func (m *Shell) runDocVerify(f domain.Feature) tea.Cmd {
 	return nil
 }
 
+// docFloorRefusal is what a person is told when a research card's
+// verify→done crossing is refused by the document floor (verifydoc).
+//
+// It used to be the three counts alone — "5 unmapped question(s)" — which
+// named a rule without stating it, so a card whose verify had passed was
+// refused with nothing on any screen saying what "unmapped" meant or how
+// to fix it. This names the first few items and the rule, and says what
+// to do: the document is fixed by the stage that writes it, or by hand.
+func docFloorRefusal(f domain.Feature, rep verifydoc.Report) string {
+	layout := spec.LayoutOf(&f)
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: not done yet — the research document fails its floor (%s)", f.ID, rep.Summary(layout))
+	if n := len(rep.Coverage); n > 0 {
+		const show = 3
+		quoted := make([]string, 0, show)
+		for i, c := range rep.Coverage {
+			if i == show {
+				break
+			}
+			quoted = append(quoted, "“"+sanitize(c.Item)+"”")
+		}
+		fmt.Fprintf(&b, ". Unmapped: %s", strings.Join(quoted, ", "))
+		if n > show {
+			fmt.Fprintf(&b, " (+%d more)", n-show)
+		}
+		fmt.Fprintf(&b, ". Each ## %s bullet must be quoted in a ## Slices row's requirements, or given an ## Out of scope line `- <its text>: <why not>`", layout.Coverage)
+	}
+	if n := len(rep.Citations); n > 0 {
+		fmt.Fprintf(&b, ". Broken citation: %s — %s", sanitize(rep.Citations[0].Citation), sanitize(rep.Citations[0].Reason))
+		if n > 1 {
+			fmt.Fprintf(&b, " (+%d more)", n-1)
+		}
+	}
+	if rep.OpenThreads > 0 {
+		b.WriteString(". Open comments need resolving first")
+	}
+	b.WriteString(" — send it back to have the document fixed, or edit it yourself")
+	return b.String()
+}
+
 // readCitedFiles reads each cited path's lines from root, keyed by the
 // path as cited. A path that would resolve outside root is skipped and
 // never read; an unreadable file is silently dropped — verifydoc reports
@@ -250,10 +290,11 @@ func readCitedFiles(root string, paths []string) map[string][]string {
 type docVerifyDialog struct {
 	feature domain.FeatureID
 	report  verifydoc.Report
+	layout  spec.Layout
 }
 
 func newDocVerifyDialog(f domain.Feature, report verifydoc.Report) *docVerifyDialog {
-	return &docVerifyDialog{feature: f.ID, report: report}
+	return &docVerifyDialog{feature: f.ID, report: report, layout: spec.LayoutOf(&f)}
 }
 
 func (d *docVerifyDialog) ID() string { return "doc-verify" }
@@ -277,10 +318,14 @@ func (d *docVerifyDialog) View(s *theme.Styles, w, h int) string {
 		b.WriteString("\n")
 	}
 	if len(d.report.Coverage) > 0 {
-		b.WriteString(s.Warning.Render("unmapped questions") + "\n")
+		b.WriteString(s.Warning.Render("unmapped "+strings.ToLower(d.layout.Coverage)) + "\n")
 		for _, c := range d.report.Coverage {
 			b.WriteString("  " + s.Error.Render(sanitize(c.Item)) + s.Faint.Render(" — "+sanitize(c.Reason)) + "\n")
 		}
+		// The rule, where the refusal is: a floor nobody can see the
+		// shape of is one a document fails twice before anyone learns it.
+		b.WriteString(s.Faint.Render("  map one by quoting it in a `## Slices` row's requirements,") + "\n")
+		b.WriteString(s.Faint.Render("  or as `- <its text>: <why not>` under `## Out of scope`") + "\n")
 		b.WriteString("\n")
 	}
 	if d.report.OpenThreads > 0 {

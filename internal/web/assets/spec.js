@@ -104,8 +104,13 @@ function noteEl (n, ctx) {
         : h('button', { class: 'rs', type: 'button', testid: 'spec-note-resolve', onclick: () => resolve(n, ctx) }, 'Resolve'),
     h('b', null, `%% @${n.by || n.author}${n.date ? ` (${n.date})` : ''}`),
     h('span', { class: 'tx' }, n.text),
+    // The parser (internal/spec) is the one truth about open and closed:
+    // an agent's "resolved" under a person's comment is its answer, and
+    // only a person's resolution closes a person's comment. So the fold
+    // says "answered" while the note is still open — the gate counts it
+    // open, and the live Resolve button beside it is the way to close it.
     r ? h('span', { class: 'rsby', testid: 'spec-note-resolution' },
-      `resolved by @${r.by || r.author}${r.date ? ` (${r.date})` : ''}${why ? ` — ${why}` : ''}`) : null)
+      `${n.resolved ? 'resolved' : 'answered'} by @${r.by || r.author}${r.date ? ` (${r.date})` : ''}${why ? ` — ${why}` : ''}${n.resolved ? '' : ' · still open until you resolve it'}`) : null)
 }
 
 function checksTable (checks) {

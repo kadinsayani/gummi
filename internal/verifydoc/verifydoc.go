@@ -24,12 +24,18 @@
 //	```
 //
 // Coverage contract: every bullet under the layout's coverage section must
-// be answered — its trimmed text must appear verbatim either in some
-// slice's `requirements` list (`## Slices`, fenced `yaml`) or as the key of
-// an explicit `- key: prose` line under `## Out of scope`.
+// be answered — its text must appear either in some slice's `requirements`
+// list (`## Slices`, fenced `yaml`) or as the key of an explicit
+// `- key: prose` line under `## Out of scope`. The comparison is the
+// bullet's text, not its typography: case, runs of whitespace, a leading
+// question number ("1.", "Q2:"), emphasis and code backticks, and trailing
+// punctuation are ignored (normalize). Nothing looser is: a paraphrase is
+// not a match, because the whole point of the check is that a reader can
+// find each question's answer by searching for the question.
 package verifydoc
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -264,12 +270,31 @@ func findCoverage(artifact string, l spec.Layout) []CoverageIssue {
 
 	var issues []CoverageIssue
 	for _, q := range questions {
-		if answered[q] || outOfScope[q] {
+		k := normalize(q)
+		if answered[k] || outOfScope[k] {
 			continue
 		}
 		issues = append(issues, CoverageIssue{Item: q, Reason: "no slice or out-of-scope line answers it"})
 	}
 	return issues
+}
+
+// questionNumberRe matches the numbering an author puts in front of a
+// question — "1.", "2)", "(3)", "Q4:", "#5" — which a slice's requirement
+// quoting the question may or may not repeat.
+var questionNumberRe = regexp.MustCompile(`^(?:\(\d+\)|[qQ]?\d+[.):]?|#\d+)(?:\s*[-—–:.])?\s+`)
+
+// normalize is the coverage check's one notion of "the same question":
+// the text with its typography taken off. It is deliberately small and
+// deterministic — case, whitespace runs, a leading number, `**`/backtick
+// emphasis and trailing punctuation — so two authors quoting one bullet
+// agree, while a reworded question still does not.
+func normalize(s string) string {
+	s = strings.NewReplacer("**", "", "`", "").Replace(s)
+	s = strings.Join(strings.Fields(s), " ")
+	s = questionNumberRe.ReplaceAllString(s, "")
+	s = strings.TrimRight(s, " ?.!:;,")
+	return strings.ToLower(strings.TrimSpace(s))
 }
 
 // bullets returns the trimmed text of each top-level "- " bullet in the
@@ -308,7 +333,7 @@ func requirementSet(artifact string) map[string]bool {
 	}
 	for _, e := range entries {
 		for _, r := range e.Requirements {
-			if r = strings.TrimSpace(r); r != "" {
+			if r = normalize(r); r != "" {
 				out[r] = true
 			}
 		}
@@ -317,7 +342,12 @@ func requirementSet(artifact string) map[string]bool {
 }
 
 // outOfScopeKeys reads `## Out of scope` lines shaped `- key: prose` and
-// returns the set of keys.
+// returns the set of keys, normalized.
+//
+// A question often carries a colon of its own ("Lines: count the last
+// line?"), so the key is not simply the text before the FIRST colon:
+// every prefix ending at a colon is a candidate key, and a question
+// matches when it equals any of them.
 func outOfScopeKeys(artifact string) map[string]bool {
 	body, ok := spec.ViewSection(artifact, "Out of scope")
 	out := map[string]bool{}
@@ -329,13 +359,73 @@ func outOfScopeKeys(artifact string) map[string]bool {
 		if !ok {
 			continue
 		}
-		key, _, ok := strings.Cut(s, ":")
-		if !ok {
-			continue
-		}
-		if key = strings.TrimSpace(key); key != "" {
-			out[key] = true
+		for i := 0; i < len(s); i++ {
+			if s[i] != ':' {
+				continue
+			}
+			if key := normalize(s[:i]); key != "" {
+				out[key] = true
+			}
 		}
 	}
 	return out
+}
+
+// CoverageRule states the coverage contract for a layout in the words a
+// stage, a refusal and a report all use — one sentence, so the agent
+// writing the document and the person reading the refusal are told the
+// same rule the check applies.
+func CoverageRule(l spec.Layout) string {
+	return fmt.Sprintf("every `- ` bullet under `## %s` must be answered by name: repeat its text "+
+		"in some row's `requirements` list in the fenced yaml under `## Slices`, or give it an "+
+		"`## Out of scope` line shaped `- <the bullet's text>: <why it is not pursued>`. "+
+		"Case, spacing, a leading question number and trailing punctuation do not matter; "+
+		"a paraphrase does not count, and a `%%%%` note or a Findings paragraph answering the "+
+		"question does not map it", l.Coverage)
+}
+
+// Summary is the report's one-line count, the form a refusal leads with.
+func (r Report) Summary(l spec.Layout) string {
+	noun := "question"
+	if l.Coverage != "Questions" {
+		noun = strings.ToLower(strings.TrimSuffix(l.Coverage, "s"))
+	}
+	return fmt.Sprintf("%d open thread%s, %d broken citation%s, %d unmapped %s%s",
+		r.OpenThreads, plural(r.OpenThreads), len(r.Citations), plural(len(r.Citations)),
+		len(r.Coverage), noun, plural(len(r.Coverage)))
+}
+
+// Explain is the report written for somebody who has to fix the document:
+// what is wrong, item by item, and the rule each item breaks. Empty for a
+// passing report.
+func (r Report) Explain(l spec.Layout) string {
+	if r.Pass() {
+		return ""
+	}
+	var b strings.Builder
+	if r.OpenThreads > 0 {
+		fmt.Fprintf(&b, "%d open `%%%% @user` thread%s — each needs a resolution before the document can be done.\n",
+			r.OpenThreads, plural(r.OpenThreads))
+	}
+	if len(r.Citations) > 0 {
+		fmt.Fprintf(&b, "Broken citations under `## %s`:\n", l.Evidence)
+		for _, c := range r.Citations {
+			fmt.Fprintf(&b, "- %s — %s\n", c.Citation, c.Reason)
+		}
+	}
+	if len(r.Coverage) > 0 {
+		fmt.Fprintf(&b, "Unmapped `## %s` bullets:\n", l.Coverage)
+		for _, c := range r.Coverage {
+			fmt.Fprintf(&b, "- %s\n", c.Item)
+		}
+		b.WriteString("Rule: " + CoverageRule(l) + ".\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

@@ -1215,6 +1215,11 @@ func (e *Engine) sendKickoff(s *Session, sess agent.Session) {
 				msg = pre + "\n\n" + msg
 			}
 		}
+		// a research card's verify is held to its document floor; the
+		// report opens the kickoff so the verifier can repair it
+		if pre := e.documentFloorPreamble(s); pre != "" {
+			msg = pre + "\n\n" + msg
+		}
 	}
 	// Implement gets the plan's file manifest. Measured: gummi's
 	// implementer made its first edit at turn 32 of 97, while a bare agent
@@ -2665,6 +2670,9 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			// it pinned is on the branch nowhere, is a pass about the
 			// process rather than about the work.
 			e.gatePromiseVerdict(s)
+			// and a research document's floor, which decides whether
+			// the card may be marked done at all
+			e.gateDocumentVerdict(s)
 		}
 	case agent.EventError:
 		// a terminal error ends the turn with no trailing idle (the
