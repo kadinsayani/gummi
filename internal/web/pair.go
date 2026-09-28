@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,14 +48,62 @@ const (
 
 	// wrongGuessBudget is how many wrong guesses pairing takes, across
 	// every code and every caller, inside wrongGuessWindow before it locks
-	// for pairingLockout. A code's own three guesses bound one code; this
-	// bounds a guesser who burns codes and asks for new ones, from as many
-	// addresses as they like — the per-address rate limits cannot, since
-	// addresses are cheap (an IPv6 /64 is billions of them).
+	// the codes a browser asks for, for pairingLockout — doubled at every
+	// lockout that follows within lockoutMemory, up to maxLockout. A
+	// code's own three guesses bound one code; this bounds a guesser who
+	// burns codes and asks for new ones, from as many addresses as they
+	// like — the per-address limits cannot, since addresses are cheap (an
+	// IPv6 /64 is billions of them). Doubling is what makes that budget a
+	// bound: ten guesses a quarter-hour is a thousand a day, and ten a
+	// lockout that doubles is about seventy.
+	//
+	// It never locks a code the operator minted — the one printed when the
+	// server starts, or by `gummi web pair` — so a guesser cannot keep the
+	// operator from pairing: such a code is bounded by its own three
+	// guesses, and there is only ever one when the operator asked for it.
 	wrongGuessBudget = 10
 	wrongGuessWindow = 15 * time.Minute
 	pairingLockout   = 15 * time.Minute
+	// sourceGuessBudget wrong guesses from one address (a /64 for IPv6)
+	// inside wrongGuessWindow lock that address out of the codes a
+	// browser asks for, for sourceLockout, doubling the same way.
+	sourceGuessBudget = codeAttempts
+	sourceLockout     = time.Minute
+	// maxLockout caps a doubled lockout; lockoutMemory is how long without
+	// a lockout before the doubling starts over.
+	maxLockout    = 24 * time.Hour
+	lockoutMemory = 24 * time.Hour
+	// maxSources bounds how many addresses' guesses are remembered.
+	maxSources = 4096
 )
+
+// CodeOrigin says who minted a pairing code, which is who a pairing that
+// redeems it is announced as having come through.
+type CodeOrigin string
+
+// The code origins. Only a code a browser asked for (OriginBrowser) is
+// subject to the lockouts: the other two are the operator's.
+const (
+	// OriginTerminal: printed in the terminal running `gummi web` when it
+	// started with no device paired.
+	OriginTerminal CodeOrigin = "terminal"
+	// OriginCLI: minted by `gummi web pair` through the admin route.
+	OriginCLI CodeOrigin = "cli"
+	// OriginBrowser: asked for from the pairing form, and printed in the
+	// terminal running `gummi web`.
+	OriginBrowser CodeOrigin = "browser"
+)
+
+// Via is how a pairing that redeemed a code from o is announced.
+func (o CodeOrigin) Via() string {
+	switch o {
+	case OriginCLI:
+		return "via the local CLI (`gummi web pair`)"
+	case OriginBrowser:
+		return "with a code a browser asked for"
+	}
+	return "with the code printed when `gummi web` started"
+}
 
 // Pairing errors the HTTP layer turns into status codes. Redeeming
 // reports which of them happened so the page can say something true —
@@ -73,12 +122,69 @@ var (
 	ErrCodeLive = errors.New("a pairing code is already showing in the terminal running `gummi web`; use that one")
 )
 
-// LockedError is pairing refusing everything after too many wrong guesses
-// across codes, until Until (or until `gummi web pair` mints a code).
-type LockedError struct{ Until time.Time }
+// LockedError is pairing refusing a browser's code after too many wrong
+// guesses, until Until: from one address (Source), or from everywhere.
+// A code the operator mints (`gummi web pair`) is never locked. Started
+// marks the guess that caused the lockout.
+type LockedError struct {
+	Until   time.Time
+	Source  bool
+	Started bool
+}
 
 func (e *LockedError) Error() string {
+	if e.Source {
+		return "this address is locked out of pairing after too many wrong guesses; try again later, or run `gummi web pair` on the machine hosting the board"
+	}
 	return "pairing is locked after too many wrong guesses; try again later, or run `gummi web pair` on the machine hosting the board"
+}
+
+// Redeemed is what a correct guess redeemed: the person the code was
+// minted for (empty for an unnamed code), and who minted it.
+type Redeemed struct {
+	Person string
+	Origin CodeOrigin
+}
+
+// strikes are the wrong guesses one scope (an address, or everybody) has
+// made, and the lockouts they caused.
+type strikes struct {
+	wrong       []time.Time
+	lockouts    int
+	lockedUntil time.Time
+	lastLock    time.Time
+}
+
+func (s *strikes) locked(now time.Time) bool { return now.Before(s.lockedUntil) }
+
+// hit records a wrong guess at now, and reports whether it just locked
+// the scope: budget guesses inside window lock it for base, doubled for
+// every lockout before it within lockoutMemory, up to maxLockout.
+func (s *strikes) hit(now time.Time, budget int, window, base time.Duration) bool {
+	if s.lockouts > 0 && now.Sub(s.lastLock) >= lockoutMemory {
+		s.lockouts = 0
+	}
+	cut := 0
+	for cut < len(s.wrong) && now.Sub(s.wrong[cut]) >= window {
+		cut++
+	}
+	s.wrong = append(s.wrong[cut:], now)
+	if len(s.wrong) < budget {
+		return false
+	}
+	d := maxLockout
+	if s.lockouts < 16 {
+		d = min(base<<s.lockouts, maxLockout)
+	}
+	s.wrong, s.lockedUntil, s.lastLock = nil, now.Add(d), now
+	s.lockouts++
+	return true
+}
+
+// idle reports a scope with nothing left to remember.
+func (s *strikes) idle(now time.Time) bool {
+	return !s.locked(now) && (s.lockouts == 0 || now.Sub(s.lastLock) >= lockoutMemory) &&
+		(len(s.wrong) == 0 || now.Sub(s.wrong[len(s.wrong)-1]) >= wrongGuessWindow)
 }
 
 // WrongCodeError is a wrong guess against a live code, carrying what is
@@ -106,7 +212,9 @@ func tries(n int) string {
 // start and `gummi web pair`). A browser asking for a code (Request) gets
 // one only when none is live, so asking cannot reset a code's guesses or
 // kill a code printed for somebody by name. Wrong guesses are also counted
-// across codes, and too many lock pairing for a while (LockedError).
+// per address and across codes, and too many lock the codes a browser asks
+// for, for a while that doubles each time (LockedError) — never the
+// operator's.
 type Pairing struct {
 	now func() time.Time
 
@@ -115,12 +223,13 @@ type Pairing struct {
 	expires  time.Time
 	attempts int
 	// person is who the live code was minted for, empty when the browser
-	// redeeming it says who it is.
+	// redeeming it says who it is; origin is who minted it.
 	person string
-	// wrong are the recent wrong guesses, oldest first; lockedUntil is
-	// when a lockout they caused ends.
-	wrong       []time.Time
-	lockedUntil time.Time
+	origin CodeOrigin
+	// public are every caller's wrong guesses together; sources each
+	// address's own.
+	public  strikes
+	sources map[string]*strikes
 }
 
 // NewPairing returns an empty pairing slot. now is injectable so tests
@@ -133,30 +242,42 @@ func NewPairing(now func() time.Time) *Pairing {
 }
 
 // Mint generates a fresh six-digit code, replacing any live one, and
-// reports when it dies.
+// reports when it dies: the code the terminal prints when the server
+// starts.
 func (p *Pairing) Mint() (code string, expires time.Time, err error) {
-	return p.MintFor("")
+	return p.mint(OriginTerminal, "")
 }
 
-// MintFor is Mint for a named person: whoever redeems the code pairs as
-// person, whatever name their browser gives. It is the operator's mint, so
-// it also lifts a lockout: the person at the machine is asking to pair.
+// MintFor is `gummi web pair`'s mint, for a named person or (empty) for
+// whoever redeems it: a person named pairs as that person, whatever name
+// their browser gives. It is the operator's code, which no lockout holds:
+// the person at the machine is asking to pair.
 func (p *Pairing) MintFor(person string) (code string, expires time.Time, err error) {
-	code, err = newCode()
+	return p.mint(OriginCLI, person)
+}
+
+func (p *Pairing) mint(origin CodeOrigin, person string) (string, time.Time, error) {
+	code, err := newCode()
 	if err != nil {
 		return "", time.Time{}, err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.wrong, p.lockedUntil = nil, time.Time{}
-	p.setLocked(code, person)
+	p.setLocked(code, person, origin)
 	return p.code, p.expires, nil
 }
 
-// Request is a browser asking for a code: a fresh, unnamed one, unless a
-// code is live already (ErrCodeLive, with when it dies) or pairing is
-// locked (*LockedError). It never replaces a live code.
+// Request is a browser asking for a code with no address to hold it to
+// (RequestFrom).
 func (p *Pairing) Request() (code string, expires time.Time, err error) {
+	return p.RequestFrom("")
+}
+
+// RequestFrom is a browser at source asking for a code: a fresh, unnamed
+// one, unless a code is live already (ErrCodeLive, with when it dies) or
+// source or everybody is locked out (*LockedError). It never replaces a
+// live code.
+func (p *Pairing) RequestFrom(source string) (code string, expires time.Time, err error) {
 	code, err = newCode()
 	if err != nil {
 		return "", time.Time{}, err
@@ -164,13 +285,16 @@ func (p *Pairing) Request() (code string, expires time.Time, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
-	if now.Before(p.lockedUntil) {
-		return "", time.Time{}, &LockedError{Until: p.lockedUntil}
+	if s := p.sources[source]; s != nil && s.locked(now) {
+		return "", time.Time{}, &LockedError{Until: s.lockedUntil, Source: true}
+	}
+	if p.public.locked(now) {
+		return "", time.Time{}, &LockedError{Until: p.public.lockedUntil}
 	}
 	if p.liveLocked() {
 		return "", p.expires, ErrCodeLive
 	}
-	p.setLocked(code, "")
+	p.setLocked(code, "", OriginBrowser)
 	return p.code, p.expires, nil
 }
 
@@ -182,30 +306,44 @@ func newCode() (string, error) {
 	return fmt.Sprintf("%06d", n.Int64()), nil
 }
 
-func (p *Pairing) setLocked(code, person string) {
+func (p *Pairing) setLocked(code, person string, origin CodeOrigin) {
 	p.code = code
 	p.expires = p.now().Add(codeTTL)
 	p.attempts = codeAttempts
 	p.person = person
+	p.origin = origin
 }
 
 func (p *Pairing) liveLocked() bool {
 	return p.code != "" && p.attempts > 0 && p.now().Before(p.expires)
 }
 
-// lockedUntilTime is when the current lockout ends (zero when there has
-// been none), so the caller can tell the moment a guess started one.
-func (p *Pairing) lockedUntilTime() time.Time {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.lockedUntil
+// source is the strikes kept for one address, made on first use.
+func (p *Pairing) source(key string, now time.Time) *strikes {
+	if p.sources == nil {
+		p.sources = map[string]*strikes{}
+	}
+	s := p.sources[key]
+	if s == nil {
+		if len(p.sources) >= maxSources {
+			for k, old := range p.sources {
+				if old.idle(now) {
+					delete(p.sources, k)
+				}
+			}
+		}
+		s = &strikes{}
+		p.sources[key] = s
+	}
+	return s
 }
 
-// Live reports whether a code is currently redeemable.
+// Live reports whether a code is currently redeemable by a browser that
+// is not locked out of it itself.
 func (p *Pairing) Live() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.liveLocked() && !p.now().Before(p.lockedUntil)
+	return p.liveLocked() && (p.origin != OriginBrowser || !p.public.locked(p.now()))
 }
 
 // LiveFor reports the person the live code was minted for, empty when it
@@ -229,53 +367,66 @@ func (p *Pairing) Redeem(guess string) error {
 // RedeemFor is Redeem that also reports the person the code was minted
 // for (empty for an unnamed code).
 func (p *Pairing) RedeemFor(guess string) (person string, err error) {
+	r, err := p.RedeemFrom("", guess)
+	return r.Person, err
+}
+
+// RedeemFrom checks a guess from source (an address, as sourceKey reads
+// it). A code a browser asked for is refused outright to an address, or
+// to everybody, locked out by earlier wrong guesses; the operator's code
+// is refused to nobody but its own three wrong guesses. Every wrong guess
+// counts against both scopes, whichever code it was made against.
+func (p *Pairing) RedeemFrom(source, guess string) (Redeemed, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	now := p.now()
+	src := p.source(source, now)
+	operators := p.liveLocked() && p.origin != OriginBrowser
+	if !operators {
+		switch {
+		case src.locked(now):
+			return Redeemed{}, &LockedError{Until: src.lockedUntil, Source: true}
+		case p.public.locked(now):
+			return Redeemed{}, &LockedError{Until: p.public.lockedUntil}
+		}
+	}
 	switch {
-	case now.Before(p.lockedUntil):
-		return "", &LockedError{Until: p.lockedUntil}
 	case p.code == "":
-		return "", ErrNoCode
+		return Redeemed{}, ErrNoCode
 	case p.attempts <= 0:
-		return "", ErrCodeBurned
+		return Redeemed{}, ErrCodeBurned
 	case !now.Before(p.expires):
 		p.code, p.attempts = "", 0
-		return "", ErrCodeExpired
+		return Redeemed{}, ErrCodeExpired
 	}
 	// Constant time, even though the code is short-lived and rate limited:
 	// a timing oracle on a six-digit secret is exactly the kind of thing
 	// that turns "1 in a million per window" into "a few hundred tries".
 	if subtle.ConstantTimeCompare([]byte(p.code), []byte(guess)) != 1 {
 		p.attempts--
-		if p.countWrongLocked(now) {
-			p.code, p.attempts, p.person = "", 0, ""
-			return "", &LockedError{Until: p.lockedUntil}
+		srcLocked := src.hit(now, sourceGuessBudget, wrongGuessWindow, sourceLockout)
+		pubLocked := p.public.hit(now, wrongGuessBudget, wrongGuessWindow, pairingLockout)
+		if !operators {
+			switch {
+			case pubLocked:
+				p.code, p.attempts, p.person = "", 0, ""
+				return Redeemed{}, &LockedError{Until: p.public.lockedUntil, Started: true}
+			case srcLocked:
+				if p.attempts <= 0 {
+					p.code = ""
+				}
+				return Redeemed{}, &LockedError{Until: src.lockedUntil, Source: true, Started: true}
+			}
 		}
 		if p.attempts <= 0 {
 			p.code = ""
-			return "", ErrCodeBurned
+			return Redeemed{}, ErrCodeBurned
 		}
-		return "", &WrongCodeError{Remaining: p.attempts}
+		return Redeemed{}, &WrongCodeError{Remaining: p.attempts}
 	}
-	person = p.person
+	r := Redeemed{Person: p.person, Origin: p.origin}
 	p.code, p.attempts, p.person = "", 0, ""
-	return person, nil
-}
-
-// countWrongLocked records a wrong guess against the budget shared by
-// every code, and reports whether it just locked pairing.
-func (p *Pairing) countWrongLocked(now time.Time) bool {
-	cut := 0
-	for cut < len(p.wrong) && now.Sub(p.wrong[cut]) >= wrongGuessWindow {
-		cut++
-	}
-	p.wrong = append(p.wrong[cut:], now)
-	if len(p.wrong) < wrongGuessBudget {
-		return false
-	}
-	p.wrong, p.lockedUntil = nil, now.Add(pairingLockout)
-	return true
+	return r, nil
 }
 
 // Device is one paired browser. The token itself is never stored.
@@ -283,6 +434,13 @@ func (p *Pairing) countWrongLocked(now time.Time) bool {
 // Person is the name given when pairing; devices paired under one name are
 // one person (DESIGN §20.3), and it is what receipts, notes and the viewer
 // list carry. Name is the device's own label, read off its User-Agent.
+//
+// Origin is the host (with its port) the device paired on: its
+// token is honoured there and nowhere else (Devices.VerifyAt). A browser
+// sends a cookie to every port of the host that set it, so a token can
+// reach another server on this machine; bound to its origin, it is no key
+// to this board through any other name or port. Via says how it paired
+// (CodeOrigin.Via), for `gummi web devices`.
 type Device struct {
 	ID          string    `json:"id"`
 	Person      string    `json:"person"`
@@ -290,6 +448,8 @@ type Device struct {
 	TokenSHA256 string    `json:"token_sha256"`
 	PairedAt    time.Time `json:"paired_at"`
 	LastSeen    time.Time `json:"last_seen"`
+	Origin      string    `json:"origin,omitempty"`
+	Via         string    `json:"via,omitempty"`
 }
 
 // devicesFile is the on-disk shape. Version exists so a later format can
@@ -402,6 +562,12 @@ func (d *Devices) saveLocked() error {
 // Pair records a new device for person and returns its token — the only
 // time the token exists outside the browser.
 func (d *Devices) Pair(person, name string) (token string, dev Device, err error) {
+	return d.PairAt(person, name, "", "")
+}
+
+// PairAt is Pair for a device bound to origin (see Device), paired via
+// the code origin named.
+func (d *Devices) PairAt(person, name, origin string, via CodeOrigin) (token string, dev Device, err error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", Device{}, fmt.Errorf("generating a device token: %w", err)
@@ -419,6 +585,8 @@ func (d *Devices) Pair(person, name string) (token string, dev Device, err error
 		TokenSHA256: hashToken(token),
 		PairedAt:    now,
 		LastSeen:    now,
+		Origin:      origin,
+		Via:         string(via),
 	}
 
 	d.mu.Lock()
@@ -444,6 +612,15 @@ func (d *Devices) Verify(token string) (Device, bool) {
 // with it, or an active device would be logged out at day 90 while the
 // server still considered it fresh.
 func (d *Devices) VerifyTouch(token string) (dev Device, ok, touched bool) {
+	return d.VerifyAt(token, "")
+}
+
+// VerifyAt is VerifyTouch for a token presented at origin (the host and
+// port the request reached this server on): a device bound to another
+// origin is not recognized. A device paired before devices were bound is
+// bound to the first origin it is presented at. An empty origin checks
+// nothing.
+func (d *Devices) VerifyAt(token, origin string) (dev Device, ok, touched bool) {
 	if token == "" {
 		return Device{}, false, false
 	}
@@ -456,6 +633,15 @@ func (d *Devices) VerifyTouch(token string) (dev Device, ok, touched bool) {
 	for i := range d.devices {
 		if subtle.ConstantTimeCompare([]byte(d.devices[i].TokenSHA256), []byte(want)) != 1 {
 			continue
+		}
+		if origin != "" {
+			switch bound := d.devices[i].Origin; {
+			case bound == "":
+				d.devices[i].Origin = origin
+				_ = d.saveLocked()
+			case !strings.EqualFold(bound, origin):
+				return Device{}, false, false
+			}
 		}
 		if now.Sub(d.devices[i].LastSeen) > deviceTTL {
 			// Expired: drop it rather than leaving a dead row that would

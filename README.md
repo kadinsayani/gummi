@@ -409,7 +409,8 @@ loopback unless told otherwise: `--tls-cert`/`--tls-key` serve HTTPS, and
 login URL to open on any device (or set `TS_AUTHKEY`, which unlike
 `--ts-authkey` stays out of `ps`);
 `--ts-tls` serves HTTPS with a tailnet certificate, which notifications
-need. Pairing still applies on the tailnet, and `--no-pairing` is refused
+need. Pairing still applies on the tailnet, every new pairing is announced
+on every open page and paired device, and `--no-pairing` is refused
 on anything but loopback. See
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md#the-web-host-on-a-tailnet).
 

@@ -522,6 +522,13 @@ stages have their own scratch tree — so worktree discipline no longer
 rests on a prompt asking for it. What still rests on the model is
 everything the shell can reach.
 
+That includes the web face (§20). An unconfined agent running as the
+operator can run `gummi web pair` — or read the admin token it uses — and
+pair itself to a running `gummi web`, which gives it the landing and
+gate-crossing §16 withholds from agents. gummi cannot tell that apart
+from the operator doing it, and only announces it (§20.5); the container
+boundary above is what prevents it.
+
 #### Config layering
 
 Settings are merged from two files: a user-level config at
@@ -3695,16 +3702,35 @@ other side of that trade and contains the risk with four rules instead.
   person approved; one without is handed back the drafted message to read
   (the TUI's landing dialog, and its second `ctrl+s` on an unreviewed
   draft). A chip whose "go" spends credits asks first, as `y` does. A
-  confirmation the page sends is its own card's, never another card's a
-  flow reached on the way.
+  confirmation is never the page's to give on its own: the page sends a
+  destructive action bare, the server answers `409 confirm` with the
+  question its own dialog asks — every word, line breaks kept, the
+  commands verify would run listed one to a line — and a token bound to
+  that dialog, that card and that text. The yes is that token sent back.
+  It answers that one question, once: a question that reads differently
+  by the time the yes arrives (a goal that grew a card) is asked again,
+  a second question in the same flow is asked on its own, and a question
+  about another card a flow reached on the way is never the request's.
 - **An answer names what it was given against.** Every open decision
   carries the revision it was raised on — the spec commit for a design
   gate, the verify run and branch head for a failure — and the page shows
   it under the question. An answer sends it back and is refused with
   `409` if the card has moved, or if another viewer answered first — and
   so does a composer line or a menu action sent at that stop, so nothing
-  meant for one stop runs at another. A running card's diff announces a
+  meant for one stop runs at another. While a card pins a decision, a
+  line or an action that carries no revision at all is refused the same
+  way, except the menu entries that answer nothing the decision asks
+  (`webapi.DecisionIndependentActions`: dependencies, budget, profile,
+  repository, pull-request link, duplicate, delete, clean). A second
+  person whose answer lost the race is told who won and what they chose,
+  even when the winning answer left the card on its stage ("stop here"
+  parks the run and keeps the gate). A running card's diff announces a
   new commit rather than replacing what the reader is looking at.
+- **Every landing reads one floor.** The menu's land and "next stage" at
+  verify pass the floor the verify stop's own landing answer does
+  (`domain.Feature.MayLand`, or the stop's "land anyway" — a person's
+  overrule of a verify pass that finished and failed). A card that has
+  not finished a verify pass does not land from any door.
 - **Drift fails a test.** The read models are golden-tested from the
   same fixtures as the TUI's goldens, and a test asserts that the answers
   served for each fixture's open decision are the answers the TUI draws.
@@ -3769,13 +3795,34 @@ route, must name one of the server's own hosts, so a page elsewhere cannot
 reach a loopback board through a name it points at 127.0.0.1 (a DNS
 rebinding, whose requests carry matching `Host` and `Origin`). A browser
 asking for a code never replaces one that is live — a code minted for a
-named person stays theirs — and wrong guesses are counted across every
-code and caller: too many and pairing locks until `gummi web pair` mints
-a fresh code. Until a browser is paired, the session route says only
-whether it is and whether a code is live. Unpairing a device drops its
-push subscription and closes its open event streams. Landing and gate-crossing are available on the web
-because a person is answering: §16 withholds them from *agents*, and
-the web face is a human at the board.
+named person stays theirs. Wrong guesses are counted per address (an
+IPv6 /64 as one) and across every caller: one code's worth from one
+address locks that address out for a minute, and ten from anywhere in a
+quarter-hour lock out every code a browser asks for, for a quarter-hour;
+each lockout doubles the one before it (up to a day), so a guesser
+spread over many addresses gets tens of guesses a day, not a thousand.
+No lockout holds a code the operator minted — the one printed at start,
+or `gummi web pair`'s — which only its own three wrong guesses end, so a
+guesser can keep the pairing form busy but never keep the operator from
+pairing. Until a browser is paired, the session route says only whether
+it is and whether a code is live.
+
+Every pairing is announced: a line in the server's terminal naming the
+address and where the code came from, a notice on every open page
+("new device paired: … via the local CLI"), and a push to every
+subscribed device, with the `gummi web unpair` that undoes it; a code
+minted by `gummi web pair` is announced when it is minted too. A
+device's token is bound to the host and port it paired on and refused
+through any other — a browser sends its cookies to every port of a host,
+so another server on this machine receives the token, and that must not
+make it a key to this board. (It does not stop that server from seeing
+the token; only running nothing untrusted on the board's host does.)
+`gummi web devices` shows where each device paired and how. Unpairing a
+device — from the page or from `gummi web unpair` — drops its push
+subscription and closes its open event streams within a second. Landing
+and gate-crossing are available on the web because a person is
+answering: §16 withholds them from *agents*, and the web face is a human
+at the board.
 
 ### 20.4 Running unattended
 
@@ -3795,9 +3842,13 @@ HTTPS when given a certificate (`--tls-cert`, `--tls-key`) and plain HTTP
 otherwise, on whatever `--addr` names — loopback by default, but a paired
 board may listen on any address. Plain HTTP is a secure origin only on
 loopback (`localhost`), so off loopback it serves a board that works but
-cannot install or receive a push. What is restricted to loopback is
+cannot install or receive a push — and the pairing code and every
+device's token cross the network in clear, which the server says loudly
+when it starts that way. What is restricted to loopback is
 `--no-pairing`, which serves the board to anyone who can reach it: it is
-refused on any other listener, the tailnet included.
+refused on any other listener, the tailnet included, and beside any
+`--allow-host` that is not loopback, since that names a proxy in front of
+the board through which the unpaired board would be open.
 
 A phone reaches an always-on host over the tailnet, and the host joins it
 itself: `--tailscale` embeds a Tailscale node (`tsnet`) with its own name
@@ -3821,8 +3872,24 @@ The web face is bound by §7 rather than excused from it. It is not a
 cloud service: one binary, your machine, state in your repo, listening on
 loopback unless told otherwise. It never writes to GitHub: the PR tab
 reads, and shows the push command for a person to run. It never runs a
-workflow the TUI would not run, and it has no surface an agent can reach
-that the board-level tools (§16) withhold.
+workflow the TUI would not run, and it offers no agent a surface the
+board-level tools (§16) withhold.
+
+That last sentence has a limit it cannot enforce, and it is stated here
+rather than hidden. `gummi web pair` is the operator at the machine: it
+reads the admin token from `.gummi/state/web/server.json` (mode 0600) and
+asks the server over loopback for a code. An agent running unconfined as
+the same user — which is what a stage session is on a bare host (§4.4) —
+can read that file, or simply run `gummi web pair`, pair a "browser" of
+its own and cross gates or land through it. No file mode, nonce or
+second token closes that: anything the operator's CLI can read, a process
+with the operator's permissions can read too. What gummi does instead is
+make it loud: every pairing and every admin-minted code is announced on
+every open page, pushed to every subscribed device and logged, and
+`gummi web devices` records how each device paired, so an unexpected one
+is seen and unpaired. The boundary that actually keeps an agent out is
+the one §4.4 relies on — a container or sandbox in which the agent
+cannot read the workspace's `.gummi/state` or reach the host's loopback.
 
 ### 20.6 Deferred
 

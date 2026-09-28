@@ -52,7 +52,10 @@ func (s *Server) identify(r *http.Request) (_ Who, _ bool, renew string) {
 	if err != nil || c.Value == "" {
 		return Who{}, false, ""
 	}
-	dev, ok, touched := s.opt.Devices.VerifyTouch(c.Value)
+	// honoured only on the origin it was issued for: a cookie reaches
+	// every port on its host, and a token another server received there
+	// is no key to this board by another name or port
+	dev, ok, touched := s.opt.Devices.VerifyAt(c.Value, requestOrigin(r))
 	if !ok {
 		return Who{}, false, ""
 	}
@@ -156,6 +159,14 @@ func isSameOrigin(r *http.Request) bool {
 		return false
 	}
 	return strings.EqualFold(u.Scheme, requestScheme(r)) && strings.EqualFold(u.Host, r.Host)
+}
+
+// requestOrigin is where a request reached this server: its Host, port
+// included — what a cookie does not tell apart, since a browser sends it
+// to every port of the host that set it. The Host is one the server
+// answers to (checkHost runs first).
+func requestOrigin(r *http.Request) string {
+	return strings.ToLower(r.Host)
 }
 
 // requestScheme is the scheme the page used to reach this request:

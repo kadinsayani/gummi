@@ -35,6 +35,9 @@ import (
 const (
 	defaultCoalesce  = 100 * time.Millisecond
 	defaultHeartbeat = 15 * time.Second
+	// revokeCheck is how often an open stream asks whether its device is
+	// still paired.
+	revokeCheck = time.Second
 	// ringSize is how many past events a reconnecting page can resume from.
 	ringSize = 512
 	// clientBuffer is how far a connection may fall behind before it is
@@ -326,18 +329,28 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 	ticker := time.NewTicker(beat)
 	defer ticker.Stop()
+	// The device was checked when the stream opened; a stream lasts as
+	// long as the page, so it is checked again before every event and
+	// every revokeCheck besides. A device unpaired from another terminal
+	// (`gummi web unpair`) is a file edit this server only learns of by
+	// asking — a stat of the devices file, so asking often costs nothing
+	// — and a revoked device stops hearing about the board within a
+	// second, not at the next heartbeat.
+	revoke := time.NewTicker(min(beat, revokeCheck))
+	defer revoke.Stop()
+	paired := func() bool { return s.opt.OpenAccess || s.opt.Devices.Has(who.DeviceID) }
 	for {
 		select {
 		case ev := <-cl.ch:
-			if !send(ev) {
+			if !paired() || !send(ev) {
+				return
+			}
+		case <-revoke.C:
+			if !paired() {
 				return
 			}
 		case <-ticker.C:
-			// The device was checked when the stream opened; a stream
-			// lasts as long as the page, so it is checked again here. A
-			// device unpaired from another terminal (`gummi web unpair`)
-			// is a file edit this server only learns of by asking.
-			if !s.opt.OpenAccess && !s.opt.Devices.Has(who.DeviceID) {
+			if !paired() {
 				return
 			}
 			// a comment: keeps proxies and phones from calling the

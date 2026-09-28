@@ -297,7 +297,15 @@ tailnet gets a browser to the pairing screen, not to the board.
 `--no-pairing` refuses `--tailscale`. If the machine already runs
 `tailscaled`, `tailscale serve` in front of a loopback `gummi web` remains
 an alternative; pass `--allow-host <name>.<tailnet>.ts.net`, since the
-proxy forwards the tailnet name as the request's `Host`.
+proxy forwards the tailnet name as the request's `Host`. `--no-pairing`
+refuses an `--allow-host` that is not loopback for the same reason it
+refuses `--tailscale`: through the proxy, the unpaired board is open.
+
+A paired device's token is honoured only on the host and port it paired
+on. A device paired on `127.0.0.1:7878` and opened through the tailnet
+name (or the other way round) pairs again there, as a second device.
+Plain HTTP on an address other than loopback carries the pairing code and
+the token in clear; the server warns when it starts that way.
 
 Every request's `Host` must be one of the server's own names — loopback,
 the address it was reached on, the `--addr` name, the `--tls-cert`

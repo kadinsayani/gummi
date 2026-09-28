@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -675,39 +676,51 @@ func TestAskingForACodeNeverReplacesALiveOne(t *testing.T) {
 	}
 }
 
-// Too many wrong guesses across codes lock pairing, say so in the
-// terminal, and refuse both guessing and asking for a code.
+// Too many wrong guesses from one address lock that address out, say so
+// in the terminal, and refuse both its guessing and its asking for a code
+// — but not the operator's own code (`gummi web pair`), which pairs even
+// from that address, and whose pairing every page already on the board
+// is told about.
 func TestTooManyWrongGuessesLockPairing(t *testing.T) {
 	h := newHarness(t)
+	watcher := h.client()
+	h.pair(watcher, "Simon")
+	events := h.events(watcher, "")
+	if _, _, err := h.pairing.Request(); err != nil {
+		t.Fatal(err)
+	}
 	var last *http.Response
 	var lastBody map[string]any
-	for guesses := 0; guesses < wrongGuessBudget; {
-		if _, _, err := h.pairing.Request(); err != nil {
-			t.Fatalf("Request after %d guesses: %v", guesses, err)
-		}
-		for i := 0; i < codeAttempts && guesses < wrongGuessBudget; i++ {
-			last, lastBody = h.do(h.client(), http.MethodPost, "/api/pair", `{"code":"not-a-code","name":"Mallory"}`)
-			guesses++
-		}
+	for range sourceGuessBudget {
+		last, lastBody = h.do(h.client(), http.MethodPost, "/api/pair", `{"code":"not-a-code","name":"Mallory"}`)
 	}
 	if last.StatusCode != http.StatusTooManyRequests || !strings.Contains(fmt.Sprint(lastBody["error"]), "locked") {
 		t.Fatalf("the guess that spent the budget = %d %v, want 429 locked", last.StatusCode, lastBody)
 	}
-	if !h.logged("pairing is locked") {
+	if !h.logged("is locked out of pairing") {
 		t.Errorf("the terminal was not told: %v", h.log)
 	}
 	if res, _ := h.do(h.client(), http.MethodPost, "/api/pair/request", "{}"); res.StatusCode != http.StatusTooManyRequests {
 		t.Errorf("asking for a code while locked = %d, want 429", res.StatusCode)
 	}
-	// the operator can still pair somebody
+	// the operator can still pair somebody, from that very address
 	res, body := h.do(h.client(), http.MethodPost, adminPath, "", "Origin", "", "Authorization", "Bearer admin-secret")
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("admin pair while locked = %d %v", res.StatusCode, body)
 	}
-	// (redeemed directly: this test's one address has spent its per-address
-	// rate limit on the guesses above)
-	if err := h.pairing.Redeem(fmt.Sprint(body["code"])); err != nil {
-		t.Errorf("the operator's code = %v", err)
+	res, body = h.do(h.client(), http.MethodPost, "/api/pair", fmt.Sprintf(`{"code":%q,"name":"Ana"}`, body["code"]))
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("the operator's code from a locked-out address = %d %v", res.StatusCode, body)
+	}
+	if !h.logged("via the local CLI") {
+		t.Errorf("the pairing was not logged with where its code came from: %v", h.log)
+	}
+	// and the device already on the board hears of it
+	for {
+		ev := events.until(string(webapi.ChangeToast))
+		if strings.Contains(ev.data, "new device paired: Ana") && strings.Contains(ev.data, "local CLI") {
+			return
+		}
 	}
 }
 
@@ -762,6 +775,43 @@ func TestAStreamClosesOnceItsDeviceIsUnpairedElsewhere(t *testing.T) {
 	}
 	if !stream.ends(2 * time.Second) {
 		t.Error("the stream outlived its device")
+	}
+}
+
+// The same, at the default heartbeat: a device revoked from the terminal
+// stops hearing about the board within a couple of seconds, not at the
+// next heartbeat a quarter-minute away.
+func TestARevokedDevicesStreamClosesPromptly(t *testing.T) {
+	h := newHarness(t)
+	c := h.client()
+	h.pair(c, "Simon")
+	stream := h.events(c, "")
+	stream.until(string(webapi.ChangeViewers))
+	if stream.ends(300 * time.Millisecond) {
+		t.Fatal("the stream of a paired device closed")
+	}
+	if _, err := h.devices.Forget(h.deviceOf("Simon").ID); err != nil {
+		t.Fatal(err)
+	}
+	if !stream.ends(3 * time.Second) {
+		t.Error("the stream outlived its device by more than 3s")
+	}
+}
+
+// A device's token is honoured only on the host and port it was paired
+// on: the same cookie presented under another name the server answers to
+// (or, what the name stands for, another port on this machine that
+// received it) is not a paired browser.
+func TestADeviceTokenIsBoundToWhereItPaired(t *testing.T) {
+	h := newHarness(t)
+	c := h.client()
+	h.pair(c, "Simon")
+	if _, body := h.do(c, http.MethodGet, "/api/session", ""); body["authed"] != true {
+		t.Fatalf("the paired browser is not authed: %v", body)
+	}
+	_, port, _ := net.SplitHostPort(strings.TrimPrefix(h.http.URL, "http://"))
+	if _, body := h.do(c, http.MethodGet, "/api/session", "", "Host", "localhost:"+port); body["authed"] == true {
+		t.Errorf("the token was honoured under another host: %v", body)
 	}
 }
 

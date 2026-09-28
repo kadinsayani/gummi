@@ -97,6 +97,14 @@ func runWeb(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
+	if noPairing {
+		// a name the board answers to beyond loopback is a proxy in front
+		// of it (`tailscale serve`, a reverse proxy): through it, an
+		// unpaired board is open to whoever reaches the proxy
+		if err := noPairingHosts(fl.String("allow-host")); err != nil {
+			return err
+		}
+	}
 
 	// Signals are caught before anything is held. SIGHUP too: a closed
 	// terminal or a killed tmux pane is a quit like Ctrl-C, and must unwind
@@ -235,6 +243,10 @@ func runWeb(fl cliFlags, args []string) error {
 	defer func() { _ = os.Remove(filepath.Join(h.ws.WebDir(), serverFile)) }()
 
 	announce(logf, url, noPairing, devices, pairing)
+	if !secure && !loopbackOnly(ln) {
+		logf("web: WARNING — serving plain HTTP on %s, which is not loopback: the pairing code and every device's token cross the network in clear, readable by anyone on the path. "+
+			"Serve on 127.0.0.1 behind `tailscale serve`, use --tailscale, or give --tls-cert/--tls-key.", ln.Addr())
+	}
 
 	// The tailnet node joins after the lock is taken, not before: a second
 	// `gummi web --tailscale` on this workspace must be refused by the
@@ -574,8 +586,8 @@ func runWebDevices(fl cliFlags) error {
 			return nil
 		}
 		for _, d := range list {
-			fmt.Printf("%s  %-14s %-18s paired %s, last seen %s\n",
-				d.ID, d.Person, d.Name, d.PairedAt.Format("2006-01-02"), humanSince(d.LastSeen))
+			fmt.Printf("%s  %-14s %-18s paired %s%s, last seen %s%s\n",
+				d.ID, d.Person, d.Name, d.PairedAt.Format("2006-01-02"), deviceVia(d), humanSince(d.LastSeen), deviceAt(d))
 		}
 		return nil
 	})
@@ -625,7 +637,8 @@ func runWebUnpair(fl cliFlags, args []string) error {
 // devices file it is a file edit a running server re-reads; a failure is
 // reported, not fatal — the device is already unpaired, and the server
 // drops a subscription whose device it no longer knows before sending.
-// Their open event streams close on the server's next heartbeat.
+// Their open event streams close within a second (the server checks each
+// stream's device every second, and before every event).
 func dropPushSubscriptions(ws state.Workspace, ids ...string) {
 	store, err := push.OpenStore(filepath.Join(ws.WebDir(), web.PushFile), nil)
 	if err == nil {
@@ -652,6 +665,43 @@ func withWebWorkspace(fn func(state.Workspace) error) error {
 		return err
 	}
 	return fn(ws)
+}
+
+// deviceVia says how a device paired, when the store knows.
+func deviceVia(d web.Device) string {
+	if d.Via == "" {
+		return ""
+	}
+	return " " + web.CodeOrigin(d.Via).Via()
+}
+
+// deviceAt names where a device's token is honoured, when it is bound.
+func deviceAt(d web.Device) string {
+	if d.Origin == "" {
+		return ""
+	}
+	return " (at " + d.Origin + ")"
+}
+
+// noPairingHosts refuses --no-pairing beside an --allow-host that is not
+// loopback.
+func noPairingHosts(allow string) error {
+	for _, name := range strings.Split(allow, ",") {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		host := name
+		if h, _, err := net.SplitHostPort(name); err == nil {
+			host = h
+		}
+		host = strings.Trim(host, "[]")
+		if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("--no-pairing serves the board to anyone who reaches it, and --allow-host %s is a name something in front "+
+				"of this board forwards (a proxy, `tailscale serve`) — drop --no-pairing and pair the browser, or drop --allow-host", name)
+		}
+	}
+	return nil
 }
 
 // errNoPairingOffLoopback refuses --no-pairing on a listener other

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -82,6 +83,25 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// sourceKey is the address pairing counts wrong guesses against: the peer
+// itself for IPv4, and its /64 for IPv6, where one subscriber holds a
+// whole /64 and could otherwise start afresh at every address in it.
+func sourceKey(ip string) string {
+	a, err := netip.ParseAddr(ip)
+	if err != nil {
+		return ip
+	}
+	a = a.Unmap()
+	if a.Is4() {
+		return a.String()
+	}
+	p, err := a.Prefix(64)
+	if err != nil {
+		return a.String()
+	}
+	return p.String()
 }
 
 func isLoopback(host string) bool {

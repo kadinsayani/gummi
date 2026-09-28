@@ -20,6 +20,22 @@ func TestWebRefusesNoPairingOffLoopback(t *testing.T) {
 	}
 }
 
+// --allow-host names a proxy in front of the board; an unpaired board
+// behind one is open to whoever reaches the proxy. Only loopback names go
+// with --no-pairing.
+func TestWebRefusesNoPairingBehindAProxy(t *testing.T) {
+	boardRepo(t)
+	err := runCLI("web", "--addr", "127.0.0.1:0", "--no-pairing", "--allow-host", "localhost,gummi.tail1234.ts.net")
+	if err == nil || !strings.Contains(err.Error(), "--allow-host gummi.tail1234.ts.net") {
+		t.Errorf("web --no-pairing --allow-host <proxy> = %v, want a refusal", err)
+	}
+	for _, ok := range []string{"localhost", "127.0.0.1:8080", "[::1]:8080", "localhost, 127.0.0.2"} {
+		if err := noPairingHosts(ok); err != nil {
+			t.Errorf("--no-pairing --allow-host %s = %v, want it allowed", ok, err)
+		}
+	}
+}
+
 // --tailscale is the only way off loopback that --no-pairing cannot follow,
 // and a --ts-* flag without it would configure a node nobody starts.
 func TestWebTailnetFlagRefusals(t *testing.T) {

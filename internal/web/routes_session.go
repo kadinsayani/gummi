@@ -11,6 +11,7 @@ import (
 	"unicode"
 
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/web/push"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -117,8 +118,8 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	lastLock := s.opt.Pairing.lockedUntilTime()
-	named, err := s.opt.Pairing.RedeemFor(strings.TrimSpace(body.Code))
+	src := sourceKey(clientIP(r))
+	redeemed, err := s.opt.Pairing.RedeemFrom(src, strings.TrimSpace(body.Code))
 	if err != nil {
 		var (
 			wrong  *WrongCodeError
@@ -133,9 +134,13 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 			s.opt.Log("web: pairing code burned by wrong guesses from %s", clientIP(r))
 			writeError(w, http.StatusForbidden, err.Error())
 		case errors.As(err, &locked):
-			if locked.Until != lastLock {
-				s.opt.Log("web: pairing is locked until %s after %d wrong guesses (the last from %s); `gummi web pair` unlocks it",
-					locked.Until.Local().Format("15:04"), wrongGuessBudget, clientIP(r))
+			switch {
+			case locked.Started && locked.Source:
+				s.opt.Log("web: %s is locked out of pairing until %s after %d wrong guesses; `gummi web pair` still pairs a browser",
+					clientIP(r), locked.Until.Local().Format("Jan 2 15:04"), sourceGuessBudget)
+			case locked.Started:
+				s.opt.Log("web: pairing is locked for codes a browser asks for until %s after %d wrong guesses (the last from %s); `gummi web pair` still pairs a browser",
+					locked.Until.Local().Format("Jan 2 15:04"), wrongGuessBudget, clientIP(r))
 			}
 			writeError(w, http.StatusTooManyRequests, err.Error())
 		default:
@@ -143,21 +148,37 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
-	if named != "" {
-		person = named
+	if redeemed.Person != "" {
+		person = redeemed.Person
 	}
 	if person == "" {
 		writeError(w, http.StatusBadRequest, "say who you are: pairing needs a name")
 		return
 	}
-	token, dev, err := s.opt.Devices.Pair(person, deviceName(r.UserAgent()))
+	token, dev, err := s.opt.Devices.PairAt(person, deviceName(r.UserAgent()), requestOrigin(r), redeemed.Origin)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.setDeviceCookie(w, r, token)
-	s.opt.Log("web: paired %s on %s (%s)", dev.Person, dev.Name, dev.ID)
+	s.announcePairing(dev, redeemed.Origin, clientIP(r))
 	writeJSON(w, http.StatusOK, webapi.PairResponse{Person: dev.Person, Device: dev.Name, DeviceID: dev.ID})
+}
+
+// announcePairing tells everyone already on the board that a device was
+// added: a line in the terminal, a notice on every open page, and a
+// notification on every device subscribed to them. A pairing nobody asked
+// for — a code guessed, or minted by something else running as the
+// operator (an agent can run `gummi web pair` as well as a person can,
+// DESIGN §20.5) — is then at least not a silent one, and `gummi web
+// unpair` undoes it.
+func (s *Server) announcePairing(dev Device, origin CodeOrigin, from string) {
+	line := "new device paired: " + dev.Person + " on " + dev.Name + " " + origin.Via()
+	s.opt.Log("web: paired %s on %s (%s) from %s %s", dev.Person, dev.Name, dev.ID, from, origin.Via())
+	s.hub.publish(webapi.Change{Kind: webapi.ChangeToast, Text: line + " — `gummi web unpair " + dev.ID + "` if that was not you"})
+	if s.opt.Push != nil && !s.opt.OpenAccess {
+		s.opt.Push.Notifier.Post(push.Message{Title: "New device paired", Body: line, URL: "/", Tag: "paired-" + dev.ID})
+	}
 }
 
 // handlePairRequest is POST /api/pair/request: a browser asking for a
@@ -182,7 +203,7 @@ func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "a code was just printed; check the terminal running `gummi web`")
 		return
 	}
-	code, expires, err := s.opt.Pairing.Request()
+	code, expires, err := s.opt.Pairing.RequestFrom(sourceKey(clientIP(r)))
 	var locked *LockedError
 	switch {
 	case errors.Is(err, ErrCodeLive):
@@ -268,11 +289,14 @@ func (s *Server) handleAdminPair(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// Said in the terminal and on every open page: the admin route is the
+	// operator's, and whatever else runs as the operator can call it too.
+	who := "a browser"
 	if person != "" {
-		s.opt.Log("web: a pairing code was printed for %s by `gummi web pair`", person)
-	} else {
-		s.opt.Log("web: a pairing code was printed by `gummi web pair`")
+		who = person
 	}
+	s.opt.Log("web: `gummi web pair` asked for a pairing code for %s", who)
+	s.hub.publish(webapi.Change{Kind: webapi.ChangeToast, Text: "`gummi web pair` minted a pairing code for " + who + " on the machine hosting the board"})
 	writeJSON(w, http.StatusOK, webapi.AdminPairResponse{
 		Code:          code,
 		ExpiresInSecs: int(expires.Sub(s.now()).Seconds()),
