@@ -66,15 +66,11 @@ func (b *Bridge) Answer(ctx context.Context, id string, req webapi.AnswerRequest
 	if werr != nil {
 		return webapi.Card{}, werr
 	}
-	if cur.Decision == nil || cur.Decision.Ref != req.Ref {
-		if req.Ref == "" {
-			return webapi.Card{}, refuse(WebBadRequest, "an answer names the decision it answers")
-		}
-		return webapi.Card{}, b.answeredOrMoved(ctx, id, req.Ref, cur)
+	if req.Ref == "" {
+		return webapi.Card{}, refuse(WebBadRequest, "an answer names the decision it answers")
 	}
-	if req.Against != cur.Decision.Against.Token {
-		return webapi.Card{}, &WebError{Code: WebConflict, Reason: webapi.ConflictMoved,
-			Text: "the card moved since you read it — now " + cur.Decision.Against.Label}
+	if cur.Decision == nil || cur.Decision.Ref != req.Ref || req.Against != cur.Decision.Against.Token {
+		return webapi.Card{}, b.answeredOrMoved(ctx, id, req.Ref, req.Against, cur)
 	}
 	in := webInput{actor: state.PersonActor(person), confirm: req.Confirm}
 	wait := webWait
@@ -87,6 +83,7 @@ func (b *Bridge) Answer(ctx context.Context, id string, req webapi.AnswerRequest
 		in.message, req.Words = req.Words, ""
 		wait = webWaitDraft
 	}
+	var label string
 	out, werr := b.intent(ctx, webID(id), in, wait, func(m *Shell, r featureRow) (tea.Cmd, error) {
 		// read again on the loop: the card may have moved between the
 		// check above and now, and the answer is only ever given to the
@@ -98,6 +95,7 @@ func (b *Bridge) Answer(ctx context.Context, id string, req webapi.AnswerRequest
 		if !strings.HasPrefix(req.Against, od.api.Against.Token) {
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictMoved, Text: "the card moved since you read it"}
 		}
+		label = od.optionLabel(req.Option)
 		return m.webAnswer(r, od, req)
 	})
 	if werr != nil {
@@ -106,21 +104,82 @@ func (b *Bridge) Answer(ctx context.Context, id string, req webapi.AnswerRequest
 			if cerr != nil {
 				return webapi.Card{}, cerr
 			}
-			return webapi.Card{}, b.answeredOrMoved(ctx, id, req.Ref, now)
+			return webapi.Card{}, b.answeredOrMoved(ctx, id, req.Ref, req.Against, now)
 		}
 		return webapi.Card{}, werr
 	}
 	if e := out.err(); e != nil {
 		return webapi.Card{}, e
 	}
+	b.noteAnswer(id, webAnswerRecord{ref: req.Ref, against: req.Against, by: person, label: label})
 	return b.Card(ctx, id)
+}
+
+// webAnswerRecord is the last answer a person gave from the web to one of
+// a card's decisions: the decision, the revision it was given against,
+// who gave it and the answer's label. An answer that leaves the card
+// where it stood ("stop here" at a gate parks the run, and the gate stays
+// pinned with a different answer set) moves the revision without leaving
+// anything in the log a later reader could name the answerer from — and a
+// second person who answered the same revision is told who got there
+// first, not that the card "moved".
+type webAnswerRecord struct {
+	ref, against, by, label string
+}
+
+// noteAnswer records an answer given through the web.
+func (b *Bridge) noteAnswer(id string, rec webAnswerRecord) {
+	if rec.ref == "" || rec.against == "" {
+		return
+	}
+	if rec.by == "" {
+		rec.by = "someone"
+	}
+	b.turnsMu.Lock()
+	defer b.turnsMu.Unlock()
+	if b.answered == nil {
+		b.answered = map[string]webAnswerRecord{}
+	}
+	b.answered[id] = rec
+}
+
+// answeredBy is the recorded answer to ref given against the very
+// revision against names, if there is one.
+func (b *Bridge) answeredBy(id, ref, against string) (webAnswerRecord, bool) {
+	b.turnsMu.Lock()
+	defer b.turnsMu.Unlock()
+	rec, ok := b.answered[id]
+	if !ok || against == "" || rec.ref != ref || rec.against != against {
+		return webAnswerRecord{}, false
+	}
+	return rec, true
+}
+
+// optionLabel is the label of one of the decision's options, or the id
+// itself when the decision has no such option.
+func (od *webOpenDecision) optionLabel(id string) string {
+	for _, o := range od.api.Options {
+		if o.ID == id {
+			return o.Label
+		}
+	}
+	return id
 }
 
 // answeredOrMoved is the 409 for an answer to a decision that is no
 // longer the one pinned: "answered" when the log has an answer to that
 // very decision, "moved" when the card simply stands somewhere else now
 // (a decision that changed kind, a stop nobody answered).
-func (b *Bridge) answeredOrMoved(ctx context.Context, id, ref string, cur webapi.Card) error {
+//
+// An answer given from the web to the very revision the page answered
+// against is named first: it is the one case the log cannot tell apart
+// from a card that moved on its own (an answer that leaves the card on
+// its stage, such as "stop here").
+func (b *Bridge) answeredOrMoved(ctx context.Context, id, ref, against string, cur webapi.Card) error {
+	if rec, ok := b.answeredBy(id, ref, against); ok {
+		return &WebError{Code: WebConflict, Reason: webapi.ConflictAnswered,
+			Text: "answered by " + rec.by + " — " + rec.label, By: rec.by, Receipt: rec.by + " chose “" + rec.label + "”"}
+	}
 	still := cur.Decision != nil && cur.Decision.Ref == ref
 	// a stop is answered by moving the card off its stage; one that only
 	// changed kind where it stands (idle, then a gate) was answered by
@@ -135,11 +194,15 @@ func (b *Bridge) answeredOrMoved(ctx context.Context, id, ref string, cur webapi
 		}
 		return &WebError{Code: WebConflict, Reason: webapi.ConflictAnswered, Text: text, By: by, Receipt: receipt}
 	}
+	// a card that pins nothing now — an interactive session mid-turn, a
+	// card a goal conducts or another process drives — has no decision to
+	// name, whatever stage the stale answer was for
 	now := "nothing is waiting on you"
 	switch {
+	case cur.Decision == nil:
 	case still:
 		now = cur.Decision.Against.Label
-	case cur.Decision != nil:
+	default:
 		now = cur.Decision.Question
 	}
 	return &WebError{Code: WebConflict, Reason: webapi.ConflictMoved, Text: "the card moved since you read it — now " + now}

@@ -49,6 +49,9 @@ type Bridge struct {
 	// card nobody is writing to has no entry.
 	turnsMu sync.Mutex
 	turns   map[string]*cardTurn
+	// answered is the last web answer per card (webintents.go), under
+	// turnsMu.
+	answered map[string]webAnswerRecord
 }
 
 // cardTurn is one card's turn: a chan of one, and how many requests hold
