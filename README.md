@@ -436,7 +436,12 @@ Two files in `.gummi/`, both scaffolded on first run:
   `instructions` files, `hooks` scripts run on board events, and `agent`
   for the agent tab.
 - **`profiles.yaml`**: named profiles mapping each role to
-  `{backend, model}`, and which one is the default.
+  `{backend, model}`, and which one is the default. A running board
+  picks up an edit for its next session (a session already running keeps
+  its model); an edit that does not parse, or that names a backend the
+  board did not start, is refused and the board says so. The claude
+  backend spells model versions with dashes (`claude-haiku-4-5`), not
+  the dots other CLIs use; `gummi doctor` flags the dotted form.
 
 The environment variables you meet first:
 

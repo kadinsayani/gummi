@@ -134,6 +134,21 @@ architect, for example.
 (endpoints, keys, credit rates) stays in each backend's native store, so
 this file is safe to commit.
 
+A running board (TUI or `gummi web`) re-reads the file when it changes,
+and its **next** session resolves against the edit; a session already
+running keeps the model it started with. An edit that does not parse, or
+that routes a role to a backend the board did not start, is refused — the
+board keeps the profiles it had and says why (the web Doctor view's
+`profiles:live` line) — and backends are started once, so a new backend
+needs a restart.
+
+Model ids are forwarded verbatim, so their spelling is the backend's: the
+claude CLI takes `claude-haiku-4-5`, while Copilot's spells the same
+model `claude-haiku-4.5`. `gummi doctor` fails a claude-backed role
+spelled the dotted way without needing `--deep`, and a scribe the backend
+refuses says so on the first card it fails, since discovery, estimates
+and landing drafts all run on it.
+
 ## Hooks
 
 `hooks:` in either config file runs a script when the board changes —

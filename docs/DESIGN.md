@@ -190,8 +190,20 @@ Stage semantics:
   never become part of the command), tab indentation and a flush-left
   `cmd:` are re-indented, and a plain value holding a colon-space is
   quoted. A block that still will not parse is reported wherever it is
-  read — never swallowed into "this card has no checks". Results recorded
-  in the spec. Deterministic floor, adaptive ceiling.
+  read — never swallowed into "this card has no checks". Nor is **no
+  block at all**: discovery is best-effort (a scribe the backend refuses
+  finds nothing), but a card it leaves without one is said so — a note
+  on the card's thread and a notice, discovery retried when verify
+  starts, a verify that still has nothing to run drawn as "no checks"
+  rather than "all passed", and a pass on such a card worded as the
+  reviewer's own. A failing scribe is said once per card, naming its
+  model, because the same failure also skips the estimate and the
+  landing draft. The approval baseline records the **commit it was
+  measured on**, and a check it excuses as already failing is excused
+  on that commit only: when the card's base moves (a rebase, a
+  restack), the excused checks are measured again on the new base
+  before verify writes anything off. Results recorded in the spec.
+  Deterministic floor, adaptive ceiling.
 - **Done** — you decide the feature is done. A verified card has **three
   endings**, and the answer set at the verify gate offers all three
   rather than assuming the first:
@@ -2121,10 +2133,23 @@ all deterministic:
 - **Citations resolve** — for every `path:line`/`path:start-end` reference in
   `## Findings`, the file exists, the line is in range, and the quoted
   snippet (when the doc quotes one) still matches the file.
-- **Coverage reconciles** — every `## Questions` thread and every
-  requirement referenced from `## Slices` maps to a slice row or an explicit
-  `## Out of scope` line; anything left unmapped is surfaced loudly rather
-  than silently dropped.
+- **Coverage reconciles** — every `## Questions` bullet is quoted in some
+  slice row's `requirements` (the fenced yaml under `## Slices`) or given an
+  explicit `## Out of scope` line `- <the bullet>: <why not>`; anything
+  left unmapped is surfaced loudly rather than silently dropped. The match
+  is the bullet's text, not its typography — case, spacing, a leading
+  question number, emphasis and trailing punctuation are ignored — and
+  nothing looser: a paraphrase, or a Findings paragraph that answers the
+  question, does not map it.
+
+The floor is not a rule the document meets by luck. Every research stage
+is told it in the same sentence the refusal prints
+(`verifydoc.CoverageRule`), and it runs **as part of verify**, not only at
+the done edge: its report opens the verify kickoff, so the verifier can
+repair what it names, and it runs again as the stage ends, where a failing
+floor fails the verify with the report on the thread — so a verify cannot
+pass a document that "mark done" then refuses. A refusal at the done edge
+names the unmapped questions and the rule.
 
 A safety note: research's autonomous work stage runs branchless, in the
 card's scratch tree (§4.3) rather than the main checkout, under the
@@ -3459,6 +3484,11 @@ It has **no artifact**: `Kind.ArtifactNoun` and `ArtifactPath` are empty
 for it, nothing is seeded at mint, and the thread is the record.
 
 ### 19.3a The conversation is the context, so the conversation is persisted
+
+The conversation is also what a freeform card's landing message is drafted
+from: with no spec to digest, the scribe gets the card's title and the
+person's own turns beside the branch's commits and diffstat, and is told a
+person's read of the diff — not a verify — stands behind the landing.
 
 Because the thread is the record, losing it loses the card. A freeform
 card's session therefore has a durable row like a stage session's — its
