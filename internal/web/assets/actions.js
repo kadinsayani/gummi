@@ -66,8 +66,13 @@ function dialog (card, a, { ask = null } = {}) {
       // a landing stopped to have its drafted message read: it is the
       // field's value now, to read and edit before it lands
       if (e.draft != null && e.needs === 'message') {
-        const ta = fields.get('message')?.el.querySelector('textarea')
-        if (ta && !ta.value.trim()) { ta.value = e.draft; ta.focus(); ta.setSelectionRange(0, 0); ta.scrollTop = 0 }
+        const f = fields.get('message')
+        const ta = f?.el.querySelector('textarea')
+        if (ta && !ta.value.trim() && e.draft.trim()) {
+          ta.value = e.draft
+          f.drafted?.()
+          ta.focus(); ta.setSelectionRange(0, 0); ta.scrollTop = 0
+        }
       }
     }
   }
@@ -130,11 +135,17 @@ function fieldFor (card, a, need) {
   const label = h('span', { class: 'fl' }, NOUN[need] || 'Value')
   const def = a.needs === need ? (a.default || '') : ''
   if (need === 'message') {
-    const ta = h('textarea', { id: 'action-input', testid: 'action-input', value: def, rows: /^(merge|squash)$/.test(a.id) ? 8 : 4, spellcheck: 'true' })
-    const hint = /^(merge|squash)$/.test(a.id)
-      ? h('span', { class: 'fh' }, def ? 'Drafted when verify passed. Read it, edit it if you like — this is what lands.' : 'Nothing was drafted yet: leave it empty and gummi drafts one for you to read first (this can take a minute), or write it.')
-      : null
-    return { el: h('label', { class: 'field' }, label, ta, hint), value: () => ({ message: ta.value.trim() }), focus: () => ta.focus() }
+    const landing = /^(merge|squash)$/.test(a.id)
+    const ta = h('textarea', { id: 'action-input', testid: 'action-input', value: def, rows: landing ? 8 : 4, spellcheck: 'true' })
+    const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(a, def ? 'default' : 'none')) : null
+    return {
+      el: h('label', { class: 'field' }, label, ta, hint),
+      value: () => ({ message: ta.value.trim() }),
+      focus: () => ta.focus(),
+      // the draft the server stopped to have read is in the box now: the
+      // hint says so rather than that nothing was drafted
+      drafted: () => { if (hint) clear(hint).append(messageHint(a, 'drafted')) }
+    }
   }
   if (need === 'number') {
     const inp = h('input', { id: 'action-input', testid: 'action-input', type: 'number', min: '0', inputmode: 'numeric', value: def })
@@ -160,6 +171,18 @@ function fieldFor (card, a, need) {
     placeholder: a.id === 'prlink' ? 'https://github.com/owner/repo/pull/7, or 7' : null
   })
   return { el: h('label', { class: 'field' }, label, inp), value: () => ({ message: inp.value.trim() }), focus: () => inp.focus() }
+}
+
+// messageHint is the line under a landing's or a squash's message: where
+// the message in the box came from (the verify gate's draft, one drafted
+// just now, or none yet) and what it becomes. A squash collapses the
+// branch where it is — nothing lands — so it never says "lands".
+function messageHint (a, from) {
+  const squash = a.id === 'squash'
+  const becomes = squash ? 'this is the one commit the branch becomes' : 'this is what lands'
+  if (from === 'none') return 'Nothing was drafted yet: leave it empty and gummi drafts one for you to read first (this can take a minute), or write it.'
+  const where = from === 'drafted' ? 'Drafted by gummi just now.' : squash ? 'Drafted for this branch.' : 'Drafted when verify passed.'
+  return `${where} Read it, edit it if you like — ${becomes}.`
 }
 
 // cardsField is a multi-select of the board's other cards, the ones set

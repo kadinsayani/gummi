@@ -107,6 +107,14 @@ test.describe('a verified card', () => {
     await expect(msg).toHaveValue(/^feat: land /);
     await expect(page.getByTestId('action-dialog')).toContainText('Drafted when verify passed');
     await shot(page, info, 'action-land');
+    // a squash in place is not a landing, and its hint does not say so
+    await page.getByTestId('action-cancel').click();
+    await menu(page, 'squash');
+    await expect(page.getByTestId('action-input')).toHaveValue(/^feat: land /);
+    await expect(page.getByTestId('action-hint')).toContainText('the one commit the branch becomes');
+    await expect(page.getByTestId('action-hint')).not.toContainText(/lands|Nothing was drafted/);
+    await page.getByTestId('action-cancel').click();
+    await menu(page, 'merge');
     await page.getByTestId('action-confirm').click();
     await expect(page.getByTestId('action-dialog')).toHaveCount(0, { timeout: 30_000 });
     if (phone(info)) await page.getByTestId('mnav-cards').click();

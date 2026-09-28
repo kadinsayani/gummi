@@ -60,7 +60,8 @@ once choosing), `resume-picked`, `resume-none` ("Not now").
 `card-actions-menu`, `action-<id>` (menu item), `action-btn-<id>` (pause/resume
 shown as a button), `action-dialog`, `action-question` (what it asks, or the
 server's question on a 409), `action-input` (the field its `needs` asks for,
-prefilled with its default), `action-card-<ID>` (a card in the dependency
+prefilled with its default), `action-hint` (under a landing's or a squash's
+message: where it came from and what it becomes), `action-card-<ID>` (a card in the dependency
 picker), `action-cards-filter`, `action-error` (the board's refusal, in the
 dialog), `action-confirm`, `action-cancel`.
 
@@ -73,7 +74,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `thread-items` | the polite live region holding items |
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
-| `receipt`, `verify`, `check-<name>`, `tool-group`, `stretch`, `thread-decision` | item kinds |
+| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `tool-group`, `stretch`, `thread-decision` | item kinds |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
 | `live`, `live-streaming`, `live-elsewhere`, `live-error`, `live-consult`, `live-consult-head`, `live-freeform`, `live-freeform-head` | live block parts |

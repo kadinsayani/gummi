@@ -257,7 +257,7 @@ function verify (it) {
   const checks = it.checks || []
   const fails = checks.filter(k => !k.ok).length
   return h('div', { class: 'msg st-verify', testid: 'verify' },
-    h('div', { class: 'av agent', 'aria-hidden': 'true' }, '✓?'),
+    h('div', { class: 'av agent', 'aria-hidden': 'true', testid: 'verify-avatar' }, avatarFor('verify')),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, 'verify'), h('span', { class: 'mono' }, clock(it.time)),
         h('span', { class: fails ? 'badc' : 'okc' }, fails ? `${fails} failed` : 'all passed')),

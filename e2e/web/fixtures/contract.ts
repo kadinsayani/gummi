@@ -103,7 +103,7 @@ export const stats = {
   ],
 };
 
-export async function mockCard(page: Page, id: string): Promise<MockHandle> {
+export async function mockCard(page: Page, id: string, opts: { kind?: string; decision?: any } = {}): Promise<MockHandle> {
   const m: MockHandle = { answers: [], annotations: [{ id: 1, file: 'wave.go', idx: 8, excerpt: 'func Wave', comment: 'Name it WaveAt?', by: 'Yuki', source: 'gummi', resolved: false }], nextAnswer: null, diffRev: 'a41c9e2' };
   const json = (route: Route, body: any, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
   const base = `**/api/cards/${id}`;
@@ -111,7 +111,8 @@ export async function mockCard(page: Page, id: string): Promise<MockHandle> {
     const res = await route.fetch();
     const card = await res.json();
     card.stage = 'verify';
-    card.decision = decision;
+    if (opts.kind) card.kind = opts.kind;
+    card.decision = opts.decision ?? decision;
     card.decisionsMore = 0;
     card.composer = { says: 'answers the pinned decision', route: 'answer' };
     await json(route, card);

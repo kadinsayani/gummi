@@ -1,5 +1,5 @@
 import { expect, test } from '../fixtures/test';
-import { mockCard } from '../fixtures/contract';
+import { decision, mockCard } from '../fixtures/contract';
 import { shot } from '../fixtures/shots';
 
 // The card page's drawing against contract-shaped answers (fixtures/
@@ -23,6 +23,8 @@ test('the thread folds past stages and draws every item kind', async ({ pairedPa
   await expect(page.getByTestId('stage-group-plan')).not.toHaveAttribute('open', '');
   await expect(page.getByTestId('stage-group-plan')).toContainText('approved');
   await expect(items.getByTestId('verify')).toContainText('1 failed');
+  // the verify pass wears an avatar like every other role's
+  await expect(items.getByTestId('verify-avatar')).toHaveText('VE');
   await expect(items.getByTestId('check-clean')).toContainText('TestCleanKeepsAdopted');
   await expect(page.getByTestId('live')).toContainText('reading the failure');
   // the safe renderer: markup in a message is text, links are http(s) only
@@ -76,6 +78,25 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   await expect(page.getByTestId('diff-viewed-1')).toBeChecked();
   expect(m.annotations).toHaveLength(2);
   await shot(page, info, 'diff');
+});
+
+test('the decision points only at what the card has', async ({ pairedPage: page }, info) => {
+  // a research card has no branch diff: its decision sends the reader to
+  // the document, whatever tab the decision is about
+  await mockCard(page, id, { kind: 'research' });
+  await page.reload();
+  if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+  await expect(page.getByTestId('decision-jump')).toHaveText('read the document');
+  await page.unrouteAll({ behavior: 'wait' });
+
+  // comments on a diff go with an answer only when one carries them
+  const { options } = decision;
+  await mockCard(page, id, { decision: { ...decision, options: options.map((o) => ({ ...o, carriesComments: false })) } });
+  await page.reload();
+  if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
+  await page.getByTestId('tab-diff').click();
+  await expect(page.getByTestId('diff-pending')).toHaveText('1 comment on this diff is still open.');
+  await expect(page.getByTestId('decision-carry')).toHaveCount(0);
 });
 
 test('the PR and stats tabs draw their reads', async ({ pairedPage: page }, info) => {
