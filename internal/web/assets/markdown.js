@@ -1,8 +1,8 @@
 // markdown.js — a small, safe markdown renderer for agent messages and specs.
 // It builds DOM nodes, never HTML strings, so nothing in the source can
 // become markup: raw HTML shows as text. Supported: paragraphs, headings,
-// fenced code (with a hook for custom fences such as gummi-checks), code
-// spans, bold, italic, lists (nested by indent), block quotes, rules, pipe
+// fenced code (with a hook for custom fences such as gummi-checks),
+// indented code, code spans (both keep their spaces as written), bold, italic, lists (nested by indent), block quotes, rules, pipe
 // tables and links (http and https only, opened with rel=noopener).
 // Lines starting with `%%` are review notes and prompts; the spec view shows
 // notes on their own, so they are dropped here.
@@ -10,6 +10,7 @@
 import { h } from './dom.js?v=__ASSET_V__'
 
 const FENCE = /^\s{0,3}(`{3,}|~{3,})\s*([\w+-]*)/
+const INDENTED = /^(?: {4}| {0,3}\t)/
 const HEADING = /^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$/
 const RULE = /^\s{0,3}([-*_])(\s*\1){2,}\s*$/
 const QUOTE = /^\s{0,3}>\s?/
@@ -41,6 +42,17 @@ function blocks (lines, opts) {
     const line = lines[i]
     let m
     if (!line.trim()) { flush(); i++; continue }
+    if (!para.length && INDENTED.test(line)) {
+      // an indented code block (CommonMark §4.4): four columns in, and
+      // never one that interrupts a paragraph — an indented line under a
+      // paragraph's text continues it. It runs through blank lines to the
+      // first line that is less indented; its blank tail is not its own.
+      const body = []
+      while (i < lines.length && (INDENTED.test(lines[i]) || !lines[i].trim())) body.push(lines[i++].replace(INDENTED, ''))
+      while (!body[body.length - 1].trim()) { body.pop(); i-- }
+      out.push(h('pre', { tabindex: '0' }, h('code', null, body.join('\n'))))
+      continue
+    }
     if ((m = FENCE.exec(line))) {
       flush()
       const mark = m[1]
@@ -160,7 +172,9 @@ export function inline (text) {
     let start = m.index
     if (m[7] !== undefined) start += m[6].length // keep the char before _em_
     if (start > last) out.push(...breaks(text.slice(last, start)))
-    if (m[1]) out.push(h('code', null, m[2]))
+    // a code span keeps its spaces (app.css) but not its line breaks,
+    // which CommonMark reads as spaces
+    if (m[1]) out.push(h('code', null, m[2].replace(/\n/g, ' ')))
     else if (m[3] !== undefined) out.push(h('strong', null, inline(m[3])))
     else if (m[4] !== undefined) out.push(h('strong', null, inline(m[4])))
     else if (m[5] !== undefined) out.push(h('em', null, inline(m[5])))
