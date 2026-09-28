@@ -25,7 +25,8 @@ import { initPanel, setTab, togglePanel } from './panel.js?v=__ASSET_V__'
 import { initMobile } from './mobile.js?v=__ASSET_V__'
 import { initKeys } from './keys.js?v=__ASSET_V__'
 import { palette, keysHelp } from './palette.js?v=__ASSET_V__'
-import { showPair } from './pair.js?v=__ASSET_V__'
+import { showPair, showPending } from './pair.js?v=__ASSET_V__'
+import { initApprovals } from './approvals.js?v=__ASSET_V__'
 import { h } from './dom.js?v=__ASSET_V__'
 import {
   initSelection, loadBoard, select, refresh, refreshAll, loadLive, nextNeeding, step
@@ -49,6 +50,12 @@ async function boot () {
   }
   set({ session })
   $('#boot').hidden = true
+  if (session.approval === 'pending') {
+    // paired, but not let in yet: the wait, until a paired page answers
+    $('#app').hidden = true
+    showPending(session, () => { $('#pair').hidden = true; boot() })
+    return
+  }
   if (!session.authed && !session.openAccess) {
     $('#app').hidden = true
     showPair(session, () => { $('#pair').hidden = true; boot() })
@@ -118,6 +125,7 @@ async function startBoard () {
   initMobile()
   initSelection()
   initResume({ loadBoard, select: ctx.select })
+  initApprovals()
   registerWorker()
   initKeys({
     palette: () => palette(ctx.select),

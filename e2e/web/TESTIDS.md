@@ -24,7 +24,19 @@ in `internal/web/assets/*.js`; keep this list in step when adding one.
 ## Pairing
 
 `pair`, `pair-form`, `pair-name`, `pair-code`, `pair-submit`, `pair-error`
-(wrong code, with "N tries left"), `pair-note`, `pair-new` (print a new code).
+(wrong code, with "N tries left"), `pair-note`, `pair-new` (print a new code),
+`pair-refused` (the form shown again after a request was rejected or lapsed).
+
+A browser paired while another has the board, with a code other than the one
+printed at start, waits to be let in: `pending` (the waiting screen),
+`pending-text`, `pending-expires` (m:ss left), `pending-error`,
+`pending-cancel` (withdraw the request).
+
+On a page at the board: `approvals-slot` (always present, hidden when nobody
+waits), `approvals` (the request banner), `approval-<deviceId>` (one request),
+and inside it `approval-person`, `approval-device`, `approval-source`,
+`approval-via`, `approval-time`, `approval-ua`, `approval-approve`,
+`approval-reject`.
 
 ## Rail
 

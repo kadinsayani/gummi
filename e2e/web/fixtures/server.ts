@@ -23,6 +23,11 @@ export class GummiServer {
   readonly logFile: string;
   /** The code the server printed at start, until something redeems it. */
   code: string | undefined;
+  /**
+   * The request client of the first device pair() let in: it approves a
+   * later device that waits to be let in (see pair()).
+   */
+  approver: APIRequestContext | undefined;
   private proc: ChildProcess | undefined;
   private output = '';
 
@@ -162,11 +167,24 @@ export class GummiServer {
 export async function pair(page: Page, server: GummiServer, name = 'Tester', via: 'api' | 'ui' = 'api'): Promise<void> {
   const code = await server.freshCode();
   if (via === 'api') {
-    const res = await page.context().request.post(`${server.url}/api/pair`, {
+    const request = page.context().request;
+    const res = await request.post(`${server.url}/api/pair`, {
       data: { code, name },
       headers: { Origin: server.url },
     });
     if (!res.ok()) throw new Error(`POST /api/pair → ${res.status()}: ${await res.text()}`);
+    const body = await res.json();
+    if (body.pending) {
+      // A second device paired with `gummi web pair`'s code waits to be
+      // let in (DESIGN §20.3): the first device paired here lets it in.
+      if (!server.approver) throw new Error(`${name} waits to be let in, and no device paired before it can approve it`);
+      const ok = await server.approver.post(`${server.url}/api/devices/${encodeURIComponent(body.deviceId)}/approve`, {
+        headers: { Origin: server.url },
+      });
+      if (!ok.ok()) throw new Error(`approving ${name} → ${ok.status()}: ${await ok.text()}`);
+    } else {
+      server.approver ??= request;
+    }
     await page.goto(server.url);
     return;
   }
