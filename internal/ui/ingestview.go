@@ -88,12 +88,23 @@ func (iv *ingestView) setCursor(n int) {
 	iv.cursor = min(max(n, 0), max(len(iv.props)-1, 0))
 }
 
-// mergeIntoPrev folds the cursor proposal into the one above it: their
-// refs, dependencies, open questions, and section content combine, and the
-// cursor proposal is removed. The previous proposal's title and one-liner
-// win (it is the survivor). A no-op at the top of the list.
+// mergeIntoPrev folds the cursor proposal into the one above it (see
+// mergeAt) and moves the cursor onto the survivor. A no-op at the top of
+// the list.
 func (iv *ingestView) mergeIntoPrev() bool {
 	i := iv.cursor
+	if !iv.mergeAt(i) {
+		return false
+	}
+	iv.setCursor(i - 1)
+	return true
+}
+
+// mergeAt folds proposal i into the one above it: their refs,
+// dependencies, open questions, and section content combine, and i is
+// removed. The previous proposal's title and one-liner win (it is the
+// survivor). False at the top of the list or past its end.
+func (iv *ingestView) mergeAt(i int) bool {
 	if i <= 0 || i >= len(iv.props) {
 		return false
 	}
@@ -114,9 +125,31 @@ func (iv *ingestView) mergeIntoPrev() bool {
 		}
 	}
 	iv.props = append(iv.props[:i], iv.props[i+1:]...)
-	iv.setCursor(i - 1)
 	return true
 }
+
+// validProposalTitle refuses a title that does not slugify: it becomes
+// the card's ID slug.
+func validProposalTitle(title string) error {
+	_, err := domain.Slugify(title)
+	return err
+}
+
+// rename retitles proposal i, refusing a title that cannot become a slug.
+func (iv *ingestView) rename(i int, title string) error {
+	if err := validProposalTitle(title); err != nil {
+		return err
+	}
+	iv.props[i].p.Title = title
+	return nil
+}
+
+// setOneLiner replaces proposal i's one-line summary.
+func (iv *ingestView) setOneLiner(i int, text string) { iv.props[i].p.OneLiner = text }
+
+// setDropped excludes proposal i from materialization, or brings it back;
+// a dropped proposal stays listed so the drop can be undone.
+func (iv *ingestView) setDropped(i int, dropped bool) { iv.props[i].dropped = dropped }
 
 // bindings is the ingest review surface's key table (see keymap.go).
 func (iv *ingestView) bindings() []binding {
@@ -152,8 +185,7 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 			question:     fmt.Sprintf("discard %d proposal(s)?", n),
 			detail:       "they came from a paid architect pass over " + iv.source + " and are not recoverable — nothing has been created yet",
 			onConfirm: func() tea.Cmd {
-				m.ingest = nil
-				m.notice = noticeMsg{text: "ingest discarded — nothing created"}
+				m.discardIngest()
 				return nil
 			},
 		})
@@ -168,7 +200,7 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 		iv.setCursor(iv.cursor - m.mainPage())
 	case "x":
 		if len(iv.props) > 0 {
-			iv.props[iv.cursor].dropped = !iv.props[iv.cursor].dropped
+			iv.setDropped(iv.cursor, !iv.props[iv.cursor].dropped)
 		}
 	case "r", "c":
 		iv.promptTitle(m)
@@ -184,6 +216,13 @@ func (m *Shell) handleIngestKey(key string) tea.Cmd {
 	return nil
 }
 
+// discardIngest closes the review surface with nothing created: the
+// discard confirm's yes, and the web face's discard.
+func (m *Shell) discardIngest() {
+	m.ingest = nil
+	m.notice = noticeMsg{text: "ingest discarded — nothing created"}
+}
+
 // promptTitle opens the rename dialog for the cursor proposal; the new
 // title must slugify (it becomes the feature's ID slug).
 func (iv *ingestView) promptTitle(m *Shell) {
@@ -192,13 +231,9 @@ func (iv *ingestView) promptTitle(m *Shell) {
 	}
 	i := iv.cursor
 	cur := iv.props[i].p.Title
-	m.Overlay.Push(newTextPrompt("rename feature", cur, "feature title",
-		func(s string) error {
-			_, err := domain.Slugify(s)
-			return err
-		},
+	m.Overlay.Push(newTextPrompt("rename feature", cur, "feature title", validProposalTitle,
 		func(s string) tea.Cmd {
-			iv.props[i].p.Title = s
+			_ = iv.rename(i, s) // validated above
 			return nil
 		}))
 }
@@ -212,7 +247,7 @@ func (iv *ingestView) promptOneLiner(m *Shell) {
 	cur := iv.props[i].p.OneLiner
 	m.Overlay.Push(newTextPrompt("edit one-liner", cur, "one-line summary", nil,
 		func(s string) tea.Cmd {
-			iv.props[i].p.OneLiner = s
+			iv.setOneLiner(i, s)
 			return nil
 		}))
 }
@@ -245,10 +280,23 @@ func (m *Shell) approveIngest() tea.Cmd {
 	return nil
 }
 
-// materializeIngest mints the kept proposals and reloads the board. It
-// captures the engine and result before clearing the surface so the
-// command can't race a re-open.
+// materializeIngest mints the kept proposals and reloads the board.
 func (m *Shell) materializeIngest() tea.Cmd {
+	mint := m.takeIngest()
+	if mint == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		_, notice := mint(context.Background())
+		return notice
+	}
+}
+
+// takeIngest closes the review surface and returns what mints its kept
+// proposals: the approval the confirm's yes and the web face's approve
+// share. It captures the engine and result before clearing the surface so
+// the minting can't race a re-open. Nil when there is nothing to approve.
+func (m *Shell) takeIngest() func(context.Context) ([]domain.Feature, noticeMsg) {
 	iv := m.ingest
 	if iv == nil || m.engine == nil {
 		return nil
@@ -257,21 +305,21 @@ func (m *Shell) materializeIngest() tea.Cmd {
 	res := iv.kept()
 	m.ingest = nil
 	if cardID := iv.decomposeFor; cardID != "" {
-		return func() tea.Msg {
-			created, err := eng.MintProposals(context.Background(), cardID, res)
+		return func(ctx context.Context) ([]domain.Feature, noticeMsg) {
+			created, err := eng.MintProposals(ctx, cardID, res)
 			if err != nil {
-				return noticeMsg{text: "decompose: " + sanitize(err.Error()), isErr: true}
+				return created, noticeMsg{text: "decompose: " + sanitize(err.Error()), isErr: true}
 			}
-			return noticeMsg{text: fmt.Sprintf("created %d card%s from %s", len(created), plural(len(created)), cardID), reload: true}
+			return created, noticeMsg{text: fmt.Sprintf("created %d card%s from %s", len(created), plural(len(created)), cardID), reload: true}
 		}
 	}
 	opts := engine.MaterializeOpts{Profile: iv.profile, Envelope: iv.envelope, Repo: iv.repo}
-	return func() tea.Msg {
-		created, err := eng.Materialize(context.Background(), res, opts)
+	return func(ctx context.Context) ([]domain.Feature, noticeMsg) {
+		created, err := eng.Materialize(ctx, res, opts)
 		if err != nil {
-			return noticeMsg{text: "ingest: " + sanitize(err.Error()), isErr: true}
+			return created, noticeMsg{text: "ingest: " + sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("created %d card%s in todo", len(created), plural(len(created))), reload: true}
+		return created, noticeMsg{text: fmt.Sprintf("created %d card%s in todo", len(created), plural(len(created))), reload: true}
 	}
 }
 
@@ -281,6 +329,12 @@ func (m *Shell) materializeIngest() tea.Cmd {
 // stream through a channel into the ingestRun feed so the user can watch
 // the architect work instead of staring at a static notice.
 func (m *Shell) startIngest(path, profile, repo string) tea.Cmd {
+	return m.startIngestWith(path, profile, repo, m.envelope)
+}
+
+// startIngestWith is startIngest with the envelope the approved cards are
+// made with named, rather than the board's default.
+func (m *Shell) startIngestWith(path, profile, repo string, envelope int) tea.Cmd {
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
 		return nil
@@ -289,7 +343,7 @@ func (m *Shell) startIngest(path, profile, repo string) tea.Cmd {
 		m.notice = noticeMsg{text: "an ingest is already decomposing — wait for it", isErr: true}
 		return nil
 	}
-	eng, envelope := m.engine, m.envelope
+	eng := m.engine
 	m.ingestRun = newIngestRunView(path)
 	m.notice = noticeMsg{text: "ingesting " + path + " — decomposing…"}
 	steps := make(chan engine.IngestStep, 256)

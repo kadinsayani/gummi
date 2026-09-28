@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -71,6 +72,21 @@ func (m *Shell) toggleGoalFold() bool {
 	return true
 }
 
+// goalCardCounts counts a goal's landed cards and its cards, the dropped
+// ones left out: they are no longer part of the goal's work.
+func goalCardCounts(g *engine.GoalReport) (landed, cards int) {
+	for _, c := range g.Cards {
+		switch c.State {
+		case "landed":
+			landed++
+		case "dropped":
+			continue
+		}
+		cards++
+	}
+	return landed, cards
+}
+
 // goalRowTag is a goal row's progress on the board: done-when met, cards
 // landed, budget spent, and whether it is waiting for you. Folded, it also
 // says how many cards are under it.
@@ -80,16 +96,7 @@ func goalRowTag(s *theme.Styles, r featureRow, open bool) string {
 	}
 	g := r.Goal
 	met, total := g.Met()
-	landed, cards := 0, 0
-	for _, c := range g.Cards {
-		switch c.State {
-		case "landed":
-			landed++
-		case "dropped":
-			continue // no longer part of the goal's work
-		}
-		cards++
-	}
+	landed, cards := goalCardCounts(g)
 	tag := fmt.Sprintf("%d/%d done-when · %d/%d cards · %.0f/%d", met, total, landed, cards, g.Budget.Total, g.Budget.Envelope)
 	switch {
 	case total == 0 && len(g.Cards) == 0:

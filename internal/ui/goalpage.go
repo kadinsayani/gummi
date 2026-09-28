@@ -222,6 +222,21 @@ func (m *Shell) goalPageRender(w, h int) string {
 	return strings.Join(lines[gp.scroll:end], "\n")
 }
 
+// goalStatusWord is the goal page's one word for where a goal stands.
+func goalStatusWord(r engine.GoalReport) string {
+	switch {
+	case r.Ready:
+		return "ready for you"
+	case r.WrappingUp:
+		return "wrapping up"
+	case r.Stage == domain.StagePlan:
+		return "agreeing the plan"
+	case r.Stage == domain.StageDone:
+		return "done"
+	}
+	return "running"
+}
+
 // goalPageLines renders the goal page as lines, top to bottom. cardAt
 // tags each card in report.Cards with the line its row landed on — the
 // cards are the one region with a cursor, and the render is the only
@@ -255,17 +270,7 @@ func goalPageLines(s *theme.Styles, gp *goalPageView, w int) ([]string, []int) {
 	plain := func(s ...string) string { return strings.Join(s, "") }
 
 	met, total := r.Met()
-	status := "running"
-	switch {
-	case r.Ready:
-		status = "ready for you"
-	case r.WrappingUp:
-		status = "wrapping up"
-	case r.Stage == domain.StagePlan:
-		status = "agreeing the plan"
-	case r.Stage == domain.StageDone:
-		status = "done"
-	}
+	status := goalStatusWord(r)
 	stateStyle := s.Info
 	if r.Ready {
 		stateStyle = s.Success
@@ -476,16 +481,20 @@ func (d *reverseDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.cursor--
 		}
 	case "enter":
-		dec := d.decisions[d.cursor]
-		f, eng := d.f, d.eng
-		return true, func() tea.Msg {
-			if err := eng.ReverseGoalDecision(context.Background(), f.ID, dec.DecisionRef(), ""); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-			return noticeMsg{text: string(f.ID) + ": " + dec.DecisionRef() + " reversed — the goal went back to its cards", reload: true, clearInbox: f.ID}
-		}
+		return true, reverseGoalDecision(d.eng, d.f, d.decisions[d.cursor].DecisionRef(), "")
 	}
 	return false, nil
+}
+
+// reverseGoalDecision has a goal's lead take the other way on one of its
+// decisions for review: the dialog's enter, and the web face's reverse.
+func reverseGoalDecision(eng *engine.Engine, f domain.Feature, ref, why string) tea.Cmd {
+	return func() tea.Msg {
+		if err := eng.ReverseGoalDecision(context.Background(), f.ID, ref, why); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + ": " + ref + " reversed — the goal went back to its cards", reload: true, clearInbox: f.ID}
+	}
 }
 
 func (d *reverseDialog) View(s *theme.Styles, w, h int) string {

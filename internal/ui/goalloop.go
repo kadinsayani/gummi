@@ -510,37 +510,45 @@ func (m *Shell) goalNote(f domain.Feature, note string) tea.Cmd {
 
 // confirmStopGoal asks before telling a goal to finish now.
 func (m *Shell) confirmStopGoal(f domain.Feature) tea.Cmd {
-	eng := m.engine
 	m.Overlay.Push(&confirmDialog{
 		id: "confirm-stop-goal", question: "Stop " + string(f.ID) + "?", confirmLabel: "Stop",
-		detail: "Nothing new starts. Verified cards land on the goal branch, the rest are dropped, and the goal comes back to you partial.",
-		onConfirm: func() tea.Cmd {
-			return func() tea.Msg {
-				if err := eng.StopGoal(context.Background(), f.ID); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				}
-				return noticeMsg{text: string(f.ID) + " is wrapping up", reload: true}
-			}
-		},
+		detail:    "Nothing new starts. Verified cards land on the goal branch, the rest are dropped, and the goal comes back to you partial.",
+		onConfirm: func() tea.Cmd { return m.stopGoal(f) },
 	})
 	return nil
+}
+
+// stopGoal tells a goal to finish now: the confirm's yes, and the web
+// face's stop.
+func (m *Shell) stopGoal(f domain.Feature) tea.Cmd {
+	eng := m.engine
+	return func() tea.Msg {
+		if err := eng.StopGoal(context.Background(), f.ID); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + " is wrapping up", reload: true}
+	}
 }
 
 // confirmAbandonGoal asks before closing a goal that is not ready: its
 // unfinished cards are dropped and its branch is kept until you clean it.
 func (m *Shell) confirmAbandonGoal(f domain.Feature) tea.Cmd {
-	eng := m.engine
 	m.Overlay.Push(&confirmDialog{
 		id: "confirm-abandon-goal", question: "Abandon " + string(f.ID) + "?", confirmLabel: "Abandon",
-		detail: "Its unfinished cards are dropped and the goal closes without landing anything. Its branch stays until you clean it up.",
-		onConfirm: func() tea.Cmd {
-			return func() tea.Msg {
-				if _, err := eng.AbandonGoal(context.Background(), f.ID, "user"); err != nil {
-					return noticeMsg{text: sanitize(err.Error()), isErr: true}
-				}
-				return noticeMsg{text: string(f.ID) + " abandoned — its branch is kept", reload: true, clearInbox: f.ID}
-			}
-		},
+		detail:    "Its unfinished cards are dropped and the goal closes without landing anything. Its branch stays until you clean it up.",
+		onConfirm: func() tea.Cmd { return m.abandonGoal(f) },
 	})
 	return nil
+}
+
+// abandonGoal closes a goal without landing anything: the confirm's yes,
+// and the web face's abandon.
+func (m *Shell) abandonGoal(f domain.Feature) tea.Cmd {
+	eng := m.engine
+	return func() tea.Msg {
+		if _, err := eng.AbandonGoal(context.Background(), f.ID, "user"); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		}
+		return noticeMsg{text: string(f.ID) + " abandoned — its branch is kept", reload: true, clearInbox: f.ID}
+	}
 }

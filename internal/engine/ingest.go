@@ -170,11 +170,20 @@ func (e *Engine) Ingest(ctx context.Context, sourcePath, profile, repo string, p
 // prior ingest's provenance never silently resolves to the wrong doc;
 // re-stashing an identical document reuses its existing file.
 func (e *Engine) stashIngestSource(srcPath string, content []byte) (relPath, absPath string, err error) {
+	return e.StashIngestDocument(filepath.Base(srcPath), content)
+}
+
+// StashIngestDocument saves content under .gummi/ingest/ as name — or
+// name-2, name-3… when a different document already has it — and returns
+// its repo-relative and absolute paths. It is where a document with no
+// file of its own (one pasted into the web face) is put before Ingest
+// reads it; Ingest's own stash then finds it already there.
+func (e *Engine) StashIngestDocument(name string, content []byte) (relPath, absPath string, err error) {
 	dir := e.cfg.Workspace.IngestDir()
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return "", "", fmt.Errorf("creating ingest dir: %w", err)
 	}
-	name, err := uniqueIngestName(dir, filepath.Base(srcPath), content)
+	name, err = uniqueIngestName(dir, filepath.Base(name), content)
 	if err != nil {
 		return "", "", err
 	}

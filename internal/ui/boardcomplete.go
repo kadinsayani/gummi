@@ -448,13 +448,7 @@ func (m *Shell) runBoardProfileCommand(arg string) tea.Cmd {
 	// popup's prefix filter, the command word itself) — and the declared
 	// spelling is what gets used, never what was typed, so the name that
 	// reaches the engine is one resolveBoardRole can actually find.
-	name := ""
-	for _, p := range m.engine.BoardProfiles() {
-		if strings.EqualFold(p.Name, arg) {
-			name = p.Name
-			break
-		}
-	}
+	name := m.boardProfileNamed(arg)
 	if name == "" {
 		m.notice = noticeMsg{text: "no profile named " + arg, isErr: true}
 		return nil
@@ -464,6 +458,20 @@ func (m *Shell) runBoardProfileCommand(arg string) tea.Cmd {
 		"the current conversation ends; a fresh one starts under "+name,
 		engine.BoardOpts{Profile: name},
 	)
+}
+
+// boardProfileNamed is the declared spelling of the profile arg names,
+// matched case-insensitively, or "" when no profile has that name.
+func (m *Shell) boardProfileNamed(arg string) string {
+	if m.engine == nil {
+		return ""
+	}
+	for _, p := range m.engine.BoardProfiles() {
+		if strings.EqualFold(p.Name, arg) {
+			return p.Name
+		}
+	}
+	return ""
 }
 
 // runBoardModelCommand answers /model <arg>. Unlike /profile, any
@@ -510,7 +518,7 @@ func (m *Shell) confirmBoardReopen(question, detail string, opts engine.BoardOpt
 	// transcript is still empty while a turn is very much in flight —
 	// skipping the confirm there would discard a message the user watched
 	// leave the composer.
-	if snap := m.boardSnapshot(); m.board == nil || (len(snap.Transcript) == 0 && !snap.Busy) {
+	if !m.boardReopenLoses() {
 		return m.reopenBoard(opts)
 	}
 	m.Overlay.Push(&confirmDialog{
@@ -522,6 +530,13 @@ func (m *Shell) confirmBoardReopen(question, detail string, opts engine.BoardOpt
 		onConfirm:    func() tea.Cmd { return m.reopenBoard(opts) },
 	})
 	return nil
+}
+
+// boardReopenLoses reports whether reopening the board session would end
+// a conversation someone could miss: a transcript, or a turn in flight.
+func (m *Shell) boardReopenLoses() bool {
+	snap := m.boardSnapshot()
+	return m.board != nil && (len(snap.Transcript) > 0 || snap.Busy)
 }
 
 // boardCommandWord splits a composer line into the command word and its
