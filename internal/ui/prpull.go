@@ -3,10 +3,10 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
 )
@@ -57,7 +57,7 @@ func (m *Shell) pullPRReview(f domain.Feature) tea.Cmd {
 		diff, diffErr := m.wt.Diff(ctx, &f)
 		var worktreeLines []string
 		if diffErr == nil {
-			worktreeLines = strings.Split(strings.TrimRight(diff, "\n"), "\n")
+			worktreeLines = diffannot.Lines(diff)
 		}
 		res, err := pr.Ingest(ctx, m.store, f.ID, worktreeLines, threads)
 		if err != nil {

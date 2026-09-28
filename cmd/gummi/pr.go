@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/state"
@@ -364,7 +365,7 @@ func runPRCommentsIngest(ctx context.Context, pe *prEnv, f *domain.Feature, thre
 	diff, diffErr := pe.wt.Diff(ctx, f)
 	var worktreeLines []string
 	if diffErr == nil {
-		worktreeLines = strings.Split(strings.TrimRight(diff, "\n"), "\n")
+		worktreeLines = diffannot.Lines(diff)
 	}
 
 	res, err := pr.Ingest(ctx, pe.store, f.ID, worktreeLines, threads)

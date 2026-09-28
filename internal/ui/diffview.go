@@ -79,7 +79,7 @@ func (m *Shell) reloadDiff() tea.Cmd {
 func newDiffView(f domain.Feature, diff string, anns []domain.DiffAnnotation) *diffView {
 	dv := &diffView{
 		f:       f,
-		lines:   strings.Split(strings.TrimRight(diff, "\n"), "\n"),
+		lines:   diffannot.Lines(diff),
 		anns:    anns,
 		located: map[int][]int{},
 		cursor:  1,

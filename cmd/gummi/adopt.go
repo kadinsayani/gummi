@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/state"
@@ -153,7 +154,7 @@ func linkAdoptedPR(ctx context.Context, store *state.Store, wt *worktree.Manager
 	}
 	var lines []string
 	if diff, derr := wt.Diff(ctx, f); derr == nil {
-		lines = strings.Split(strings.TrimRight(diff, "\n"), "\n")
+		lines = diffannot.Lines(diff)
 	}
 	res, err := pr.Ingest(ctx, store, f.ID, lines, threads)
 	if err != nil {
