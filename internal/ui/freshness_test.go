@@ -261,21 +261,64 @@ func TestAWorktreeCommitElsewhereReachesTheOpenCard(t *testing.T) {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
+	waitChangeAfter(t, log, mark, webapi.ChangeCard, "FD-001", "a commit in the open card's worktree")
+}
+
+// A spec gummi itself rewrites — check discovery writing the gummi-checks
+// block, a scribe's estimate — reaches the open page, so its spec tab
+// reloads onto the new revision instead of keeping the one without the
+// checks until a reload. The same watch is what moves an open goal's
+// "N of M done-when met" once its verify writes the results.
+func TestASpecRewrittenUnderAnOpenCardReachesItsPage(t *testing.T) {
+	b, log, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	ctx := context.Background()
+	var path string
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		ff := f
+		p, _ := ff.ArtifactFile(m.wt.Root())
+		path = p
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("# Dark mode\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := b.Card(ctx, "FD-001"); err != nil { // the page opens it
+		t.Fatal(err)
+	}
+	time.Sleep(2*foreignInterval + 200*time.Millisecond)
+	log.mu.Lock()
+	mark := len(log.all)
+	log.mu.Unlock()
+	if err := os.WriteFile(path, []byte("# Dark mode\n\n```gummi-checks\nbuild: go build ./...\n```\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	waitChangeAfter(t, log, mark, webapi.ChangeCard, "FD-001", "a spec rewritten under the open card")
+}
+
+// waitChangeAfter waits for a change of kind about id reported after the
+// mark'th one.
+func waitChangeAfter(t *testing.T, log *changeLog, mark int, kind webapi.ChangeKind, id, what string) {
+	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		log.mu.Lock()
 		var seen bool
 		for _, c := range log.all[mark:] {
-			seen = seen || (c.Kind == webapi.ChangeCard && c.ID == "FD-001")
+			seen = seen || (c.Kind == kind && c.ID == id)
 		}
 		log.mu.Unlock()
 		if seen {
 			return
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("a commit in the open card's worktree never reached its page")
+			t.Fatalf("%s never reached its page (no %s change for %s)", what, kind, id)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
 }
-

@@ -148,7 +148,11 @@ func webConversation(snap engine.Snapshot, sending, verb string) *webapi.Convers
 // assistant message still arriving, and the tool call in flight.
 func webTranscript(snap engine.Snapshot) (turns []webapi.Turn, streaming string, tool *webapi.ToolCall) {
 	tr := snap.Transcript
-	if n := len(tr); n > 0 && tr[n-1].Author == engine.AuthorAssistant && tr[n-1].Streaming {
+	// A message is still arriving only while a turn is in flight. One a
+	// pause or a failure cut off is flagged streaming forever, and the
+	// page drew it under "writing" with a spinner for as long as the
+	// session stayed around; it is the settled turn it stopped as.
+	if n := len(tr); n > 0 && tr[n-1].Author == engine.AuthorAssistant && tr[n-1].Streaming && snap.Busy {
 		streaming = boundTail(threadfold.Sanitize(tr[n-1].Content), webapi.LiveText)
 		tr = tr[:n-1]
 	}

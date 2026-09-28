@@ -79,7 +79,7 @@ export async function loadThread (id = state.sel, full = false) {
     const items = after ? upsert(state.thread.items, t.items || []) : (t.items || [])
     const lastSeq = Math.max(t.lastSeq || 0, after)
     set({ thread: { items, lastSeq } })
-    if (t.live !== undefined && !liveRoute) set({ live: t.live || null })
+    if (t.live !== undefined && !liveRoute) set({ live: liveOrNull(t.live) })
   } catch (err) {
     if (state.sel !== id) return
     set({ thread: { items: state.thread?.items || [], lastSeq: state.thread?.lastSeq || 0, unavailable: err.notBuilt, err } })
@@ -109,7 +109,7 @@ export async function loadLive (id = state.sel) {
   liveBusy = true
   try {
     const l = await get(cardPath(id, 'live'))
-    if (state.sel === id) set({ live: l || null })
+    if (state.sel === id) set({ live: liveOrNull(l) })
   } catch (err) {
     if (err.notBuilt) liveRoute = false
   } finally {
@@ -118,11 +118,27 @@ export async function loadLive (id = state.sel) {
   }
 }
 
-// refresh is what a "card" event for the open card does.
+// liveOrNull is the server's live block, or null when it says nothing is
+// live: an answer with no session, no busy word, no transcript and no
+// conversation is the end of whatever the page was drawing, and must
+// clear it rather than leave the last spinner standing.
+export function liveOrNull (l) {
+  if (!l) return null
+  const talk = (c) => c && (c.busy || c.sending || c.streaming || c.err || c.turns?.length)
+  const any = l.busy || l.state || l.streaming || l.tool || l.err || l.turns?.length ||
+    talk(l.consult) || talk(l.freeform) || l.elsewhere
+  return any ? l : null
+}
+
+// refresh is what a "card" event for the open card does. The live block is
+// read again too: a card that moved (a run ended, a pause taken, a check
+// finished) has usually ended what the block was drawing, and the page must
+// not keep a spinner the server no longer reports.
 export function refresh (id = state.sel) {
   if (!id || id !== state.sel) return
   loadCard(id)
   loadThread(id)
+  loadLive(id)
   set({ cardRev: (state.cardRev || 0) + 1 })
 }
 
