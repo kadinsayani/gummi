@@ -2729,6 +2729,13 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 			e.yieldSlotForAsk(s)
 			return
 		}
+		// a turn that ended with its question still open has not finished
+		// the stage: the card stays parked on the question.
+		if e.askOutlivedItsCall(s) {
+			e.persist(s)
+			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})
+			return
+		}
 		kind = EventIdle
 		// an autonomous turn completing frees the slot (atomically, so a
 		// racing Pause isn't overwritten)

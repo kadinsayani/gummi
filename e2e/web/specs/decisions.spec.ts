@@ -280,6 +280,55 @@ test.describe('an agent’s question', () => {
   });
 });
 
+// A backend's own MCP client bounds a tool call (a minute, on several of
+// them), and a question is a tool call that waits on a person. When the
+// bound passes the agent is told its call failed, says so and ends its
+// turn, with the question still on the page. A turn that ended on an open
+// question has not finished the stage: the card waits where it is, and
+// the answer reaches the architect as its next turn.
+test.describe('a question the agent stopped waiting on', () => {
+  async function ask(api: any): Promise<string> {
+    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-gives-up] Add a patient helper' })).json;
+    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+    await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
+    return c.id;
+  }
+
+  test('stays open, and its answer still reaches the architect', async ({ pairedPage: page, server, api }, info) => {
+    const id = await ask(api);
+    await open(page, server, id);
+    await expect(page.getByTestId('decision-question')).toContainText('Where should');
+    // the agent gives up on its call and ends its turn while the reader
+    // is still looking at the question
+    // (a running stage's turns are drawn under the settled items, so
+    // this reads the whole thread)
+    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    await expect(page.getByTestId('thread')).toContainText('The ask timed out');
+    // long enough for a critique to have started, had the stage been
+    // taken for finished
+    await page.waitForTimeout(3000);
+    const card = (await api('GET', `/api/cards/${id}`)).json;
+    expect(card.decision?.kind).toBe('ask');
+    expect(card.status).toBe('needs');
+    await expect(page.getByTestId('thread')).not.toContainText('critique');
+    await expect(page.getByTestId('thread')).not.toContainText('superseded');
+    await shot(page, info, 'ask-outlived-its-call');
+    if (!isPhone(info)) {
+      await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask');
+      await expect(page.getByTestId('decision-question')).toContainText('Where should');
+    }
+
+    await answerOption(page, isPhone(info), '1');
+    await expect(await thread(page, isPhone(info))).toContainText('Extend the existing file');
+    // the architect finishes the plan with the answer, and only then is
+    // the plan critiqued and its gate raised
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
+    const spec = (await api('GET', `/api/cards/${id}/spec`)).json;
+    expect(JSON.stringify(spec)).toContain('Decided with the user: Extend the existing file');
+  });
+});
+
 test.describe('a verified card', () => {
   let id: string;
   test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });

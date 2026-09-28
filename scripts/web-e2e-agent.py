@@ -25,6 +25,11 @@ artifact):
                    puts the choice to the person with ask_user (two options,
                    changes_section "Chosen approach"), and finishes the spec
                    with whatever the answer was.
+    [ask-gives-up] as [ask], but the agent's own tool call times out before
+                   the person answers (GUMMI_E2E_ASK_TIMEOUT seconds, default
+                   2): it says so and ends its turn with the question still
+                   open, which is what a backend whose MCP client bounds a
+                   tool call does to a question nobody answered in time.
     [slow]         every stage streams its reply in small text deltas with a
                    pause between them (GUMMI_E2E_SLOW_SECONDS, default 6s
                    per stage in total), so a test can watch a live card. An
@@ -66,6 +71,7 @@ import time
 
 FAST = os.environ.get("GUMMI_E2E_FAST") == "1"
 SLOW_SECONDS = float(os.environ.get("GUMMI_E2E_SLOW_SECONDS") or "6")
+ASK_TIMEOUT = float(os.environ.get("GUMMI_E2E_ASK_TIMEOUT") or "2")
 LOG = os.environ.get("GUMMI_E2E_AGENT_LOG")
 CREDITS = 12  # per turn; small enough that no envelope in the suite runs dry
 
@@ -142,16 +148,26 @@ def poll_interrupt():
         DEFERRED.append(frame)
 
 
-def call_tool(name, args):
+class TimedOut(Exception):
+    pass
+
+
+def call_tool(name, args, timeout=None):
     """Invoke a gummi client tool and block until gummi resolves it.
 
     ask_user resolves when the person answers; the other tools resolve at
-    once. The result string is returned.
+    once. The result string is returned. With a timeout the call is given
+    up on after that many seconds (TimedOut), the way a backend's own MCP
+    client does; gummi is not told.
     """
     call_id = "%s-%d-%d" % (name, os.getpid(), int(time.time() * 1000))
     emit({"type": "ask", "id": call_id, "name": name, "ask": args})
+    deadline = None if timeout is None else time.time() + timeout
     while True:
-        frame = INBOX.get()
+        try:
+            frame = INBOX.get(timeout=None if deadline is None else max(0.0, deadline - time.time()))
+        except queue.Empty:
+            raise TimedOut()
         if frame is None:
             raise Closed()
         kind = frame.get("type")
@@ -330,10 +346,11 @@ def plan_feature(turn, answer=None):
         ("Out of scope", "- changing `Greet` or the command"),
         ("Considered approaches", considered),
     ])
-    if "[ask]" in ctx["keywords"] and answer is None:
+    gives_up = "[ask-gives-up]" in ctx["keywords"]
+    if ("[ask]" in ctx["keywords"] or gives_up) and answer is None:
         turn.say("Two ways to do this are written up under Considered approaches. "
                  "I need you to pick one.")
-        answer = call_tool("ask_user", {
+        answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up else None, args={
             "question": "Where should %s's helper live?" % ctx["card"],
             "options": [
                 {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
@@ -542,7 +559,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[slow]", "[research]")
+KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[slow]", "[research]")
 
 
 def detect(frame):
@@ -636,6 +653,9 @@ def main():
                 handle_send(ctx, frame.get("text") or "", first)
             except Interrupted:
                 emit({"type": "message", "text": "(stopped)"})
+            except TimedOut:
+                emit({"type": "message", "text": "The ask timed out. That question is live in "
+                                                 "your pane now; take your time answering it."})
             first = False
             emit({"type": "idle"})
         elif kind == "interrupt":

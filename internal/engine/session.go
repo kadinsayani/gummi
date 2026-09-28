@@ -994,6 +994,28 @@ func (s *Session) setVerdictFloor(v, reason string) {
 	s.verdictFloorReason = reason
 }
 
+// outlivePendingAsk cuts the open ask loose from the tool call that
+// raised it, reporting whether there was one to cut. The question stays
+// open under the same decision; what goes is the call id, so Answer stops
+// looking for a blocked call to resolve and delivers the answer as a turn,
+// and the call's bridge waiter, handed back so the caller can release it.
+// The ask is replaced rather than edited: a snapshot taken earlier still
+// holds the old one.
+func (s *Session) outlivePendingAsk() (waiter chan string, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pendingAsk == nil || s.pendingAsk.CallID == "" {
+		return nil, false
+	}
+	cut := *s.pendingAsk
+	waiter = s.resolvers[cut.CallID]
+	delete(s.resolvers, cut.CallID)
+	delete(s.resolverWait, cut.CallID)
+	cut.CallID, cut.Outlived = "", true
+	s.pendingAsk = &cut
+	return waiter, true
+}
+
 // takePendingAsk clears and returns the open ask (nil if none), so the
 // answer path resolves exactly one call.
 func (s *Session) takePendingAsk() *Ask {

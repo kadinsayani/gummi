@@ -62,6 +62,11 @@ type Ask struct {
 	// opened. Engine-side only; never parsed from or persisted to the
 	// tool arguments.
 	DecisionID string `json:"-"`
+	// Outlived marks a question whose tool call ended before anyone
+	// answered it: the backend stopped waiting and the agent's turn closed
+	// with the question still up (see Engine.askOutlivedItsCall). Its
+	// answer travels as a turn, to the session that asked.
+	Outlived bool `json:"-"`
 }
 
 // AskOption is one selectable answer.
@@ -988,6 +993,51 @@ func (e *Engine) resolveNow(s *Session, callID, result string) {
 	}
 }
 
+// AskOutlivedNote is the activity line left on a card whose agent stopped
+// waiting on its own question.
+const AskOutlivedNote = "the agent stopped waiting for your answer — the question stays open, " +
+	"and your answer reaches it as its next turn"
+
+// askOutlivedReply is what a bridge call still parked on the question is
+// released with. The backend that made the call has usually stopped
+// listening for it; a client that has not reads this as the call's result.
+const askOutlivedReply = "the question is still open with the user — their answer will arrive " +
+	"as your next message; do not ask it again"
+
+// askOutlivedItsCall handles a turn that ended while its question was
+// still open, reporting whether that is what happened.
+//
+// ask_user blocks the agent's turn on a person, and a person may take an
+// hour. The backends between gummi and the model do not wait an hour: an
+// MCP client bounds every tool call (a minute, on opencode and codex), and
+// the engine's side of the bridge is never told the client gave up. The
+// model reads "timed out", asks again, is bounced because the first
+// question is still up, says the question is with the user and ends its
+// turn. That idle used to read as the design stage finishing: the critique
+// replaced the session, the question was filed "unanswered, superseded"
+// under the eyes of the person reading it, and the gate then held the card
+// for the sections the answer was supposed to decide.
+//
+// A turn that ended on an open question has finished nothing. The card
+// stays where it is, parked on the question, and the ask is cut loose from
+// its dead call so the answer is delivered as a turn rather than resolved
+// into a call nobody is waiting on — which would also raise the spinner
+// over a session with no turn running.
+func (e *Engine) askOutlivedItsCall(s *Session) bool {
+	waiter, ok := s.outlivePendingAsk()
+	if !ok {
+		return false
+	}
+	if waiter != nil {
+		select {
+		case waiter <- askOutlivedReply:
+		default:
+		}
+	}
+	s.appendActivity(AskOutlivedNote)
+	return true
+}
+
 // GateAdvanceLabel is the option that crosses the gate. The UI matches an
 // answer against it, so it is an exported constant rather than prose
 // either side is free to reword.
@@ -1241,9 +1291,22 @@ func reentryTurn(ask *Ask, answer string) string {
 		fmt.Fprintf(&b, "You offered: %s\n", strings.Join(opts, " · "))
 	}
 	fmt.Fprintf(&b, "The answer is: %s\n\n", answer)
-	b.WriteString(reentryGuidance)
+	if ask.Outlived {
+		b.WriteString(outlivedGuidance)
+	} else {
+		b.WriteString(reentryGuidance)
+	}
 	return b.String()
 }
+
+// outlivedGuidance is the standing half of the turn that answers a
+// question whose call ended first. The session is the one that asked, so
+// none of reentryGuidance is true of it; what it needs to be told is that
+// this message is the result its call never returned.
+const outlivedGuidance = `Your ask_user call stopped waiting before the user answered, so their
+answer arrives as this message instead of as that call's result. The
+question is settled: do not ask it again. Act on the answer and carry on
+with the stage from where you left it.`
 
 // reentryGuidance is the standing half of a re-entry turn: what this
 // session is, and what it should not spend turns on. Fixed text — it does
