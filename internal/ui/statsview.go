@@ -72,29 +72,11 @@ func (m *Shell) openStats(f domain.Feature) tea.Cmd {
 		if fresh, err := store.GetFeature(ctx, f.ID); err == nil {
 			f = fresh
 		}
-		evs, err := store.Events(ctx, f.ID)
+		in, err := cardrun.Gather(ctx, store, f)
 		if err != nil {
 			return statsLoadedMsg{f: f, err: err}
 		}
-		spend, err := store.SessionBreakdown(ctx, f.ID)
-		if err != nil {
-			spend = nil
-		}
-		rnds := map[domain.RoundKind]int{}
-		for _, k := range []domain.RoundKind{
-			domain.RoundKindPlan, domain.RoundKindReview, domain.RoundKindCorrective,
-		} {
-			if n, err := store.Rounds(ctx, f.ID, k); err == nil {
-				rnds[k] = n
-			}
-		}
-		baseline, err := store.CheckBaseline(ctx, f.ID)
-		if err != nil {
-			baseline = nil
-		}
-		return statsLoadedMsg{f: f, report: cardrun.Report(cardrun.Input{
-			Feature: f, Events: evs, Spend: spend, Rounds: rnds, Baseline: baseline,
-		})}
+		return statsLoadedMsg{f: f, report: cardrun.Report(in)}
 	}
 }
 

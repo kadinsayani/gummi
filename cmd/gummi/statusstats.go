@@ -186,27 +186,11 @@ type statusPark struct {
 // the status view does: a caller asking how a card ran must still get the
 // part of the answer that is readable.
 func buildStats(ctx context.Context, store *state.Store, f *domain.Feature) *statusStats {
-	evs, err := store.Events(ctx, f.ID)
+	in, err := cardrun.Gather(ctx, store, *f)
 	if err != nil {
 		return nil
 	}
-	spend, err := store.SessionBreakdown(ctx, f.ID)
-	if err != nil {
-		spend = nil
-	}
-	rnds := map[domain.RoundKind]int{}
-	for _, k := range []domain.RoundKind{domain.RoundKindPlan, domain.RoundKindReview, domain.RoundKindCorrective} {
-		if n, err := store.Rounds(ctx, f.ID, k); err == nil {
-			rnds[k] = n
-		}
-	}
-	baseline, err := store.CheckBaseline(ctx, f.ID)
-	if err != nil {
-		baseline = nil
-	}
-	r := cardrun.Report(cardrun.Input{
-		Feature: *f, Events: evs, Spend: spend, Rounds: rnds, Baseline: baseline,
-	})
+	r := cardrun.Report(in)
 	return statsPayload(r)
 }
 
