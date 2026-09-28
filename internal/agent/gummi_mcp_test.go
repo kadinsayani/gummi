@@ -39,6 +39,25 @@ func TestBuildGummiMCPServerConfig(t *testing.T) {
 	}
 }
 
+// Claude Code gives up on an MCP call that has been silent for a while
+// (sent no response or progress; its own default idle bound), and tells
+// gummi nothing. ask_user is silent for as long as a person reads, so the
+// server carries its own timeout, which is what lifts that bound.
+func TestBuildGummiMCPServerConfigOutwaitsAPerson(t *testing.T) {
+	for _, workspace := range []bool{false, true} {
+		raw := buildGummiMCPServerConfig("/opt/gummi", "FD-012", "/tmp/mcp/FD-012.sock", workspace)
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatal(err)
+		}
+		g := m["mcpServers"].(map[string]any)["gummi"].(map[string]any)
+		ms, ok := g["timeout"].(float64)
+		if !ok || ms < float64(24*60*60*1000) {
+			t.Errorf("workspace=%v: timeout = %v ms, want at least a day", workspace, g["timeout"])
+		}
+	}
+}
+
 // TestBuildGummiMCPServerConfigWorkspace pins the workspace-scoped shape:
 // args carries --workspace and never --feature, and featureID (passed as
 // junk here) is not consulted at all.

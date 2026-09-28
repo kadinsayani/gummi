@@ -14,7 +14,8 @@ import (
 // call to gummi's server.
 //
 // Every client bounds a tool call, and the bound is sized for tools that
-// compute: a minute on opencode and on codex. ask_user does not compute, it
+// compute: a minute on opencode and on codex, and on claude a bound on
+// how long a call may go without a response or progress. ask_user does not compute, it
 // waits on a person, and a person reading the question for longer than a
 // minute had it fail under them — the model was told the call timed out,
 // asked again, and ended its turn on a question nobody had answered. A
@@ -33,7 +34,7 @@ const mcpCallTimeout = 7 * 24 * time.Hour
 //
 // The JSON shape is Claude Code's mcpServers config:
 //
-//	{"mcpServers":{"gummi":{"command":execPath,"args":["__mcp","--feature",featureID],"env":{"GUMMI_MCP_SOCK":sockPath}}}}
+//	{"mcpServers":{"gummi":{"command":execPath,"args":["__mcp","--feature",featureID],"env":{"GUMMI_MCP_SOCK":sockPath},"timeout":ms}}}
 //
 // args carries the subcommand verbatim (order is significant — the mcp
 // subcommand parses positionally), and the socket path travels in env so
@@ -60,6 +61,10 @@ func buildGummiMCPServerConfig(execPath, featureID, sockPath string, workspace b
 				"command": execPath,
 				"args":    args,
 				"env":     map[string]string{"GUMMI_MCP_SOCK": sockPath},
+				// Claude Code aborts a call that has sent no response or
+				// progress for its idle bound, and tells the server
+				// nothing; a server's own timeout is what lifts it
+				"timeout": mcpCallTimeout.Milliseconds(),
 			},
 		},
 	}
