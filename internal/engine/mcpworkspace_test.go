@@ -568,3 +568,51 @@ func TestWorkspaceMCPSockPathStaysUnderUnixLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// card_run and card_resume start a fresh stage session, and a fresh
+// session holds no question: run on a card parked on a person's question,
+// either would put the question out from under the person reading it,
+// filed as superseded, on nothing but a hosted agent's say-so. Both
+// refuse instead, and the question stays open.
+func TestWorkspaceMCPCardRunLeavesAPersonsQuestionOpen(t *testing.T) {
+	ag := &agent.Fake{Caps: agent.Capabilities{ClientTools: true, Interrupt: true}}
+	args := askArgs(t, Ask{Question: "Persist where?", Options: []AskOption{{Label: "per-device"}}})
+	ag.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		return []agent.Event{{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: args}}}
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "impl", domain.StageImplement)
+	withWorktree(t, wt, f)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	path, teardown, err := e.StartWorkspaceMCPEndpoint()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer teardown()
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventQuestion)
+
+	for _, parked := range []bool{false, true} {
+		if parked {
+			if err := e.Pause(context.Background(), f.ID); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, tool := range []string{"card_run", "card_resume"} {
+			s := e.Get(f.ID)
+			_, errMsg := callWorkspaceTool(t, path, tool, map[string]any{"id": "FD-001", "note": "go on"})
+			if !strings.Contains(errMsg, "Persist where?") {
+				t.Errorf("%s (parked=%v) = %q; want a refusal naming the open question", tool, parked, errMsg)
+			}
+			if e.Get(f.ID) != s || s.Snapshot().PendingAsk == nil {
+				t.Errorf("%s (parked=%v) put the question out from under the person", tool, parked)
+			}
+		}
+	}
+}

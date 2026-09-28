@@ -555,10 +555,32 @@ func (e *Engine) cardRun(ctx context.Context, args json.RawMessage) (string, err
 	if err != nil {
 		return "", err
 	}
+	if err := e.refuseOverOpenQuestion(f.ID); err != nil {
+		return "", err
+	}
 	if err := e.Run(f); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("%s: run requested for stage %s", f.ID, f.Stage), nil
+}
+
+// refuseOverOpenQuestion keeps a hosted agent's card_run and card_resume
+// off a card that is waiting on a person's answer. Either starts a fresh
+// stage session, and a fresh session holds no question: the one the
+// person is reading would be put out from under them and filed as
+// superseded, on nothing but the agent's say-so — or, while the stage
+// that asked is still up, the run would be a silent no-op the agent was
+// told had started. The answer is the person's to give, at the board.
+func (e *Engine) refuseOverOpenQuestion(id domain.FeatureID) error {
+	s := e.Get(id)
+	if s == nil {
+		return nil
+	}
+	if ask := s.Snapshot().PendingAsk; ask != nil {
+		return fmt.Errorf("%s is waiting on a person's answer to %q — it carries on once they "+
+			"answer it at the board; a fresh run would discard the question", id, ask.Question)
+	}
+	return nil
 }
 
 // cardResume answers card_resume: RunWith(note), the same path Run takes
@@ -575,6 +597,9 @@ func (e *Engine) cardResume(ctx context.Context, args json.RawMessage) (string, 
 	}
 	f, err := e.resolveFeature(ctx, a.ID)
 	if err != nil {
+		return "", err
+	}
+	if err := e.refuseOverOpenQuestion(f.ID); err != nil {
 		return "", err
 	}
 	if err := e.RunWith(f, a.Note); err != nil {
