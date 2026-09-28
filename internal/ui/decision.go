@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -212,64 +213,15 @@ func (d *threadDecision) wordConsumer() int {
 
 // optionCount is the number of rows the picker shows for this decision —
 // the workflow actions, or a live ask's options plus the synthetic "Chat
-// about this" row askPickerOptions appends. It is the one place that
+// about this" row decisions.AskOptions appends. It is the one place that
 // counts rows, so every bound check (↑↓, digit-select, the o-key's
 // landing, answerDecision's enter guard) agrees on where the synthetic
 // row lives without a shared constant (invariant, Considered approaches).
 func (d *threadDecision) optionCount() int {
 	if d.ask != nil {
-		return len(askPickerOptions(d.ask))
+		return len(decisions.AskOptions(d.ask))
 	}
 	return len(d.actions)
-}
-
-// pickerOption is one row in the decision's picker: what the choice is,
-// and the detail that says what it does.
-//
-// There is no key field. There used to be — nextAction.key, the board
-// accelerator (g, s, A, b, d, v…) — rendered in a right-hand column, but
-// that accelerator only fires from the backlog list, where this picker
-// never shows: on the card page the same letter reaches the composer and
-// types (F12). A control that prints a key which does something else
-// entirely one keystroke later is worse than one that names no key at
-// all, so the column is gone rather than fixed — the row's number is
-// still there for the digit that does work (F14).
-type pickerOption struct {
-	label    string
-	detail   string
-	danger   bool
-	noToggle bool
-}
-
-// askPickerOptions shapes a live ask_user question for the picker. Every
-// ask gains a synthetic "Chat about this" row after the real options, so
-// the free-form channel is visible before the user ever types anything —
-// closing the gap where the picker offered no legible way to see that
-// prose would be routed there (Chosen approach).
-//
-// EVERY ask, not only one that declared allow_free_form: the answer path
-// has never honoured that flag — a prose line at any open question is
-// delivered as its answer (submitThreadLine), because the ask is
-// blocking the agent's turn from inside a client tool and a second turn
-// is refused. So withholding the row withheld nothing but the knowledge
-// that talking was allowed, from exactly the questions whose options
-// were too narrow to say what the reader meant. The flag is gone from
-// Ask for the same reason.
-//
-// The row's index is always len(ask.Options): appended last and never
-// reordered, so wordAim, the digit/arrow bound checks, the o-key handler,
-// and answerDecision's enter guard all agree on it without a shared
-// constant.
-func askPickerOptions(ask *engine.Ask) []pickerOption {
-	options := make([]pickerOption, 0, len(ask.Options)+1)
-	for _, option := range ask.Options {
-		options = append(options, pickerOption{label: option.Label, detail: option.Detail})
-	}
-	return append(options, pickerOption{
-		label:    "Chat about this",
-		detail:   "reply with your own words instead of picking an option",
-		noToggle: true,
-	})
 }
 
 // pickerView is the shared inline decision picker. The card thread feeds
@@ -320,7 +272,7 @@ func pickerHead(s *theme.Styles, title, question string, width int) []string {
 	return out
 }
 
-func pickerView(s *theme.Styles, title, question string, options []pickerOption, selected int, picked map[int]bool, multi bool, w int, armed bool) string {
+func pickerView(s *theme.Styles, title, question string, options []decisions.Option, selected int, picked map[int]bool, multi bool, w int, armed bool) string {
 	width := max(w-2, 10)
 	var b strings.Builder
 	for _, l := range pickerHead(s, title, question, width) {
@@ -361,7 +313,7 @@ func pickerView(s *theme.Styles, title, question string, options []pickerOption,
 // remembered-but-not-armed cursor (SelMarkerDim, s.Base, no bright band),
 // so the picker never keeps claiming enter after the bar has already
 // named a different destination for it.
-func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, picked map[int]bool, multi bool, width, maxExtra int, armed bool) []string {
+func pickerOptionLines(s *theme.Styles, option decisions.Option, i, selected int, picked map[int]bool, multi bool, width, maxExtra int, armed bool) []string {
 	marker := "  "
 	label := s.Base
 	if i == selected {
@@ -374,27 +326,27 @@ func pickerOptionLines(s *theme.Styles, option pickerOption, i, selected int, pi
 		}
 	}
 	tick := ""
-	if multi && !option.noToggle {
+	if multi && !option.Chat {
 		box := "○ "
 		if picked[i] {
 			box = "● "
 		}
 		tick = s.Faint.Render(box)
 	}
-	head := fmt.Sprintf("%s%s%d. %s", marker, tick, i+1, sanitize(option.label))
-	if option.danger && i != selected {
+	head := fmt.Sprintf("%s%s%d. %s", marker, tick, i+1, sanitize(option.Label))
+	if option.Danger && i != selected {
 		label = s.Error
 	}
 	full := head
-	if option.detail != "" {
-		full += s.Faint.Render(" — " + sanitize(option.detail))
+	if option.Detail != "" {
+		full += s.Faint.Render(" — " + sanitize(option.Detail))
 	}
 	rendered := label.Render(full)
-	if maxExtra <= 0 || option.detail == "" || ansi.StringWidth(ansi.Strip(rendered)) <= width {
+	if maxExtra <= 0 || option.Detail == "" || ansi.StringWidth(ansi.Strip(rendered)) <= width {
 		return []string{ansi.Truncate(rendered, width, "…")}
 	}
 	wrapWidth := max(width-2, 8)
-	wrapped := strings.Split(wrapText(sanitize(option.detail), wrapWidth), "\n")
+	wrapped := strings.Split(wrapText(sanitize(option.Detail), wrapWidth), "\n")
 	// maxExtra is the rows this option may GROW by, and the head row it
 	// grows from is already spent — so the detail gets maxExtra rows, not
 	// maxExtra+1. Budgeting the wrap as if the head were free let a
@@ -645,7 +597,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 		return append(narr, m.chipLines(s, r, p, width, rows)...)
 	}
 	title := "gummi"
-	options := make([]pickerOption, 0, len(d.actions))
+	options := make([]decisions.Option, 0, len(d.actions))
 	multi := false
 	// A decision autopilot has taken renders open, with its options,
 	// saying whose it is — never a countdown. The answer runs in a
@@ -673,7 +625,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 			// picker stood.
 			title += " · your line is the answer"
 		}
-		options = askPickerOptions(d.ask)
+		options = decisions.AskOptions(d.ask)
 		multi = d.ask.MultiPick
 	} else {
 		aim := m.wordAim(d)
@@ -685,8 +637,8 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 			if i == aim {
 				label += " with your words"
 			}
-			options = append(options, pickerOption{
-				label: label, detail: action.detail, danger: action.danger,
+			options = append(options, decisions.Option{
+				Label: label, Detail: action.detail, Danger: action.danger,
 			})
 		}
 	}
@@ -822,7 +774,7 @@ func fitNarration(narr []string, budget int) []string {
 // short-circuited by the length check below). So the wrap only ever grows
 // into rows the block's own budget already owned and was not going to use
 // for anything else — never the foot's, and never another option's.
-func expandHighlighted(s *theme.Styles, windowed, lines []string, headRows int, options []pickerOption, cursor int, picked map[int]bool, multi bool, width, maxRows int, armed bool) []string {
+func expandHighlighted(s *theme.Styles, windowed, lines []string, headRows int, options []decisions.Option, cursor int, picked map[int]bool, multi bool, width, maxRows int, armed bool) []string {
 	if maxRows <= 0 || len(windowed) == 0 || len(windowed) != len(lines) {
 		return windowed
 	}
@@ -950,20 +902,20 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 	if d.ask != nil {
 		if m.decisionCursor == len(d.ask.Options) {
 			// the synthetic "Chat about this" row is selected: there is no
-			// entry in ask.Options at this index for decisionAnswerText to
+			// entry in ask.Options at this index for decisions.AnswerText to
 			// resolve, so enter arms the free-form channel instead of
 			// silently no-oping — the same effect pressing 'o' has.
 			m.threadFreeForm = true
 			return nil
 		}
-		answer := decisionAnswerText(d.ask, m.decisionCursor, m.decisionPicked)
+		answer := decisions.AnswerText(d.ask, m.decisionCursor, m.decisionPicked)
 		// A gate ask IS the crossing: answering it with the advance option
 		// has to move the card, or the question would be a control that
 		// looks like a decision and does nothing. Everything else about it
 		// — recording the answer, resolving the agent's blocked call —
 		// goes through the ordinary answer path first, so the transcript
 		// and the spec anchor read the same as any other answer.
-		crossing := gateAnswerCrosses(d.ask, answer)
+		crossing := decisions.GateAnswerCrosses(d.ask, answer)
 		if answer == "" {
 			// Belt to parseAsk's braces. Nothing that reaches here should
 			// be able to resolve to an empty answer, but if it ever does,
@@ -1005,31 +957,4 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 		id: action.id, key: action.key, label: action.label,
 		why: action.detail, danger: action.danger,
 	})
-}
-
-// gateAnswerCrosses reports whether answering ask with this text is the
-// gate crossing itself, rather than an ordinary answer the stage then
-// acts on. Only a gate ask can cross, and only its advance option does —
-// "not yet" and any free-form reply are answers that leave the card
-// exactly where it is.
-func gateAnswerCrosses(ask *engine.Ask, answer string) bool {
-	return ask != nil && ask.Gate && answer == engine.GateAdvanceLabel
-}
-
-func decisionAnswerText(ask *engine.Ask, cursor int, picked map[int]bool) string {
-	if ask.MultiPick {
-		var labels []string
-		for i, option := range ask.Options {
-			if picked[i] {
-				labels = append(labels, option.Label)
-			}
-		}
-		if len(labels) > 0 {
-			return strings.Join(labels, ", ")
-		}
-	}
-	if cursor >= 0 && cursor < len(ask.Options) {
-		return ask.Options[cursor].Label
-	}
-	return ""
 }

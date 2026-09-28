@@ -4,21 +4,24 @@ import (
 	"sync"
 	"time"
 
+	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// attnKind classifies why a feature needs your attention.
+// attnKind classifies why a feature needs your attention. Its values are
+// decisions.Lane's, spelled once there, so a durable decision's lane
+// (decisions.Attention) converts to one without a table in between.
 type attnKind string
 
 const (
 	// attnGate: an autonomous stage finished and awaits your decision.
-	attnGate attnKind = "gate"
+	attnGate = attnKind(decisions.LaneGate)
 	// attnFailure: a session errored.
-	attnFailure attnKind = "failure"
+	attnFailure = attnKind(decisions.LaneFailure)
 	// attnQuestion: the agent asked something and is waiting.
-	attnQuestion attnKind = "question"
+	attnQuestion = attnKind(decisions.LaneQuestion)
 	// attnBudget: a stage hit its budget and awaits a top-up/park decision.
-	attnBudget attnKind = "budget"
+	attnBudget = attnKind(decisions.LaneBudget)
 )
 
 // attnItem is one entry in the needs-attention queue.

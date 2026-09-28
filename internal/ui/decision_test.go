@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -103,7 +104,7 @@ func TestThreadDecisionMatchesTheChatPicker(t *testing.T) {
 	}
 	out := ansi.Strip(m.threadView(100, 30))
 	want := pickerView(m0Styles(), "FD-001 asks", ask.Question,
-		askPickerOptions(ask), 0, nil, ask.MultiPick, 100, true)
+		decisions.AskOptions(ask), 0, nil, ask.MultiPick, 100, true)
 	for _, line := range strings.Split(ansi.Strip(want), "\n") {
 		if line == "" {
 			continue
@@ -792,12 +793,12 @@ func TestAskPickerOptionsAddsChatAboutThisRow(t *testing.T) {
 		{Question: "Persist where?", Options: []engine.AskOption{{Label: "per-device"}, {Label: "synced"}}},
 		{Question: "Which rig?", Options: []engine.AskOption{{Label: "rig-a"}, {Label: "rig-b"}}},
 	} {
-		got := askPickerOptions(ask)
+		got := decisions.AskOptions(ask)
 		if len(got) != 3 {
 			t.Fatalf("%q got %d options, want 3 (2 real + synthetic): %+v", ask.Question, len(got), got)
 		}
-		if got[2].label != "Chat about this" {
-			t.Errorf("%q last row = %q, want \"Chat about this\"", ask.Question, got[2].label)
+		if got[2].Label != "Chat about this" {
+			t.Errorf("%q last row = %q, want \"Chat about this\"", ask.Question, got[2].Label)
 		}
 	}
 }
@@ -953,8 +954,8 @@ func TestDecisionAnswerTextIgnoresSyntheticIndex(t *testing.T) {
 	base := map[int]bool{0: true}
 	withSynthetic := map[int]bool{0: true, len(ask.Options): true}
 
-	want := decisionAnswerText(ask, 0, base)
-	got := decisionAnswerText(ask, 0, withSynthetic)
+	want := decisions.AnswerText(ask, 0, base)
+	got := decisions.AnswerText(ask, 0, withSynthetic)
 	if got != want {
 		t.Errorf("decisionAnswerText with a picked synthetic index = %q, want %q (unchanged)", got, want)
 	}
@@ -999,20 +1000,20 @@ func TestGateAnswerCrosses(t *testing.T) {
 		{Label: engine.GateAdvanceLabel}, {Label: "b"},
 	}}
 
-	if !gateAnswerCrosses(gate, engine.GateAdvanceLabel) {
+	if !decisions.GateAnswerCrosses(gate, engine.GateAdvanceLabel) {
 		t.Error("the advance option on a gate did not read as the crossing")
 	}
 	for _, answer := range []string{"Not yet", "the migration step is missing", ""} {
-		if gateAnswerCrosses(gate, answer) {
+		if decisions.GateAnswerCrosses(gate, answer) {
 			t.Errorf("%q on a gate read as a crossing; only the advance option may", answer)
 		}
 	}
 	// an ordinary ask never crosses, even when a label happens to match:
 	// the flag is what makes a question a gate, not its wording.
-	if gateAnswerCrosses(plain, engine.GateAdvanceLabel) {
+	if decisions.GateAnswerCrosses(plain, engine.GateAdvanceLabel) {
 		t.Error("a non-gate ask crossed the gate on a matching label")
 	}
-	if gateAnswerCrosses(nil, engine.GateAdvanceLabel) {
+	if decisions.GateAnswerCrosses(nil, engine.GateAdvanceLabel) {
 		t.Error("a workflow decision (no ask at all) read as a gate crossing")
 	}
 }

@@ -385,7 +385,7 @@ func (m *Shell) handleThreadInputKey(msg tea.KeyPressMsg) tea.Cmd {
 				m.syncDecision(d)
 				// the synthetic "Chat about this" row (index
 				// len(d.ask.Options), on every ask) has no tick box —
-				// decisionAnswerText never reads it — so toggling here would
+				// decisions.AnswerText never reads it — so toggling here would
 				// record picked state the render doesn't show and the answer
 				// ignores.
 				if m.decisionCursor < len(d.ask.Options) {
