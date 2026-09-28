@@ -3977,9 +3977,10 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 			}
 			return nil
 		case engine.StateQueued:
-			// the ◔ queued pill (runCounts) already says this, computed
-			// live from engine state every render — a free-text echo here
-			// would just be one more copy nothing retracts once it starts.
+			// the ◔ queued pill (runCounts) says this on the board, but a
+			// person who just asked for the run is owed an answer to the
+			// ask itself: silence here read as the request being dropped.
+			m.notice = noticeMsg{text: string(f.ID) + ": " + string(f.Stage) + " is already queued — it starts when a lane frees", id: f.ID}
 			return nil
 		case engine.StateDone:
 			// A finished session on a stage that ends with a critique
@@ -4045,9 +4046,17 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 	}
 	// Run schedules and spawns the backend synchronously; do it in a command
 	// so a slow agent launch can't freeze the TUI.
+	eng := m.engine
 	return func() tea.Msg {
-		if err := m.engine.RunWith(f, note); err != nil {
+		if err := eng.RunWith(f, note); err != nil {
 			return noticeMsg{text: cardLockedNotice(f.ID, err), isErr: true, id: f.ID}
+		}
+		if eng.Get(f.ID) == nil {
+			// RunWith reports success for a run it did not schedule (one
+			// already under way that ended in between); a request that
+			// started nothing says so rather than leaving the card idle
+			// under an answer that looked taken.
+			return noticeMsg{text: string(f.ID) + ": " + string(f.Stage) + " did not start — try again", isErr: true, id: f.ID}
 		}
 		// no bare "queued" text: the ◔ queued / ⬤ running pills
 		// (runCounts) already say it, computed live from engine state on
