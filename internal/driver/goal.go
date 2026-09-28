@@ -399,6 +399,12 @@ func (d *Driver) goalVerifyNotPassed(ctx context.Context, f domain.Feature, reas
 	return Outcome{}, nil
 }
 
+// SeedGoal readies a freshly minted goal before its plan conversation:
+// continued from after, and with its owner's reference documents.
+func (d *Driver) SeedGoal(ctx context.Context, goal, after domain.FeatureID, references []string) error {
+	return d.eng.SeedGoal(ctx, goal, after, references)
+}
+
 // ContinueGoal makes a goal start from what another came to know, before
 // its plan conversation begins (`gummi goal --after`).
 func (d *Driver) ContinueGoal(ctx context.Context, goal, prev domain.FeatureID) error {

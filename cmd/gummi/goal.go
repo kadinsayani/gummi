@@ -7,7 +7,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/driver"
-	"github.com/morphis/gummi/internal/notebook"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -42,23 +41,11 @@ func runGoal(fl cliFlags, args []string) error {
 			return driver.Outcome{}, err
 		}
 		// A goal that continues another starts from what that one came to
-		// know — its reference, its registry, the findings that still hold,
-		// and its hand-over — so the plan is agreed against it.
-		if prev := strings.ToUpper(strings.TrimSpace(fl.String("after"))); prev != "" {
-			if err := d.ContinueGoal(ctx, f.ID, domain.FeatureID(prev)); err != nil {
-				return driver.Outcome{}, fmt.Errorf("--after %s: %w", prev, err)
-			}
-		}
-		// The owner's reference documents go into the goal's notebook before
-		// the plan conversation starts: the architect plans against them,
-		// and the plan gate pins them.
-		for _, p := range strings.Split(fl.String("reference"), ",") {
-			if p = strings.TrimSpace(p); p == "" {
-				continue
-			}
-			if err := notebook.Open(ws.GoalNotebookDir(f.ID)).AddReference(p); err != nil {
-				return driver.Outcome{}, fmt.Errorf("--reference %s: %w", p, err)
-			}
+		// know, and the owner's reference documents go into its notebook
+		// before the plan conversation starts (engine.SeedGoal).
+		after := domain.FeatureID(strings.ToUpper(strings.TrimSpace(fl.String("after"))))
+		if err := d.SeedGoal(ctx, f.ID, after, strings.Split(fl.String("reference"), ",")); err != nil {
+			return driver.Outcome{}, fmt.Errorf("--%w", err)
 		}
 		release, err := state.AcquireLock(ws.CardLockFile(f.ID))
 		if err != nil {
