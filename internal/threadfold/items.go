@@ -252,6 +252,19 @@ func Items(events []state.CardEvent, opt Options) []Item {
 		case state.EventTool:
 			var p state.ToolPayload
 			_ = json.Unmarshal([]byte(ev.Payload), &p)
+			// A verify that had no gummi-checks to run is a verify item
+			// with no checks and the reason as its text — never a group
+			// of zero failures, which a page reads as "all passed".
+			if strings.HasPrefix(p.Label, engine.NoChecksRow+" — ") {
+				it := Item{Seq: ev.Seq, Key: "verify:" + seqKey(ev.Seq), T: ItemVerify, At: ev.At, Stage: ev.Stage, Text: Sanitize(p.Label)}
+				if seg.Exited {
+					it.Verdict, it.Exited = seg.Verdict, true
+					it.Seq = max(it.Seq, events[seg.ExitIdx].Seq)
+				}
+				emit(it)
+				group = -1
+				continue
+			}
 			if name, status, ok := checkRow(p.Label); ok {
 				c := Check{Name: name, Status: status, OK: ev.Status == state.StatusOK, MS: p.MS}
 				if !c.OK {

@@ -103,8 +103,11 @@ func TestRestartedVerifyStillPresentsAsFinished(t *testing.T) {
 	if d := m.openDecision(m.rows[0]); d == nil || d.kind != decisionVerify {
 		t.Errorf("decision kind = %+v, want the verify decision", d)
 	}
-	if narr := m.cardNarration(in, m.rows[0]); len(narr) == 0 || narr[0].text != "Verify passed — the work is ready. Decide how it leaves gummi." {
-		t.Errorf("narration = %+v, want the pass", narr)
+	// the fixture's spec carries no gummi-checks block, so the pass is the
+	// reviewer's own and the sentence says so (featureRow.NoChecks)
+	if narr := m.cardNarration(in, m.rows[0]); len(narr) == 0 ||
+		narr[0].text != "Verify passed on the reviewer's own commands — this card has no gummi-checks, so gummi ran none. Decide how it leaves gummi." {
+		t.Errorf("narration = %+v, want the pass, qualified by the missing checks", narr)
 	}
 	_ = id
 	_ = tea.KeyPressMsg{}

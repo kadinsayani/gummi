@@ -1520,7 +1520,30 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	if s.Feature.IsGoal() {
 		proven = e.goalExperimentResults(context.Background(), s.Feature, string(raw))
 	}
+	// A card that reaches verify with no block at all is one whose
+	// discovery failed or found nothing at approval — best-effort, and
+	// once silent: verify then "passed" on commands the reviewer chose.
+	// Discovery is retried here when it had left the card without a block
+	// (the repo's cached survey makes it cheap when any card found one),
+	// and a verify that still has nothing to run says so on the thread, as
+	// a row both faces draw as "no checks".
+	ownVerify := s.Feature.Stage == domain.StageVerify && !s.Critique && checksKind(s.Feature)
+	if len(checks) == 0 && ownVerify {
+		if _, found, _ := spec.ParseChecks(string(raw)); !found && e.cardHasEvent(context.Background(), s.Feature.ID, noChecksNoteKey) {
+			if got, _ := e.DiscoverChecks(context.Background(), s.Feature); len(got) > 0 {
+				if again, err := os.ReadFile(s.SpecPath()); err == nil {
+					raw = again
+					checks, _, _ = spec.ParseChecks(string(raw))
+				}
+				s.appendActivity(fmt.Sprintf("check discovery, retried at verify, found %d command%s", len(got), plural(len(got))))
+			}
+		}
+	}
 	if len(checks) == 0 && len(proven) == 0 {
+		if ownVerify {
+			s.appendActivity(NoChecksRow + " — this card has no gummi-checks block, so " + NoChecksConsequence)
+			e.persist(s)
+		}
 		return ""
 	}
 	workDir := filepath.Join(e.pool.Root(), s.Feature.WorktreePath())

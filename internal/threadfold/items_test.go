@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -378,5 +379,32 @@ func TestAYouLineCarriesWhoTypedIt(t *testing.T) {
 	}
 	if want := []string{"Ana|cover the settings page", "|and the footer"}; strings.Join(got, ";") != strings.Join(want, ";") {
 		t.Errorf("you lines = %q, want %q", got, want)
+	}
+}
+
+// A verify that had no gummi-checks to run is a verify item with no
+// checks and the reason as its text. Before, it drew nothing — and a page
+// counting failures in a verify item reads zero checks as "all passed".
+func TestAVerifyWithNoChecksIsSaidAsOne(t *testing.T) {
+	verify := domain.StageVerify
+	log := newLog().enter(verify, "reviewer", "stage").
+		tool(verify, engine.NoChecksRow+" — this card has no gummi-checks block, so "+engine.NoChecksConsequence, "", "").
+		say(verify, "assistant", "ran go test myself").
+		exit(verify, "pass", 2)
+	items := Items(log.evs, Options{})
+	var v *Item
+	for i := range items {
+		if items[i].T == ItemVerify {
+			v = &items[i]
+		}
+	}
+	if v == nil {
+		t.Fatalf("no verify item: %+v", items)
+	}
+	if len(v.Checks) != 0 || !strings.Contains(v.Text, engine.NoChecksConsequence) {
+		t.Errorf("verify item = %+v, want no checks and the no-checks sentence", *v)
+	}
+	if !v.Exited || v.Verdict != "pass" {
+		t.Errorf("verify item = %+v, want it to carry the stage's verdict", *v)
 	}
 }

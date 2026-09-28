@@ -75,6 +75,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
 | `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `tool-group`, `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
+| `verify-no-checks` | a verify item's head when gummi had no gummi-checks to run (never "all passed") |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
 | `live`, `live-streaming`, `live-elsewhere`, `live-error`, `live-consult`, `live-consult-head`, `live-freeform`, `live-freeform-head` | live block parts |
@@ -108,7 +109,8 @@ Spec: `spec`, `spec-toc`, `spec-toc-<i>`, `spec-doc`, `spec-src`, `spec-title`,
 `spec-section-<i>`, `spec-comment-<i>`, `spec-note-draft`, `spec-note-input`,
 `spec-note-save`, `spec-note`, `spec-prompt` (gummi's own `%%` prompts),
 `spec-note-resolve`, `spec-note-resolution` (a resolution marker, folded onto
-the note it closes), `spec-checks`, `spec-check-<name>`, `spec-none`.
+the note above it: "resolved by" when it closes it, "answered by" when an
+agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-none`.
 
 Diff: `diff-head`, `diff-rev`, `diff-since`, `diff-since-all`, `diff-since-new`,
 `diff-fresh` (branch moved banner), `diff-fresh-show`, `diff-pending`,

@@ -50,6 +50,11 @@ type featureRow struct {
 	// would be refused for.
 	Undrafted     []string
 	BaselineFails int // gummi-checks already failing on the fresh branch
+	// NoChecks is a feature or bug past its design gate whose artifact
+	// carries no gummi-checks block: its verify runs no gummi checks and
+	// gates nothing but the reviewer's own commands. A load-time read of
+	// the artifact, so adding a block clears it on the next load.
+	NoChecks bool
 	// DepBlocked is whether the Advance gate would block this card on an
 	// unmet direct dependency at its coding-stage entry — a load-time
 	// snapshot resolved against the live dependency store (never a
@@ -334,6 +339,7 @@ func (m *Shell) loadRows() tea.Msg {
 				}
 			}
 		}
+		row.NoChecks = row.HasWorktree && m.checksBlockMissing(f)
 		for _, b := range m.dependencyBlockers(ctx, f.ID) {
 			row.DepBlockers = append(row.DepBlockers, b.ID)
 		}
@@ -805,6 +811,12 @@ type worktreeEnteredMsg struct {
 type checksDiscoveredMsg struct {
 	id domain.FeatureID
 	n  int // checks discovered; 0 when the block pre-existed or discovery failed
+	// err is why discovery failed, nil when it ran (whatever it found)
+	err error
+	// missing: the card's artifact carries no gummi-checks block after
+	// discovery — its verify would gate nothing but the reviewer's own
+	// commands, which the board says rather than swallows
+	missing bool
 }
 
 // baselineDoneMsg carries the baseline run's outcome back to the shell.
@@ -824,14 +836,19 @@ type baselineDoneMsg struct {
 type scribeEstimateDoneMsg struct {
 	id      domain.FeatureID
 	blended int
+	// err is the estimate pass's own failure, nil otherwise; a backend
+	// that refused the scribe is said once per card (warnScribeFailure)
+	err error
 }
 
 // discoverChecks runs a one-shot scribe pass that surveys the fresh
 // worktree and records the repo's build/test/lint commands in the
 // artifact's Verification section as a gummi-checks block (skipped when
 // a block is already there). Best-effort: on failure the block stays
-// absent and the Verify agent discovers the commands itself. Always
-// resolves to checksDiscoveredMsg so the baseline run chains behind it.
+// absent and the Verify agent discovers the commands itself — but the
+// board is told (checksDiscoveredMsg.missing/err), so a card left with no
+// checks is never a silent one. Always resolves to checksDiscoveredMsg so
+// the baseline run chains behind it.
 func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
 	if m.engine == nil {
 		return nil
@@ -844,11 +861,64 @@ func (m *Shell) discoverChecks(id domain.FeatureID) tea.Cmd {
 			return checksDiscoveredMsg{id: id}
 		}
 		checks, err := m.engine.DiscoverChecks(ctx, f)
-		if err != nil {
-			return checksDiscoveredMsg{id: id}
-		}
-		return checksDiscoveredMsg{id: id, n: len(checks)}
+		missing := len(checks) == 0 && m.engine.ChecksBlockMissing(ctx, f)
+		return checksDiscoveredMsg{id: id, n: len(checks), err: err, missing: missing}
 	}
+}
+
+// checksBlockMissing is featureRow.NoChecks: a feature or bug card past
+// its design gate whose artifact holds no gummi-checks block. A block that
+// does not parse is not "missing" — verify reports that as a plan defect.
+func (m *Shell) checksBlockMissing(f domain.Feature) bool {
+	switch {
+	case f.Kind == domain.KindResearch, f.IsGoal(), f.IsFreeform():
+		return false
+	case f.Stage != domain.StageImplement && f.Stage != domain.StageVerify:
+		return false
+	}
+	path := m.artifactFile(&f)
+	if path == "" {
+		return false
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	_, found, perr := spec.ParseChecks(string(raw))
+	return perr == nil && !found
+}
+
+// noChecksNotice is what the board says when discovery left a card with
+// no gummi-checks block: why, and what it costs the card.
+func noChecksNotice(id domain.FeatureID, err error) string {
+	why := "check discovery found no commands"
+	var sf *engine.ScribeFailure
+	switch {
+	case errors.As(err, &sf):
+		why = "check discovery failed: the scribe (" + sf.Model + ") — " + sf.Short()
+	case err != nil:
+		why = "check discovery failed: " + err.Error()
+	}
+	return sanitize(fmt.Sprintf("%s: %s — %s, so %s; add a gummi-checks block to the %s's Verification section",
+		id, engine.NoChecksRow, why, engine.NoChecksConsequence, artifactNoun(id.Kind())))
+}
+
+// warnScribeFailure puts a failed scribe pass on screen once per card. A
+// scribe the backend refuses fails every pass it runs — discovery, the
+// estimate, the landing draft — and they used to fail in silence; the
+// card's thread carries the durable note (engine.ScribeFailure), and this
+// is the notice for whoever is looking now. Anything that is not a
+// backend failure (an unusable reply, a cancelled pass) says nothing.
+func (m *Shell) warnScribeFailure(id domain.FeatureID, err error) {
+	var sf *engine.ScribeFailure
+	if !errors.As(err, &sf) || m.scribeWarned[id] {
+		return
+	}
+	m.scribeWarned[id] = true
+	// not isErr, for the reason the no-checks notice is not: the pass
+	// that failed rides in the wake of a crossing that succeeded
+	m.notice = noticeMsg{id: id, text: sanitize(string(id) + ": " + sf.Error() +
+		" — check discovery, the budget estimate and landing drafts are skipped until it works; fix the scribe's model in .gummi/profiles.yaml")}
 }
 
 // baselineChecks runs the artifact's gummi-checks once on the fresh
@@ -895,7 +965,10 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 			return scribeEstimateDoneMsg{id: id}
 		}
 		scribe, err := m.engine.Estimate(ctx, f)
-		if err != nil || scribe <= 0 {
+		if err != nil {
+			return scribeEstimateDoneMsg{id: id, err: err}
+		}
+		if scribe <= 0 {
 			return scribeEstimateDoneMsg{id: id}
 		}
 		blended := int(domain.BlendEstimate(float64(f.Budget.Envelope), scribe))

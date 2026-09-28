@@ -408,6 +408,11 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			// Not "ready to land": the picker beneath this offers three
 			// endings and landing is only one of them, so the question
 			// has to be the one the rows actually answer.
+			if in.noChecks {
+				// and not a bare "passed" when gummi ran nothing: the
+				// card has no gummi-checks, so the pass is the reviewer's
+				return "verification passed on the reviewer's own commands (no gummi-checks ran) — decide how this work leaves gummi."
+			}
 			return "verification passed — decide how this work leaves gummi."
 		}
 		return "verification stopped here — choose what happens next."

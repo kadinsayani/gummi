@@ -140,6 +140,10 @@ type nextInput struct {
 	// (state.ExcusedChecks). Read from the shell's per-card cache, never
 	// from the store — this is assembled on the render path.
 	excusedChecks []string
+	// noChecks: the card's artifact carries no gummi-checks block, so its
+	// verify ran none and a pass rests on the reviewer's own commands
+	// (featureRow.NoChecks). The pass sentence says so.
+	noChecks bool
 
 	// base is the branch this card lands on, resolved once at attach
 	// (Shell.baseBranch). The landing row used to write the literal
@@ -348,6 +352,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		pullRequest:      r.F.PullRequest,
 		exited:           r.Exited,
 		excusedChecks:    m.excusedChecks[r.F.ID],
+		noChecks:         r.NoChecks,
 		base:             m.baseBranch(r.F),
 		branch:           r.F.BranchName(),
 		adopted:          r.F.Adopted(),

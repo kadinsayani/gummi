@@ -263,7 +263,11 @@ function verify (it) {
     h('div', { class: 'av agent', 'aria-hidden': 'true', testid: 'verify-avatar' }, avatarFor('verify')),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, 'verify'), h('span', { class: 'mono' }, clock(it.time)),
-        h('span', { class: fails ? 'badc' : 'okc' }, fails ? `${fails} failed` : 'all passed')),
+        // zero checks is not "all passed": gummi ran nothing (the item's
+        // text says why), and the verdict rests on the reviewer's own runs
+        checks.length
+          ? h('span', { class: fails ? 'badc' : 'okc' }, fails ? `${fails} failed` : 'all passed')
+          : h('span', { class: 'badc', testid: 'verify-no-checks' }, 'no checks')),
       it.text ? h('div', { class: 'body' }, markdown(it.text)) : null,
       checks.length ? checksList(checks) : null))
 }

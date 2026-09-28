@@ -87,11 +87,11 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 		ExtraReadAllows: []string{specPath},
 	})
 	if err != nil {
-		return 0, err
+		return 0, e.scribeFailed(ctx, f, "the budget estimate", rc.Model, ag, err)
 	}
 	defer func() { _ = sess.Close() }()
 	if err := sess.Send(ctx, estimatePrompt); err != nil {
-		return 0, err
+		return 0, e.scribeFailed(ctx, f, "the budget estimate", rc.Model, ag, err)
 	}
 	stage := f.Stage
 	var text assistantText
@@ -113,7 +113,7 @@ func (e *Engine) Estimate(ctx context.Context, f domain.Feature) (float64, error
 				v, _ := parseScribeEstimate(text.String())
 				return v * e.costFactor(backend), nil
 			case agent.EventError:
-				return 0, ev.Err
+				return 0, e.scribeFailed(ctx, f, "the budget estimate", rc.Model, ag, ev.Err)
 			}
 		case <-ctx.Done():
 			return 0, ctx.Err()

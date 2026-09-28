@@ -507,6 +507,12 @@ func verifyStopped(in nextInput, art string) string {
 		// state; who lands it is the question the rows ask, and a reader
 		// who is going to hand the branch off should not be told the
 		// screen has already decided.
+		if in.noChecks {
+			// no gummi-checks ran: the pass is the reviewer's word on
+			// commands it chose, and a reader deciding to land is owed that
+			return "Verify passed on the reviewer's own commands — this card has no gummi-checks, so gummi ran none" +
+				". Decide how it leaves gummi."
+		}
 		return "Verify passed — the work is ready" + excusedClause(in.excusedChecks) +
 			". Decide how it leaves gummi."
 	}

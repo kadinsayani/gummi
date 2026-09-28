@@ -68,7 +68,28 @@ func discoverPromptWith(card string) string {
 // during spec, or from an earlier approval), so re-entry never clobbers
 // edits. Best-effort like Estimate: an unusable reply returns (nil, nil)
 // and the Verify agent falls back to discovering the commands itself.
+//
+// Best-effort is not silent, though. A pass the backend refused returns a
+// *ScribeFailure and says so on the card (scribeFailed), and a card left
+// with no block at all — whatever the reason — gets a note saying that its
+// verify will gate nothing but the reviewer's own commands (noteNoChecks).
+// Both are written once per card, so the retry at verify start
+// (runSpecChecks) cannot repeat them.
 func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain.Check, error) {
+	checks, err := e.discoverChecks(ctx, f)
+	if len(checks) == 0 && e.agentFor(e.scribeBackend(f)) != nil && e.ChecksBlockMissing(ctx, f) {
+		e.noteNoChecks(ctx, f, err)
+	}
+	return checks, err
+}
+
+// scribeBackend is the backend name a card's scribe resolves to.
+func (e *Engine) scribeBackend(f domain.Feature) string {
+	_, backend := e.resolveRole(f.Profile, agent.RoleScribe)
+	return backend
+}
+
+func (e *Engine) discoverChecks(ctx context.Context, f domain.Feature) ([]domain.Check, error) {
 	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
@@ -139,7 +160,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		ExtraReadAllows: []string{specPath},
 	})
 	if err != nil {
-		return nil, err
+		return nil, e.scribeFailed(ctx, f, "check discovery", rc.Model, ag, err)
 	}
 	defer func() { _ = sess.Close() }()
 	// The repo's own instructions go in ahead of the survey: a
@@ -152,7 +173,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 		prompt = card + "\n\n" + prompt
 	}
 	if err := sess.Send(ctx, prompt); err != nil {
-		return nil, err
+		return nil, e.scribeFailed(ctx, f, "check discovery", rc.Model, ag, err)
 	}
 	// Booked against the stage the pass started in, like oneShot: a
 	// discovery that outlives the gate it was fired at is still that
@@ -176,7 +197,7 @@ func (e *Engine) DiscoverChecks(ctx context.Context, f domain.Feature) ([]domain
 			case agent.EventIdle:
 				return e.finishDiscovery(repoRoot, specPath, text.String())
 			case agent.EventError:
-				return nil, ev.Err
+				return nil, e.scribeFailed(ctx, f, "check discovery", rc.Model, ag, ev.Err)
 			case agent.EventBudgetExhausted:
 				// soft stop, same as the main engine loop's handling: the
 				// in-flight response is done and no more turns will run, so

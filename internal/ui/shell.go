@@ -329,7 +329,11 @@ type Shell struct {
 	// "in flight" is testable as key-presence — cardBusy/spinnerActive rely
 	// on that.
 	scribing map[domain.FeatureID]int
-	rounds   map[roundKey]int // automatic loop round counters, keyed by (id, round_kind)
+	// scribeWarned is the cards whose scribe failure the board already
+	// put on screen: the passes that fail together (discovery, the
+	// estimate, the landing draft) say it once, not three times.
+	scribeWarned map[domain.FeatureID]bool
+	rounds       map[roundKey]int // automatic loop round counters, keyed by (id, round_kind)
 	// cardEvents caches the card-event log (state.CardEvent, card_events
 	// table) per feature, loaded lazily by loadCardEvents and applied to
 	// the selected row's featureRow.Events at render time (msgs.go). It is
@@ -564,6 +568,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		checks:         map[domain.FeatureID]stagedChecks{},
 		baselining:     map[domain.FeatureID]bool{},
 		scribing:       map[domain.FeatureID]int{},
+		scribeWarned:   map[domain.FeatureID]bool{},
 		consultSending: map[domain.FeatureID]string{},
 		rounds:         map[roundKey]int{},
 		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
@@ -2143,13 +2148,28 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// discovery settled (wrote a block, found one already there, or
 		// failed): baseline whatever block the artifact now carries.
 		m.scribeSettled(msg.id)
-		if msg.n > 0 {
+		switch {
+		case msg.n > 0:
 			// plural (reviewloop.go) is "" for exactly one check and "s"
 			// otherwise — "check(s)" read as literal punctuation on
 			// screen instead of agreeing with msg.n the way every other
 			// count on this notice's neighbors does.
 			m.notice = noticeMsg{text: fmt.Sprintf("%s: discovered %d repo check%s into the %s",
 				msg.id, msg.n, plural(msg.n), artifactNoun(msg.id.Kind()))}
+		case msg.missing:
+			// Discovery is best-effort, and it used to fail in silence: a
+			// card crossed its gate with no block and verify later passed
+			// on whatever the reviewer chose to run. The card's thread
+			// carries the durable note (engine.noteNoChecks); this is the
+			// moment somebody is looking.
+			//
+			// Not isErr: the crossing that fired discovery succeeded, and
+			// an error notice arriving in its wake reads to a web answer
+			// as that answer being refused (webIntent.noticed).
+			m.scribeWarned[msg.id] = m.scribeWarned[msg.id] || msg.err != nil
+			m.notice = noticeMsg{id: msg.id, text: noChecksNotice(msg.id, msg.err)}
+		case msg.err != nil:
+			m.warnScribeFailure(msg.id, msg.err)
 		}
 		m.baselining[msg.id] = true
 		return m, tea.Batch(m.baselineChecks(msg.id), spinnerTick())
@@ -2170,6 +2190,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case scribeEstimateDoneMsg:
 		m.scribeSettled(msg.id)
+		if msg.err != nil {
+			m.warnScribeFailure(msg.id, msg.err)
+		}
 		if msg.blended == 0 {
 			return m, nil
 		}
