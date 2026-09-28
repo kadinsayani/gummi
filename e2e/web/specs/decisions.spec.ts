@@ -96,7 +96,11 @@ test.describe('a design gate', () => {
     await expect(page.getByTestId('decision-option-go')).toHaveClass(/\bdanger\b/);
     await answerOption(page, false, 'go');
     await expect(page.getByTestId('decision-confirm')).toBeVisible();
+    // the question is the server's, and it says what the go does
+    await expect(page.getByTestId('decision-confirm-question')).toContainText('spends credits');
+    const yes = page.waitForRequest((r) => r.url().endsWith('/answer') && typeof r.postDataJSON()?.confirm === 'string');
     await page.getByTestId('decision-confirm-yes').click();
+    expect((await yes).postDataJSON().confirm).toMatch(/^c[0-9a-f]+$/);
     // the architect heard it, and the plan comes back to the gate
     await expect.poll(() => workspace.agentLog().includes('Cover an empty name too')).toBe(true);
     await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'gate', { timeout: 30_000 });

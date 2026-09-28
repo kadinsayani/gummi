@@ -59,7 +59,9 @@ once choosing), `resume-picked`, `resume-none` ("Not now").
 `card-spend`, `card-error`, `toggle-panel` (`]`), `card-actions` (menu),
 `card-actions-menu`, `action-<id>` (menu item), `action-btn-<id>` (pause/resume
 shown as a button), `action-dialog`, `action-question` (what it asks, or the
-server's question on a 409), `action-input` (the field its `needs` asks for,
+server's question on a 409 — verbatim, line breaks kept; an action that asks a
+yes is sent bare first and never pre-confirmed, and its yes is the token the
+question came with), `action-input` (the field its `needs` asks for,
 prefilled with its default), `action-hint` (under a landing's or a squash's
 message: where it came from and what it becomes), `action-card-<ID>` (a card in the dependency
 picker), `action-cards-filter`, `action-error` (the board's refusal, in the
@@ -88,7 +90,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `decision-question`, `decision-against`, `decision-more`, `decision-jump` | its parts |
 | `decision-option-<optionId>` | a numbered answer (`aria-pressed` = highlighted; on a multi-pick question, picked) |
 | `decision-note` and its kinds `decision-answered`, `decision-moved`, `decision-needs`, `decision-busy`, `decision-newcard`, `decision-error` | what happened to the last answer (a 409 said who got there first, that the card moved, what it still needs) |
-| `decision-confirm`, `decision-confirm-question`, `decision-confirm-yes`, `decision-confirm-no` | a confirmation an answer's flow asked for (409 `confirm`), drawn beside the decision (never inside its capped box) and focused when it appears; yes sends the answer again with `confirm` |
+| `decision-confirm`, `decision-confirm-question`, `decision-confirm-yes`, `decision-confirm-no` | a confirmation an answer's flow asked for (409 `confirm`), drawn beside the decision (never inside its capped box) and focused when it appears; the question is the server's, verbatim (line breaks kept); yes sends the answer again with the token it came with as `confirm` |
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
 | `nextup-slot`, `nextup` | "X also needs you" chip after an answer |
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |

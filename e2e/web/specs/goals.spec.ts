@@ -110,6 +110,27 @@ test.describe('a running goal', () => {
     await page.getByTestId('card-goal').click();
     await expect(page.getByTestId('view-goal').getByTestId('goal-id')).toHaveText(goal);
   });
+
+  // Deleting the goal from its card's menu asks the board's own question —
+  // which says its two cards go with it — before anything is sent with a
+  // yes; the page never confirms ahead of the server's question.
+  test('deleting the goal shows the server’s question, cards and all', async ({ pairedPage: page, server, api }, info) => {
+    await page.goto(`${server.url}/#${goal}`);
+    await expect(page.getByTestId('card-id')).toHaveText(goal);
+    if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
+    const sent: any[] = [];
+    page.on('request', (r) => { if (r.url().includes('/actions/delete') && r.method() === 'POST') sent.push(r.postDataJSON() || {}); });
+    await page.getByTestId('card-actions').click();
+    await page.getByTestId('action-delete').click();
+    const q = page.getByTestId('action-question');
+    await expect(q).toContainText(`Delete ${goal}?`);
+    await expect(q).toContainText('and the same for its 2 cards');
+    expect(sent.length).toBe(1);
+    expect(sent[0].confirm).toBeUndefined();
+    await shot(page, info, 'goal-delete-question');
+    await page.getByTestId('action-cancel').click();
+    expect((await api('GET', `/api/cards/${goal}`)).status).toBe(200);
+  });
 });
 
 test('a goal is created from the form', async ({ pairedPage: page }, info) => {

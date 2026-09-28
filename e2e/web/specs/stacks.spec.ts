@@ -95,8 +95,11 @@ test('a stack is started, grown, reordered, trimmed and restacked', async ({ pai
   }
   expect(pushed).toBe(true);
   await expect(box.getByTestId('stack-replayed')).toContainText(ids.shrug);
-  await expect(box.getByTestId('stack-push-line').first()).toContainText('git push --force-with-lease');
+  // the workspace's repository has no remote: the line says there is
+  // nothing to push, rather than naming an origin that is not there
+  await expect(box.getByTestId('stack-push-line').first()).toContainText('no remote is configured');
   await expect(box.getByTestId('stack-push-line').first()).toContainText('feat/add-a-shrug-helper');
+  await expect(box.getByTestId('stack-push-line').first()).not.toContainText('origin');
   await box.getByTestId('stack-push-copy').first().click();
   await expect(page.getByTestId('toast').filter({ hasText: /copied|selected/ })).toHaveCount(1);
   await shot(page, info, 'stack-restack');

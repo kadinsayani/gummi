@@ -53,13 +53,25 @@ test.describe('a backlog', () => {
   test('delete asks first, then the card is gone', async ({ pairedPage: page, server, api }, info) => {
     const id = ids[1];
     await open(page, server, id, phone(info));
+    const sent: any[] = [];
+    page.on('request', (r) => { if (r.url().includes('/actions/delete') && r.method() === 'POST') sent.push(r.postDataJSON() || {}); });
     await menu(page, 'delete');
-    await expect(page.getByTestId('action-question')).toContainText(`Delete ${id}`);
+    // the question is the server's own, whole: sent bare, asked back
+    await expect(page.getByTestId('action-question')).toContainText(`Delete ${id}?`);
+    await expect(page.getByTestId('action-question')).toContainText('removes worktree, branch, and record');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].confirm).toBeUndefined();
     await shot(page, info, 'action-delete');
     await page.getByTestId('action-cancel').click();
     expect((await api('GET', `/api/cards/${id}`)).status).toBe(200);
+    // a bare yes is not one
+    expect((await api('POST', `/api/cards/${id}/actions/delete`, { confirm: true })).status).toBe(400);
     await menu(page, 'delete');
     await page.getByTestId('action-confirm').click();
+    // the yes is the token the question came with
+    await expect.poll(() => sent.length).toBe(3);
+    expect(typeof sent[2].confirm).toBe('string');
+    expect(sent[2].confirm.length).toBeGreaterThan(8);
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).status).toBe(404);
     if (phone(info)) await page.getByTestId('mnav-cards').click();
     await expect(page.getByTestId(`rail-row-${id}`)).toHaveCount(0);
