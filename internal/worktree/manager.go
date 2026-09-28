@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -1604,6 +1605,45 @@ func (m *Manager) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 		return "", err
 	}
 	return runGit(ctx, p, "diff", base)
+}
+
+// revRe is what DiffSince accepts as a revision: a commit id, never a ref
+// name or anything git could read as an option.
+var revRe = regexp.MustCompile(`^[0-9a-f]{7,64}$`)
+
+// DiffSince is the worktree's change since rev with no context lines: the
+// narrow "what moved since I last looked" a reviewer asks after a new
+// commit, in the same coordinates Diff's new side uses (both end at the
+// worktree). rev must be a commit id the repository has.
+func (m *Manager) DiffSince(ctx context.Context, f *domain.Feature, rev string) (string, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return "", err
+	}
+	if !revRe.MatchString(rev) {
+		return "", fmt.Errorf("%q is not a commit id", rev)
+	}
+	if _, err := runGit(ctx, p, "rev-parse", "--verify", "--quiet", rev+"^{commit}"); err != nil {
+		return "", fmt.Errorf("unknown commit %s", rev)
+	}
+	return runGit(ctx, p, "diff", "-U0", rev, "--")
+}
+
+// Upstream is the remote branch the card's branch tracks, as git's own
+// branch config records it: the remote's name and the branch's name
+// there. ok is false for a branch that tracks nothing, which is every
+// branch gummi cut until someone pushed it with -u.
+func (m *Manager) Upstream(ctx context.Context, f *domain.Feature) (remote, branch string, ok bool) {
+	name := f.BranchName()
+	remote, err := runGit(ctx, m.repo, "config", "--get", "branch."+name+".remote")
+	if err != nil || remote == "" || remote == "." {
+		return "", "", false
+	}
+	merge, err := runGit(ctx, m.repo, "config", "--get", "branch."+name+".merge")
+	if err != nil || merge == "" {
+		return "", "", false
+	}
+	return remote, strings.TrimPrefix(merge, "refs/heads/"), true
 }
 
 // DiffStat is Diff's summary: the same base, `--stat` instead of the

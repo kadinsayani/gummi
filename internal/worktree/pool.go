@@ -357,6 +357,30 @@ func (p *Pool) Diff(ctx context.Context, f *domain.Feature) (string, error) {
 	return wt.Diff(ctx, f)
 }
 
+func (p *Pool) DiffBase(ctx context.Context, f *domain.Feature) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.DiffBase(ctx, f)
+}
+
+func (p *Pool) DiffSince(ctx context.Context, f *domain.Feature, rev string) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.DiffSince(ctx, f, rev)
+}
+
+func (p *Pool) Upstream(ctx context.Context, f *domain.Feature) (remote, branch string, ok bool) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", "", false
+	}
+	return wt.Upstream(ctx, f)
+}
+
 func (p *Pool) CommitAll(ctx context.Context, f *domain.Feature, message string) (bool, error) {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {

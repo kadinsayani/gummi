@@ -71,6 +71,24 @@ func Headings(content string) []string {
 	return out
 }
 
+// Heading is one top-level section heading and the 1-based line it is on.
+type Heading struct {
+	Title string
+	Line  int
+}
+
+// HeadingLines is Headings with each heading's line: a document's table
+// of contents, in document order, by the same `## ` rule.
+func HeadingLines(content string) []Heading {
+	var out []Heading
+	for i, l := range strings.Split(content, "\n") {
+		if isHeading(l) {
+			out = append(out, Heading{Title: strings.TrimSpace(l[len("## "):]), Line: i + 1})
+		}
+	}
+	return out
+}
+
 // SectionLastLine reports the 1-based line number of the last line of the
 // named section's body — the line a note appended to that section belongs
 // under. Blank trailing lines are skipped, so an appended marker lands
