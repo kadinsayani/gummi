@@ -31,12 +31,15 @@ import (
 // ask, it is a hard stop nothing else on the card can get past on its
 // own, whereas a budget or a gate can still be looked at once the more
 // urgent thing is dealt with. idle is never a real contender — it means
-// nobody is waiting on anyone — and is dropped rather than ranked.
+// nobody is waiting on anyone — and is dropped rather than ranked. A
+// stage that failed to run ranks beside a budget stop: both are a stage
+// that stopped short and resolve only by running it again.
 func Rank(decs []state.OpenDecision) (state.OpenDecision, bool) {
 	rank := map[string]int{
 		state.DecisionKindAsk:      0,
 		state.DecisionKindConflict: 0,
 		state.DecisionKindBudget:   1,
+		state.DecisionKindFailure:  1,
 		state.DecisionKindVerify:   2,
 		state.DecisionKindGate:     3,
 	}
@@ -79,7 +82,8 @@ const (
 // clean, so it reads as an escalated gate — the same tint an escalation
 // gives a human-judgment stop nothing settled on its own. A rebase
 // conflict is an environment stop, which is the failure lane, not the
-// review-and-advance one. idle (and anything unrecognized) reports false:
+// review-and-advance one, and so is a stage that failed to run. idle (and
+// anything unrecognized) reports false:
 // an idle card is not waiting on anyone, and nothing writes one today
 // regardless.
 func Attention(kind string) (lane Lane, escalated bool, ok bool) {
@@ -92,7 +96,7 @@ func Attention(kind string) (lane Lane, escalated bool, ok bool) {
 		return LaneGate, false, true
 	case state.DecisionKindVerify:
 		return LaneGate, true, true
-	case state.DecisionKindConflict:
+	case state.DecisionKindConflict, state.DecisionKindFailure:
 		return LaneFailure, false, true
 	default:
 		return "", false, false

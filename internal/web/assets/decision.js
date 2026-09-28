@@ -24,6 +24,7 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
 import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
+import { runAction } from './actions.js?v=__ASSET_V__'
 
 let ctx = {}
 let answering = false
@@ -110,7 +111,13 @@ function optionButtons (d, compact) {
 const SURFACES = {
   spec: () => ctx.setTab('spec'),
   diff: () => ctx.setTab('diff'),
-  goalpage: () => openView('goal', { id: state.sel })
+  goalpage: () => openView('goal', { id: state.sel }),
+  // the card's own menu entry, which asks for the profile the way the
+  // menu does (a failed stage offers "change profile")
+  profile: () => {
+    const a = (state.card?.actions || []).find(x => x.id === 'profile')
+    if (a) runAction(state.card, a)
+  }
 }
 
 function onOption (i, compact) {
@@ -118,7 +125,7 @@ function onOption (i, compact) {
   const o = d.options[i]
   if (SURFACES[o.id]) {
     set({ hi: i })
-    if (isMobile() && o.id !== 'goalpage') set({ view: 'panel' })
+    if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
     SURFACES[o.id]()
     return
   }
@@ -329,7 +336,7 @@ export async function answer ({ picked = false } = {}) {
     o = d.options[w]
   }
   if (SURFACES[o.id] && !text) {
-    if (isMobile() && o.id !== 'goalpage') set({ view: 'panel' })
+    if (isMobile() && o.id !== 'goalpage' && o.id !== 'profile') set({ view: 'panel' })
     SURFACES[o.id]()
     return
   }

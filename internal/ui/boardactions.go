@@ -365,6 +365,15 @@ func (m *Shell) runCardAction(a cardAction) tea.Cmd {
 			m.notice = noticeMsg{text: string(r.F.ID) + ": " + a.label + " — " + a.why, id: r.F.ID}
 		}
 		return nil
+	case "settle":
+		// "stop here" on a failed stage (nextsteps.go's failure arm): the
+		// run already stopped, so what stops is the card asking for you.
+		// The failure stays on record; the next run of the stage closes it.
+		if r, ok := m.selected(); ok {
+			m.inbox.remove(r.F.ID)
+			m.notice = noticeMsg{text: string(r.F.ID) + ": left at " + string(r.F.Stage) + " — nothing runs until you start it again", id: r.F.ID}
+		}
+		return nil
 	case "deps":
 		// the dependency picker, reached from the list while a stage
 		// session exists — where p pauses instead (cardactions.go)

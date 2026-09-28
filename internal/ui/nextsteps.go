@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -208,6 +209,14 @@ type nextInput struct {
 	// landConflicts are the files the last landing attempt conflicted
 	// in; non-nil once a landing hit conflicts, until a rebase clears it.
 	landConflicts []string
+
+	// attnText is the attention item's own sentence — for a failure, the
+	// cause, which the decision's question names rather than leaving it
+	// in the thread alone.
+	attnText string
+	// profiles is whether the board has profiles a card can switch to,
+	// so a failed stage can be offered another one.
+	profiles bool
 }
 
 // closed reports whether the card has ended — landed, or at done by any
@@ -408,8 +417,9 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		landConflicts:    m.landConflicts[r.F.ID],
 	}
 	if it, ok := m.inbox.get(r.F.ID); ok {
-		in.attn, in.escalated = it.Kind, it.Escalated
+		in.attn, in.escalated, in.attnText = it.Kind, it.Escalated, it.Text
 	}
+	in.profiles = m.engine != nil && len(m.engine.BoardProfiles()) > 0
 	in.cardOpen = m.cardOpen
 	if r.F.IsFreeform() && m.engine != nil {
 		if ff := m.engine.Freeform(r.F.ID); ff != nil {
@@ -778,7 +788,10 @@ func stageActions(in nextInput) []nextAction {
 		}
 		return nil
 	case engine.StatePaused:
-		if !in.finished() {
+		// a failed run also leaves its session paused, but it is not a
+		// pause: it has its own answers (the failure arm below), and
+		// "the run is paused" is the wrong word for a stage that failed
+		if !in.finished() && in.attn != attnFailure {
 			// stopped by hand before the stage produced anything: picking
 			// it back up is the only answer, and "stop here" would be a
 			// row offering what has already happened. attach is plumbing
@@ -826,7 +839,18 @@ func stageActions(in nextInput) []nextAction {
 		case in.backendNeverStarted:
 			why = "the backend never started — a retry runs the same command"
 		}
-		return append([]nextAction{nextStep("run", "enter", "try again", why)}, stopHere(in)...)
+		acts := []nextAction{nextStep("run", "enter", "try again", why)}
+		if in.profiles {
+			// a failure that is the backend's (it cannot enforce what the
+			// stage needs, it is down, it never started) is answered by
+			// running the stage somewhere else
+			acts = append(acts, nextStep("profile", "", "change profile",
+				"run "+string(in.stage)+" under another profile — the failure may be this backend's"))
+		}
+		// stopHere offers nothing for a session that has already stopped,
+		// and a failed one has: this is the answer that leaves it so
+		return append(acts, nextStep("settle", "", "stop here",
+			"leave the card where it is — nothing runs until you start "+string(in.stage)+" again"))
 	case attnBudget:
 		// the two honest answers to an exhausted envelope, offered where
 		// the stop is rather than as a pointer at the inbox tab: raise it
@@ -1401,4 +1425,31 @@ func designPartner(kind domain.Kind) string {
 		return "the researcher"
 	}
 	return "the architect"
+}
+
+// repeatsLastPark reports whether the card's newest park already says
+// detail, with no run, crossing or answer since. Each retry of a stage
+// that fails the same way used to append another identical "parked — …"
+// row, so the thread filled with copies of one stop.
+func (m *Shell) repeatsLastPark(id domain.FeatureID, detail string) bool {
+	if m.store == nil {
+		return false
+	}
+	evs, err := m.store.Events(context.Background(), id)
+	if err != nil {
+		return false
+	}
+	for i := len(evs) - 1; i >= 0; i-- {
+		switch evs[i].Kind {
+		case state.EventStageEnter, state.EventGate, state.EventAsk:
+			return false
+		case state.EventPark:
+			var p state.ParkPayload
+			if json.Unmarshal([]byte(evs[i].Payload), &p) != nil {
+				return false
+			}
+			return p.Detail == detail
+		}
+	}
+	return false
 }

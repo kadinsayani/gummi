@@ -1058,8 +1058,20 @@ func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
 // already-present check keeps one stop from being recorded twice, exactly
 // as the park beside it does.
 func (m *Shell) raiseAttention(id domain.FeatureID, kind attnKind, text string) {
-	if m.parkAttentionItem(id, kind, text) && kind == attnGate {
+	// the same stop raised again with nothing run in between (a retry
+	// that failed the same way) is the one stop, already on record
+	repeat := m.repeatsLastPark(id, text)
+	if !m.parkAttentionItem(id, kind, text) || repeat {
+		return
+	}
+	switch kind {
+	case attnGate:
 		m.logDecision(id, state.DecisionKindGate, text)
+	case attnFailure:
+		// a stage that could not run blocks the card on a person just as
+		// a gate does, and without a row it was forgotten on a restart:
+		// the card came back reading idle, the failure nowhere
+		m.logDecision(id, state.DecisionKindFailure, text)
 	}
 }
 
@@ -1134,7 +1146,7 @@ func (m *Shell) logDecision(id domain.FeatureID, kind, question string) {
 // the card stopped, and failing to write the history entry is not worth
 // a second, more confusing message about it.
 func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
-	if m.store == nil {
+	if m.store == nil || m.repeatsLastPark(id, detail) {
 		return
 	}
 	_ = m.store.AppendPark(context.Background(), id, m.recordStage(id), reason, detail, "", time.Now())

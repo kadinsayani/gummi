@@ -16,7 +16,7 @@
   {
     "card": "FD-042",
     "kind": "failure",
-    "question": "implement failed — choose what happens next.",
+    "question": "implement failed: the implement session stopped: backend exited — choose what happens next.",
     "anchor": "thread",
     "options": [
       {
@@ -25,6 +25,12 @@
         "detail": "the session errored — a fresh run retries implement",
         "words": true,
         "relabel": "try again with your words"
+      },
+      {
+        "id": "settle",
+        "label": "stop here",
+        "detail": "leave the card where it is — nothing runs until you start implement again",
+        "words": false
       }
     ]
   },

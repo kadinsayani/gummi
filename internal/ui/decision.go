@@ -443,6 +443,12 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// already rendered, and offers that failure's own options
 		// (re-run, attach the agent CLI) — "nothing is running" would be
 		// a lie one line above an explanation of why nothing is.
+		// The cause goes in the question: in the thread alone it was one
+		// scroll away from the options that answer it, and a reader who
+		// opened the card on its decision never saw why it failed.
+		if cause := strings.TrimSpace(in.attnText); cause != "" {
+			return string(r.F.Stage) + " failed: " + cause + " — choose what happens next."
+		}
 		return string(r.F.Stage) + " failed — choose what happens next."
 	default:
 		if in.live {

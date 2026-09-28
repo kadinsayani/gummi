@@ -73,6 +73,10 @@ const (
 	DecisionKindConflict = "conflict"
 	DecisionKindBudget   = "budget"
 	DecisionKindIdle     = "idle"
+	// DecisionKindFailure is a stage that could not run: its session
+	// errored or never started. Like a budget stop it has no answer
+	// event — what resolves it is the stage running again.
+	DecisionKindFailure = "failure"
 )
 
 // OpenDecision records a card blocking on a human. The decision id is the
@@ -335,7 +339,7 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 			if d.stage != cur {
 				continue // the stage moved on: the decision is abandoned
 			}
-			if d.dec.Kind == DecisionKindBudget && reran > d.seq {
+			if (d.dec.Kind == DecisionKindBudget || d.dec.Kind == DecisionKindFailure) && reran > d.seq {
 				// A budget stop has no answer event — the answer kinds are
 				// gate and ask, and minting one of those for a top-up would
 				// fork their meaning. What resolves it is the stage running

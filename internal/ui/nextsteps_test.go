@@ -44,7 +44,7 @@ func TestNextActionsByState(t *testing.T) {
 		// answers /attach, and it no longer takes a row in the set beside
 		// the one thing the card is actually waiting to be told.
 		{"paused picks the stage back up", nextInput{stage: domain.StageVerify, kind: feat, sess: engine.StatePaused, hasWorktree: true}, "enter"},
-		{"failure retries", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter"},
+		{"failure retries", nextInput{stage: domain.StageVerify, kind: feat, attn: attnFailure, hasWorktree: true}, "enter "},
 		{"paused with no worktree offers only the re-run", nextInput{stage: domain.StagePlan, kind: feat, sess: engine.StatePaused}, "enter"},
 		// §1.1a: pausing a card AFTER its gate already fired is a stop
 		// mid-decision, not a reason to hide the decision. BG-002 passed
@@ -242,7 +242,7 @@ func TestNextInputForAssembly(t *testing.T) {
 	in := m.nextInputFor(row)
 	want := nextInput{
 		stage: domain.StageVerify, landed: true,
-		attn: attnGate, escalated: true,
+		attn: attnGate, escalated: true, attnText: "escalated",
 		reviewRound: 2, failedCheck: "unit",
 		openSpecQs: 1, openDiffComments: 2,
 		undrafted: []string{"Verification plan"},
