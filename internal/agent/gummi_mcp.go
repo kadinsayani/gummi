@@ -5,8 +5,25 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
+	"time"
 )
+
+// mcpCallTimeout is how long a backend's MCP client is told to wait on one
+// call to gummi's server.
+//
+// Every client bounds a tool call, and the bound is sized for tools that
+// compute: a minute on opencode and on codex. ask_user does not compute, it
+// waits on a person, and a person reading the question for longer than a
+// minute had it fail under them — the model was told the call timed out,
+// asked again, and ended its turn on a question nobody had answered. A
+// week is "as long as it takes" spelled as a number every client accepts:
+// it stays under the 2^31-1 ms a JavaScript timer can hold. The engine
+// does not depend on it (a turn that ends on an open question keeps the
+// question open); this is what keeps the call itself alive, so the answer
+// lands as the result the model is waiting for.
+const mcpCallTimeout = 7 * 24 * time.Hour
 
 // buildGummiMCPServerConfig renders the per-session MCP client config that
 // points an agent backend's MCP transport at gummi's own tool server
@@ -88,7 +105,8 @@ func buildCodexGummiOverride(execPath, featureID, sockPath string, workspace boo
 	return "mcp_servers.gummi=" + "{" +
 		"command=" + cmd + "," +
 		"args=" + argsTOML + "," +
-		"env={GUMMI_MCP_SOCK=" + sock + "}" +
+		"env={GUMMI_MCP_SOCK=" + sock + "}," +
+		"tool_timeout_sec=" + strconv.FormatInt(int64(mcpCallTimeout/time.Second), 10) +
 		"}", nil
 }
 

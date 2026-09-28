@@ -81,6 +81,7 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 				"type":        "local",
 				"command":     command,
 				"environment": map[string]string{"GUMMI_MCP_SOCK": mcpSock},
+				"timeout":     mcpCallTimeout.Milliseconds(),
 			},
 		}
 	}
@@ -102,6 +103,7 @@ func buildHostedOpencodeMCPConfig(execPath, sockPath string) []byte {
 				"type":        "local",
 				"command":     []string{execPath, "__mcp", "--workspace"},
 				"environment": map[string]string{"GUMMI_MCP_SOCK": sockPath},
+				"timeout":     mcpCallTimeout.Milliseconds(),
 			},
 		},
 	}

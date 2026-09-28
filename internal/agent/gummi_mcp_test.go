@@ -63,9 +63,10 @@ type codexOverrideEnv struct {
 }
 
 type codexOverrideServer struct {
-	Command string
-	Args    []string
-	Env     codexOverrideEnv
+	Command        string
+	Args           []string
+	Env            codexOverrideEnv
+	ToolTimeoutSec int64 `toml:"tool_timeout_sec"`
 }
 
 type codexOverrideConfig struct {
@@ -100,6 +101,11 @@ func TestBuildCodexGummiOverride_HappyPath(t *testing.T) {
 	}
 	if g.Env.GUMMI_MCP_SOCK != "/tmp/mcp/FD-013.sock" {
 		t.Errorf("env.GUMMI_MCP_SOCK = %q, want /tmp/mcp/FD-013.sock", g.Env.GUMMI_MCP_SOCK)
+	}
+	// codex bounds an MCP tool call at a minute unless told otherwise,
+	// and a question waits on a person
+	if g.ToolTimeoutSec < 24*60*60 {
+		t.Errorf("tool_timeout_sec = %d, want at least a day", g.ToolTimeoutSec)
 	}
 }
 

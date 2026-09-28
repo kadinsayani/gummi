@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func buildConfig(t *testing.T, extra []string) map[string]any {
@@ -55,6 +56,11 @@ func TestBuildOpencodeConfig(t *testing.T) {
 	env := gummi["environment"].(map[string]any)
 	if env["GUMMI_MCP_SOCK"] != "/tmp/mcp/FD-011.sock" {
 		t.Errorf("mcp.gummi.environment.GUMMI_MCP_SOCK = %v, want /tmp/mcp/FD-011.sock", env["GUMMI_MCP_SOCK"])
+	}
+	// a call to gummi may be a question waiting on a person: opencode's
+	// own bound on an MCP request (a minute) must not apply to it
+	if got, _ := gummi["timeout"].(float64); got < float64((24 * time.Hour).Milliseconds()) {
+		t.Errorf("mcp.gummi.timeout = %v ms, want at least a day", gummi["timeout"])
 	}
 }
 
