@@ -76,6 +76,11 @@ leaf services.
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `verdict` | Shared stage-verdict grammar the TUI and headless driver both parse, per DESIGN §13. |
 | `engine/freeformsession.go` | The one session that is not a stage run and still writes: a freeform card's whole working life — its worktree, its per-card lock, its envelope, and a checkpoint commit at the end of every turn. Built from `consultsession.go`'s lifecycle and `boardsession.go`'s absences; read all three together. |
+| `web` | `gummi web`: serves the board to a browser as a page of its own (DESIGN §20). Holds no board: it asks the TUI's model, run headless behind `ui.Bridge`, for every read and write. Pairing and device tokens (`pair.go`), same-origin and auth (`auth.go`), the SSE hub (`hub.go`), one `routes_*.go` per area, and the page itself under `assets/` (plain ES modules, no build step, strict CSP — no inline script or style). |
+| `web/push` | Web Push from the host with the standard library alone: VAPID identity, RFC 8291 encryption, the per-device subscription store, and the fan-out notifier the board's attention hook posts to. |
+| `webapi` | The JSON contract between `internal/web` and its page: types only, golden-tested shapes. Change a shape here first. |
+| `threadfold` | Pure fold of a card's event log into what a thread draws — stage sessions, answered decisions, autopilot stretches, and the structured `Items` the web page renders — in the words the TUI thread uses. Both faces read it. |
+| `decisions` | Pure rules for a card's open decisions: which one a card shows (`Rank`), its attention lane, how an `ask_user` question is offered as options, and what an answer says. Both faces read it. |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to either a live stage session's tools (`--feature`) or the process-lifetime workspace scope's board-level tools (`--workspace`) a hosted agent uses to drive the gummi it lives inside. |
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
@@ -223,6 +228,13 @@ still work — the board just stays static. Key env vars are tabled in
   for what a card forks from (and read its comment before touching any
   `"HEAD"` in that package — the token means two different things there).
 - A TUI bug → `internal/ui` (`board.go`, `chat.go`, `diffview.go`, `inbox.go`).
+- A web face bug → `internal/web` for the server and page, `internal/ui/web*.go`
+  and `internal/ui/bridge.go` for what the page is told and how its writes
+  reach the board. The web face never decides anything itself: if a web
+  answer differs from the TUI's, the fix belongs in the shared code
+  (`threadfold`, `decisions`, the Shell), and `TestWebDecisionsMatchThePicker`
+  is the test that should have caught it. Browser tests live in `e2e/web`
+  (`scripts/web-e2e.sh`, Playwright).
 - "what did this card cost / how did it run" → `internal/cardrun`, then its
   three readers (`internal/ui/statsview.go`, `cmd/gummi/statusstats.go`,
   `internal/ui/week.go`). The derivation lives in one place on purpose: two

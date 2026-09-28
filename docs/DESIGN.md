@@ -195,7 +195,7 @@ Stage semantics:
 - **Done** — you decide the feature is done. A verified card has **three
   endings**, and the answer set at the verify gate offers all three
   rather than assuming the first:
-  - **Land on main** (`g`, or `m` at any stage; `gummi merge`) —
+  - **Land on main** (`g`, or `m`, at verify — never before it; `gummi merge`) —
     advancing out of Verify squash-merges the branch into main as a
     single commit whose message gummi drafts from the spec and the
     branch; you review, edit, and approve it before anything lands.
@@ -1298,10 +1298,15 @@ Rules that make the control safe:
 
 Because the same event is what the headless driver raises at its own
 checkpoints, the two loops share the decision rather than each modelling
-it: `internal/gatepolicy`'s `RaiseGate` outcome is the single place a
-decision is opened, which is what keeps the TUI and `gummi run` from
-drifting the way `attnKind` and the driver's NDJSON vocabulary already
-have.
+it: both write it through `Store.OpenDecision`, with the same id shape
+and the same kinds, so a reader of the log cannot tell which loop stopped
+the card. What they share for *when* to stop is `internal/gatepolicy`,
+whose `RaiseGate` outcome decides the checkpoint after a critique or
+verify pass. It is not the only place a decision is opened: each loop
+also opens one at the stops that are its own — the driver at an
+`--until` stop, at the landing gate a verified card waits on, at a
+blocked gate and after a decompose pass (`Driver.openDecision`); the
+board where it raises a card to the inbox (`Shell.logDecision`).
 
 ## 7. What gummi is not (scope guards)
 
@@ -3252,9 +3257,13 @@ directly, so the replay that follows is a fast-forward rather than a
 re-application of work already there.
 
 `Engine.StackTick` mirrors `GoalTick` — read, ask the pure policy,
-execute — and the board (`queueStackTick`, drained in `Update` beside
-`drainGoalTicks`, plus a backstop poll) and the headless driver both tick
-without either deciding. `stack.Decide` returns **at most one** restack per
+execute — and the board ticks it without deciding anything itself
+(`queueStackTick`, drained in `Update` beside `drainGoalTicks`, plus a
+backstop poll; the TUI and `gummi web` alike, since both run the same
+board). The headless driver does not tick stacks: a card `gummi run`
+moved leaves the cards above it stale until a board is next open on the
+workspace, or until `gummi stack restack` walks the stack (`Engine.Restack`,
+StackTick to a fixed point) and prints the pushes. `stack.Decide` returns **at most one** restack per
 tick on purpose: a replay rewrites what every card above it forks from, so
 their staleness is not knowable until it has happened.
 
@@ -3635,13 +3644,23 @@ other side of that trade and contains the risk with four rules instead.
   stored (decision 18). A composer line is classified and routed on the
   server, so a line typed in a browser is a steer, a consult or a command
   exactly when the same line typed in the terminal would be.
+- **A line is never an answer it did not ask for, and a landing is read
+  before it lands.** A line typed at a stop whose answers take no words
+  is sent as a line and read, as the TUI's `enter` reads it — never given
+  as the highlighted answer. A landing answer carries the message the
+  person approved; one without is handed back the drafted message to read
+  (the TUI's landing dialog, and its second `ctrl+s` on an unreviewed
+  draft). A chip whose "go" spends credits asks first, as `y` does. A
+  confirmation the page sends is its own card's, never another card's a
+  flow reached on the way.
 - **An answer names what it was given against.** Every open decision
   carries the revision it was raised on — the spec commit for a design
   gate, the verify run and branch head for a failure — and the page shows
   it under the question. An answer sends it back and is refused with
-  `409` if the card has moved, or if another viewer answered first. A
-  running card's diff announces a new commit rather than replacing what
-  the reader is looking at.
+  `409` if the card has moved, or if another viewer answered first — and
+  so does a composer line or a menu action sent at that stop, so nothing
+  meant for one stop runs at another. A running card's diff announces a
+  new commit rather than replacing what the reader is looking at.
 - **Drift fails a test.** The read models are golden-tested from the
   same fixtures as the TUI's goldens, and a test asserts that the answers
   served for each fixture's open decision are the answers the TUI draws.
@@ -3662,7 +3681,9 @@ The TUI and the web face are both first-class, and **one board has one
 interactive host at a time**. Both take the lock the TUI has always
 taken, `.gummi/state/instance.lock`, and the holder now writes who it is
 beside it (TUI or web, pid, host, URL, start time), so the second to start
-exits naming the holder and how to reach it instead of a bare lock error. The headless verbs do not take the board lock. `run`, `resume`,
+exits naming the holder and how to reach it instead of a bare lock error.
+
+The headless verbs do not take the board lock. `run`, `resume`,
 `status` and the rest keep working card by card as they do beside a TUI
 today, and a card the host is driving stays protected by its card lock
 (decision 11).
@@ -3680,9 +3701,18 @@ Receipts, comments and spec notes carry the name, and the page shows who
 else is viewing. There are no accounts; a board that needs roles has
 outgrown what a local tool should decide.
 
-Every write route checks the request's `Origin` against the host on top
-of the cookie, since a JSON API has many doors where the pty face had one
-websocket upgrade. Landing and gate-crossing are available on the web
+Every write route checks the request's `Origin` — scheme, host and port —
+against the server on top of the cookie, since a JSON API has many doors
+where the pty face had one websocket upgrade; and every request, on every
+route, must name one of the server's own hosts, so a page elsewhere cannot
+reach a loopback board through a name it points at 127.0.0.1 (a DNS
+rebinding, whose requests carry matching `Host` and `Origin`). A browser
+asking for a code never replaces one that is live — a code minted for a
+named person stays theirs — and wrong guesses are counted across every
+code and caller: too many and pairing locks until `gummi web pair` mints
+a fresh code. Until a browser is paired, the session route says only
+whether it is and whether a code is live. Unpairing a device drops its
+push subscription and closes its open event streams. Landing and gate-crossing are available on the web
 because a person is answering: §16 withholds them from *agents*, and
 the web face is a human at the board.
 
@@ -3701,8 +3731,28 @@ be read before it is given.
 
 Web Push and the installed page need a secure origin. The host serves
 HTTPS when given a certificate (`--tls-cert`, `--tls-key`) and plain HTTP
-on loopback otherwise; on a tailnet, `tailscale serve` in front of it
-provides the certificate.
+otherwise, on whatever `--addr` names — loopback by default, but a paired
+board may listen on any address. Plain HTTP is a secure origin only on
+loopback (`localhost`), so off loopback it serves a board that works but
+cannot install or receive a push. What is restricted to loopback is
+`--no-pairing`, which serves the board to anyone who can reach it: it is
+refused on any other listener, the tailnet included.
+
+A phone reaches an always-on host over the tailnet, and the host joins it
+itself: `--tailscale` embeds a Tailscale node (`tsnet`) with its own name
+on the tailnet, beside the loopback listener rather than instead of it. It
+needs no `tailscaled` on the host, no port forwarding and no public
+listener, and its identity lives in the workspace's web state, so it
+keeps its name and login across restarts. `--ts-tls` serves HTTPS on 443
+with the tailnet's own certificate, which is the secure origin Web Push
+asks for. The node joins only after the host holds the instance lock
+(§20.2): a second host is refused before it can bring up a second node on
+the same identity, and the lock's record names the tailnet address once
+the node is up. A tailnet is a network boundary, not an identity check on
+the browser in someone's hand, so pairing applies there as on loopback,
+and `--no-pairing` stays loopback-only. `tailscale serve` in front of a
+loopback host remains an alternative for a machine that already runs
+`tailscaled`, given the tailnet name with `--allow-host`.
 
 ### 20.5 Scope guards
 
@@ -3715,7 +3765,6 @@ that the board-level tools (§16) withhold.
 
 ### 20.6 Deferred
 
-An embedded tailnet node (`tsnet`) in place of `tailscale serve`. A
-daily ceiling for the whole board, if unattended nights prove expensive.
+A daily ceiling for the whole board, if unattended nights prove expensive.
 Holding a line typed mid-turn until the turn ends (open question 3): the
 web face does whatever the TUI does, and will change when it does.

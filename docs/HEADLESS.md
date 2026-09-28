@@ -73,10 +73,15 @@ Other `run` flags:
 | `gummi skill show\|install\|list` | the calling-agent skill |
 
 `status`, `watch`, `spec` and `diff` take no lock, so you can inspect a card
-while a run is live. Everything that mutates the workspace (`run`,
-`resume`, `merge`, `squash`, `commit`, `clean`) holds an exclusive `.gummi`
-lock, so a headless run and the board never touch the same workspace at
-once.
+while a run is live. Everything that drives or writes a card (`run`,
+`resume`, `research`, `verify`, `merge`, `squash`, `commit`, `clean`) holds
+that card's own lock for the length of the command — not a lock on the
+whole `.gummi` workspace. Headless runs on different cards, and a run
+beside an open board, proceed side by side; two writers on the same card
+never do: the second is refused ("another gummi process is already driving
+this card"). The board holds the
+lock of every card it is driving the same way, and takes the workspace's
+one exclusive lock only against a second board.
 
 ## Watching a run
 
