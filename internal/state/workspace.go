@@ -33,6 +33,13 @@ func (w Workspace) StateDir() string { return filepath.Join(w.GummiDir(), "state
 // DraftsDir holds spec drafts before a feature has a worktree.
 func (w Workspace) DraftsDir() string { return filepath.Join(w.StateDir(), "drafts") }
 
+// WebDir holds `gummi web`'s machinery: the paired-device tokens and the
+// running server's address file. It sits under StateDir rather than beside
+// the specs because everything in it is a secret or a per-machine
+// artifact — a repository that commits its .gummi must not carry the keys
+// to somebody's board.
+func (w Workspace) WebDir() string { return filepath.Join(w.StateDir(), "web") }
+
 // SpecsDir holds approved specs — the artifact's workspace home from
 // spec approval on. Workspace content, never committed.
 func (w Workspace) SpecsDir() string { return filepath.Join(w.GummiDir(), "specs") }

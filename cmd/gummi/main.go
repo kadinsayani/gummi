@@ -18,14 +18,10 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/agentcli"
 	"github.com/morphis/gummi/internal/config"
-	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/hooks"
 	"github.com/morphis/gummi/internal/notify"
-	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/state"
-	"github.com/morphis/gummi/internal/ui"
-	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -99,121 +95,20 @@ func wireHooks(st *state.Store, pool *worktree.Pool, ws state.Workspace) *hooks.
 	return d
 }
 
+// runBoard is `gummi` with no arguments: the board in this terminal.
 func runBoard() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	wsRoot, defaultRoot, named, err := resolveAllRoots(cwd)
-	if err != nil {
-		return err
-	}
-	ws, err := ensureWorkspace(wsRoot, defaultRoot)
-	if err != nil {
-		return err
-	}
-	// Hold the workspace's exclusive lock for the TUI's lifetime so a second
-	// interactive board refuses to open while one is up. It does NOT block
-	// headless run/resume/verify/merge/clean: those hold a per-card lock for
-	// the card they drive, so independent cards run while the board is open.
-	release, err := state.AcquireLock(ws.LockFile())
-	if err != nil {
-		return err
-	}
-	defer release()
-	store, err := state.OpenStore(ws.DBFile())
-	if err != nil {
-		return err
-	}
-	defer store.Close()
-	pool, err := newPool(context.Background(), wsRoot, defaultRoot, named, store, true)
-	if err != nil {
-		return err
-	}
-	hookd := wireHooks(store, pool, ws)
-	defer hookd.Close()
-	// GUMMI_THEME selects the palette (dark|light|neon); default dark.
-	th, _ := theme.ByName(cmp.Or(os.Getenv("GUMMI_THEME"), "dark"))
-	shell := ui.NewShell(th, version())
-	shell.Attach(store, pool, ws)
-	// One registry of per-card locks for the whole board, shared by the
-	// engine (which holds a card while it drives it) and the board's own
-	// git verbs (merge, rebase, clean, …). Sharing it is what lets a merge
-	// on a card this board is already driving join the lock instead of
-	// deadlocking against this very process.
-	locks := state.NewCardLocks(ws)
-	shell.AttachCardLocks(locks)
-
-	// Profile names for the new-feature/bug/ingest dialogs come purely
-	// from .gummi/profiles.yaml and are available whether or not any agent
-	// backend can start — surface them unconditionally so the dialogs show
-	// the real profiles even on a static board.
-	shell.SetProfileNames(profileNames(ws))
-	// The configured managed repositories feed the new-card forms' repo
-	// selector; the default is always implicit, so only named repos here.
-	shell.SetRepoNames(pool.Names())
-	// Wire the agent engine best-effort: a missing/unstartable CLI just
-	// leaves the board static (chat reports "no agent configured").
-	//
-	// Nothing binds a workspace MCP endpoint here any more. This used to,
-	// so that a coding CLI hosted in the agent tab could drive *this*
-	// gummi rather than starting a second one. That pty is gone, and the
-	// board session that replaced it binds its own endpoint when it
-	// starts (engine.BoardSession) — which is why mcpworkspace.go's
-	// socket path carries a nonce in the first place.
-	if eng, _, cleanup := buildEngine(store, pool, ws, locks); eng != nil {
-		shell.AttachEngine(eng)
-		defer cleanup()
-	}
-	// layer-3 budget: new features get this credit envelope, drawn on by
-	// every stage until it runs dry and a human gate offers a top-up.
-	if v := os.Getenv("GUMMI_ENVELOPE"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			if float64(n) < domain.TurnReserveCredits {
-				fmt.Fprintf(os.Stderr, "gummi: GUMMI_ENVELOPE=%d is below one agent turn (~%d credits); "+
-					"stage budgets will be floored at a turn and overshoot the cap\n", n, int(domain.TurnReserveCredits))
-			}
-			shell.SetEnvelope(n)
-		}
-	}
-	// needs-attention notification hook: GUMMI_NOTIFY=bell|desktop|off
-	// (default bell when unset). Escapes go to stderr so they reach the
-	// terminal without disturbing the render surface.
-	notifyMode := notify.Bell
-	if v := os.Getenv("GUMMI_NOTIFY"); v != "" {
-		notifyMode = notify.ParseMode(v)
-	}
-	shell.SetNotifier(notify.New(notifyMode, os.Stderr))
-	// prlink/prpull need a real answer from GitHub, not the local
-	// approximation openReviewThreads' nil fallback uses for the
-	// warn-before-squash check — wire them to the same internal/pr
-	// functions cmd/gummi/pr.go's link/comments verbs already call.
-	shell.SetPRResolver(func(ctx context.Context, spec, repoDir, branch string) (domain.PullRequestRef, error) {
-		return pr.Resolve(ctx, pr.GHBinary(), spec, repoDir, branch)
+	h, err := openBoard(boardOpts{
+		holder: state.InstanceHolder{Host: state.HostTUI},
+		// bell when GUMMI_NOTIFY is unset. Escapes go to stderr so they
+		// reach the terminal without disturbing the render surface.
+		notifyDefault: notify.Bell,
+		notifyOut:     os.Stderr,
 	})
-	shell.SetPRThreadFetcher(func(ctx context.Context, ref domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error) {
-		return pr.FetchReviewThreads(ctx, pr.GHBinary(), ref)
-	})
-	shell.SetPRSquashMergeChecker(func(ctx context.Context, repo string) (bool, error) {
-		return pr.RepoAllowsSquashMerge(ctx, pr.GHBinary(), repo)
-	})
-	// GUMMI_COPILOT_HINT=off hides the status-bar Copilot quota pill
-	// (on by default; it needs an authenticated gh CLI to show anything).
-	if strings.EqualFold(os.Getenv("GUMMI_COPILOT_HINT"), "off") {
-		shell.SetCopilotHint(false)
+	if err != nil {
+		return err
 	}
-	// GUMMI_MOTION=off freezes every activity glyph in the UI to its
-	// static first frame and stops the shared clock's tick loop from
-	// ever starting (on by default).
-	if strings.EqualFold(os.Getenv("GUMMI_MOTION"), "off") {
-		shell.SetMotion(false)
-	}
-	// The agent tab's hosted-CLI question is NOT asked here any more. It
-	// used to be the first thing a new user saw — a modal about a tab
-	// they had not opened, in front of a board they had not seen — and it
-	// is asked on arrival at that tab instead (Shell.gotoTab).
-
-	_, err = tea.NewProgram(shell).Run()
+	defer h.Close()
+	_, err = tea.NewProgram(h.shell).Run()
 	return err
 }
 
