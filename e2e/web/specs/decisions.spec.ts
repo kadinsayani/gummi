@@ -212,9 +212,8 @@ test.describe('a failed verify', () => {
     await expect.poll(async () => (await api('GET', `/api/cards/${id}/thread`)).json.items
       .some((it: any) => it.t === 'receipt' && /Tester/.test(`${it.receipt?.by} ${it.receipt?.text}`))).toBe(true);
     await shot(page, info, 'verify-sent-back');
-    // and the comment goes to the implementer with its next run
-    if (phone) await page.getByTestId('mnav-thread').click();
-    await answerOption(page, false, 'run');
+    // and the comment goes to the implementer with its next run — which the
+    // card, on autopilot, starts itself once it is sent back
     await expect.poll(() => server.ws.agentLog().includes('Return early on an empty name'), { timeout: 20_000 }).toBe(true);
   });
 
