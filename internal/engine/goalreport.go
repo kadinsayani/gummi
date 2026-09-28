@@ -319,8 +319,25 @@ func (e *Engine) GoalReport(ctx context.Context, goalID domain.FeatureID) (GoalR
 		byRepo := map[string]*worktree.Manager{}
 		order := e.goalLandOrder(view.Goal)
 		r.LandOrderAgreed = len(order) > 0
+		// A goal lands only from its landing gate (§17: main moves on a
+		// person's landing), so until that gate has landed something,
+		// nothing of it can be on main. GoalTree.Landed cannot tell that
+		// on its own: it asks whether the goal branch is an ancestor of
+		// main, which a goal branch with nothing of its own — a fresh
+		// one, or one abandoned before any card landed on it — trivially
+		// is. The landing loop wants exactly that reading (nothing left
+		// to merge here); the hand-over must not call it landed. So the
+		// question is asked only of a goal whose record says it landed:
+		// a landing logged against the goal itself, or a goal that
+		// reached done through its landing gate rather than being handed
+		// off (abandoning one hands it off).
+		mayHaveLanded := goalLandingRecorded(view.Log) ||
+			(view.Goal.Stage == domain.StageDone && !view.Goal.HandedOff())
 		for i, t := range orderGoalTrees(trees, order) {
-			landed, _ := t.Landed(ctx)
+			landed := false
+			if mayHaveLanded {
+				landed, _ = t.Landed(ctx)
+			}
 			repo := GoalReportRepo{Name: t.Repo, Home: t.Home, Branch: t.Branch(), Landed: landed, Order: i + 1}
 			if series, serr := t.Series(ctx); serr == nil && !landed {
 				for _, c := range series {
@@ -350,6 +367,19 @@ func (e *Engine) GoalReport(ctx context.Context, goalID domain.FeatureID) (GoalR
 	return r, nil
 }
 
+// goalLandingRecorded reports whether the goal's log records the goal
+// itself landing on a main branch — a landed entry that names no card,
+// which is what the landing gate writes per repository. A card landing on
+// the goal branch names its card and does not count.
+func goalLandingRecorded(log []state.GoalEntry) bool {
+	for _, en := range log {
+		if en.Action == state.GoalLanded && en.Card == "" {
+			return true
+		}
+	}
+	return false
+}
+
 func buildGoalReport(v GoalView) GoalReport {
 	g := v.Goal
 	r := GoalReport{
@@ -357,6 +387,9 @@ func buildGoalReport(v GoalView) GoalReport {
 		Ready:      g.Stage == domain.StageVerify && !g.VerifiedAt.IsZero(),
 		WrappingUp: g.Goal.WrappingUp(), Lanes: g.Goal.LaneCount(),
 		NeedsBudget: v.NeedsBudget,
+		// the two lists the JSON always carries are empty, never null,
+		// before the goal has minted a card or agreed an item
+		Cards: []GoalReportCard{}, DoneWhen: []DoneWhenStatus{},
 	}
 	if v.Substrate.Agreed() {
 		r.Budget.Substrate = &GoalReportSubstrate{

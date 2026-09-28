@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1339,6 +1340,76 @@ func TestAnUnderfundedPlanSaysWhatEnvelopeWouldWork(t *testing.T) {
 			if lp >= float64(given) {
 				t.Errorf("%s: proposed %d but %d already funds it", tc.name, got, got-100)
 			}
+		}
+	}
+}
+
+// Before its landing gate a goal cannot have landed anywhere — main moves
+// only on a person's landing (§17) — yet its fresh goal branch, cut from
+// main with nothing of its own, is trivially an ancestor of main, which
+// is all GoalTree.Landed measures. The hand-over must not read that as
+// landed. And a goal with no cards minted yet reports an empty list, not
+// a missing one: the report is a JSON shape surfaces read.
+func TestAGoalReportBeforeItsLandingSaysNothingLanded(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(rep)
+	if !strings.Contains(string(raw), `"cards":[]`) {
+		t.Errorf("a goal with no cards yet reports %s, want \"cards\":[]", raw)
+	}
+	if len(rep.Repos) == 0 {
+		t.Fatal("the goal at plan reports no repository")
+	}
+	for _, rp := range rep.Repos {
+		if rp.Landed {
+			t.Errorf("at plan, %+v reads as landed", rp)
+		}
+	}
+
+	if res, err := e.Advance(ctx, g.ID, "user"); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v", res.Status, err)
+	}
+	rep, err = e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rp := range rep.Repos {
+		if rp.Landed {
+			t.Errorf("at implement with nothing landed, %+v reads as landed", rp)
+		}
+	}
+}
+
+// An abandoned goal is walked to done and handed off with a goal branch
+// that holds nothing of its own, which main trivially contains. Done is no
+// longer "before the landing gate", so the stage alone cannot keep that
+// empty branch from reading as landed; the goal's recorded ending must.
+func TestAnAbandonedGoalDoesNotReadAsLanded(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if _, err := e.AbandonGoal(ctx, g.ID, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if f, _ := store.GetFeature(ctx, g.ID); f.Stage != domain.StageDone || !f.HandedOff() {
+		t.Fatalf("abandoned goal is at %s, handed off %v; want done and handed off", f.Stage, f.HandedOff())
+	}
+	rep, err := e.GoalReport(ctx, g.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Repos) == 0 {
+		t.Fatal("the abandoned goal reports no repository")
+	}
+	for _, rp := range rep.Repos {
+		if rp.Landed {
+			t.Errorf("an abandoned goal reads as landed: %+v", rp)
 		}
 	}
 }
