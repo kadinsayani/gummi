@@ -3,6 +3,8 @@ package driver
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -298,5 +300,71 @@ func TestBareResumeRePresentsAnOpenAsk(t *testing.T) {
 		if p.Detail == "" {
 			t.Fatal("park row carries no detail")
 		}
+	}
+}
+
+// TestUntilStopRecordsItsDecision: `run --until plan` parks the card at its
+// design gate, waiting on a person — the same stop the caller gate is, so
+// it leaves the same durable row (§10.18). Without it the board read the
+// card as needs-you (by inference) while every reader of the log — the
+// store's OpenDecisions, the fleet's waits — saw nothing waiting.
+func TestUntilStopRecordsItsDecision(t *testing.T) {
+	h := newHarness(t, true, map[domain.Stage]stageFn{
+		domain.StagePlan: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return msgIdle(o.Model, "Spec drafted.")
+		},
+		// the branch must carry work, or verify's crossing finds nothing
+		// to land and closes the card itself
+		domain.StageImplement: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			_ = os.WriteFile(filepath.Join(o.WorkDir, "feature.txt"), []byte("work\n"), 0o600)
+			return msgIdle(o.Model, "Implemented.")
+		},
+		stageCritique: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+		domain.StageVerify: func(_ *harness, _ int, o agent.SessionOpts, _ string) []agent.Event {
+			return toolVerdict(o.Model, "pass")
+		},
+	})
+	ctx := context.Background()
+	out, err := h.driver(Options{Until: domain.StagePlan}).Run(ctx, "add export")
+	if err != nil || out.Status != StatusStopped {
+		t.Fatalf("Run = %q %v; stream=%v", out.Status, err, h.eventKinds())
+	}
+	opens, err := h.store.OpenDecisions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list := opens[h.only()]
+	if len(list) != 1 || list[0].Kind != state.DecisionKindGate || list[0].Stage != domain.StagePlan {
+		t.Fatalf("open decisions at the --until stop = %+v, want one plan gate row", opens)
+	}
+
+	// approving crosses the gate and closes it; the run then stops at the
+	// landing gate, which is a person's decision too, and records its own.
+	out2, err := h.driver(Options{}).Resume(ctx, h.only(), ResumeInput{Approve: true})
+	if err != nil || out2.Status != StatusVerified {
+		t.Fatalf("Resume --approve = %q %v; stream=%v", out2.Status, err, h.eventKinds())
+	}
+	opens, err = h.store.OpenDecisions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	list = opens[h.only()]
+	if len(list) != 1 || list[0].Kind != state.DecisionKindGate || list[0].Stage != domain.StageVerify {
+		t.Fatalf("open decisions at the landing gate = %+v, want only the verify-stage landing row", list)
+	}
+
+	// a bare resume of the verified card reaches the same stop; the row
+	// already standing is its record, and a second would be a duplicate
+	if out3, err := h.driver(Options{}).Resume(ctx, h.only(), ResumeInput{}); err != nil || out3.Status != StatusVerified {
+		t.Fatalf("bare resume = %q %v", out3.Status, err)
+	}
+	opens, err = h.store.OpenDecisions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(opens[h.only()]); n != 1 {
+		t.Fatalf("after a second visit to the landing gate %d decisions stand open, want 1", n)
 	}
 }

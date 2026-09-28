@@ -1876,7 +1876,14 @@ func (d *Driver) done(ctx context.Context, f domain.Feature) (Outcome, error) {
 		d.out.emit(cardVerifiedEvent{Event: "card_verified", ID: string(f.ID), Goal: string(f.GoalID), Branch: f.BranchName(), Spent: f.Spend.Credits})
 		return Outcome{Status: StatusVerified, ID: string(f.ID)}, nil
 	}
-	d.logPark(f, state.ParkReasonNeedsYou, "reached the landing gate — the branch is ready to merge.")
+	// the landing gate is a person's decision (the TUI's review loop
+	// raises the same gate when verify passes), so it leaves the row
+	// §10.18 requires; landing moves the card and closes it
+	const landing = "reached the landing gate — the branch is ready to merge."
+	d.logPark(f, state.ParkReasonNeedsYou, landing)
+	if f.Stage == domain.StageVerify {
+		d.openDecisionOnce(ctx, f, state.DecisionKindGate, landing)
+	}
 	// The card's own rework total, not this process's: a card driven over
 	// four `resume` calls reports each call's critique count in
 	// review_rounds, and a caller cannot add those up to anything true.
@@ -2174,8 +2181,18 @@ func (d *Driver) resumeCmd(id string, args ...string) string {
 // design boundary (the feature stays parked at f.Stage, resumable). It exits
 // 0 — not an escalation — so a caller distinguishes it from `done` by the
 // event name, not the exit code.
+//
+// The stop is a design gate left for a person, so it records its decision
+// like every other checkpoint (§10.18): without the row the log's readers
+// (OpenDecisions, the fleet's waits) saw nothing waiting on a card the
+// board showed as needs-you. A goal's own card is the exception, as it is
+// in the TUI: its stops are its goal's to handle, never queued for you.
 func (d *Driver) stopped(f domain.Feature) Outcome {
-	d.logPark(f, state.ParkReasonNeedsYou, "stopped early at --until "+string(f.Stage)+", as requested.")
+	question := "stopped early at --until " + string(f.Stage) + ", as requested."
+	d.logPark(f, state.ParkReasonNeedsYou, question)
+	if !f.InGoal() {
+		d.openDecisionOnce(context.Background(), f, state.DecisionKindGate, question)
+	}
 	d.out.emit(stoppedEvent{
 		Event: "stopped", ID: string(f.ID), Stage: string(f.Stage), Resume: string(f.ID),
 		Next: d.resumeCmd(string(f.ID), "--approve"),
@@ -2428,6 +2445,24 @@ func (d *Driver) openDecision(f domain.Feature, kind, question string) string {
 		ID: id, Kind: kind, Question: question,
 	}, time.Now())
 	return id
+}
+
+// openDecisionOnce is openDecision for a stop a bare resume reaches again
+// without anything having moved — a verified card resumed, a card
+// stopped at --until and run to the same stop: while a decision of kind
+// already stands open at the card's stage, that row is the stop's record
+// and a second would only be a duplicate of it.
+func (d *Driver) openDecisionOnce(ctx context.Context, f domain.Feature, kind, question string) {
+	if d.store != nil {
+		if opens, err := d.store.OpenDecisions(ctx); err == nil {
+			for _, o := range opens[f.ID] {
+				if o.Kind == kind && o.Stage == f.Stage {
+					return
+				}
+			}
+		}
+	}
+	d.openDecision(f, kind, question)
 }
 
 // emitResult emits a stage result line (verify pass/fail, review pass/
