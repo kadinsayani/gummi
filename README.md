@@ -250,7 +250,9 @@ lanes by default and queue behind each other.
 
 Autopilot runs inside the board process, so quitting stops it. The quit
 dialog names the running cards, and reopening asks once whether to pick
-them up.
+them up. A stage running on an attended card is stopped the same way and
+offered back too — restarting `gummi web` is a quit — and a card left
+paused says the quit cut its run.
 
 ## Goals
 

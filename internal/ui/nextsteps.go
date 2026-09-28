@@ -242,6 +242,9 @@ type nextInput struct {
 	// profiles is whether the board has profiles a card can switch to,
 	// so a failed stage can be offered another one.
 	profiles bool
+	// cutByQuit marks a paused run the last quit stopped (a host
+	// restart), so its decision says so instead of "the run is paused".
+	cutByQuit bool
 }
 
 // closed reports whether the card has ended — landed, or at done by any
@@ -464,6 +467,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		in.attn, in.escalated, in.attnText = it.Kind, it.Escalated, it.Text
 	}
 	in.profiles = m.engine != nil && len(m.engine.BoardProfiles()) > 0
+	in.cutByQuit = m.quitCut[r.F.ID]
 	in.cardOpen = m.cardOpen
 	if r.F.IsFreeform() && m.engine != nil {
 		if ff := m.engine.Freeform(r.F.ID); ff != nil {
@@ -848,7 +852,7 @@ func stageActions(in nextInput) []nextAction {
 			// — it is in the inventory and answers /attach, it is not one
 			// of the four.
 			return []nextAction{nextStep("run", "enter", "pick it back up",
-				"the run is paused — a fresh run picks "+string(in.stage)+" back up")}
+				pausedWhy(in))}
 		}
 		// §1.1a: pausing stops a RUN. It does not un-pass a verify, or
 		// withdraw a design waiting on approval — the stage's own gate
@@ -1464,9 +1468,18 @@ func stopHere(in nextInput) []nextAction {
 func stopOrResume(in nextInput) []nextAction {
 	if in.sess == engine.StatePaused {
 		return []nextAction{nextStep("run", "enter", "pick it back up",
-			"the run is paused — a fresh run picks "+string(in.stage)+" back up")}
+			pausedWhy(in))}
 	}
 	return stopHere(in)
+}
+
+// pausedWhy is why a paused run's "pick it back up" row is there: a
+// pause, or the quit (a host restart) that cut the run mid-stage.
+func pausedWhy(in nextInput) string {
+	if in.cutByQuit {
+		return "gummi stopped while " + string(in.stage) + " ran — a fresh run picks it back up"
+	}
+	return "the run is paused — a fresh run picks " + string(in.stage) + " back up"
 }
 
 // noun names the work item kind for prose.

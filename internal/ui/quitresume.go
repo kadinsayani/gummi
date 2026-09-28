@@ -41,6 +41,13 @@ func (m *Shell) maybeOfferQuitResume() {
 		return
 	}
 	sort.Slice(cards, func(i, j int) bool { return cards[i].Feature.ID < cards[j].Feature.ID })
+	// each card's own decision says why it is paused, whether or not the
+	// prompt is answered: "the run is paused" was all a card cut by a
+	// restart used to say
+	m.quitCut = map[domain.FeatureID]bool{}
+	for _, c := range cards {
+		m.quitCut[c.Feature.ID] = true
+	}
 	since := compactSince(m.now().Sub(earliestParked(cards))) + " ago"
 	if m.headless {
 		// No screen to open the dialog on: the board holds the question

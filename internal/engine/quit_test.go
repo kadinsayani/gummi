@@ -78,11 +78,12 @@ func TestStopForQuitParksAutopilotSession(t *testing.T) {
 	}
 }
 
-// TestStopForQuitLeavesGateAttendedSessionRunning: a card driven by hand
-// (GateAttended) is untouched by StopForQuit — it is not what "on autopilot"
-// means, and quitting the process stops it the way it always did,
-// without a marker claiming a reopen should offer it back.
-func TestStopForQuitLeavesGateAttendedSessionRunning(t *testing.T) {
+// TestStopForQuitParksAGateAttendedSessionToo: a card driven by hand
+// (GateAttended) is stopped and marked like an autopilot one. Left to die
+// with the process, it came back from a host restart reading plain
+// "paused", with nothing saying the restart had cut it and nothing
+// offering it back. The marker only makes the reopen ask.
+func TestStopForQuitParksAGateAttendedSessionToo(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
 		<-release
@@ -105,17 +106,22 @@ func TestStopForQuitLeavesGateAttendedSessionRunning(t *testing.T) {
 
 	e.StopForQuit(context.Background())
 
-	if st := e.Get("FD-001").State(); st != StateRunning {
-		t.Fatalf("GateAttended session state after StopForQuit = %s, want still running", st)
+	assertQuitParked(t, e, store, "FD-001")
+}
+
+// assertQuitParked: id's session was stopped by StopForQuit and the log
+// carries the quit marker the reopen reads.
+func assertQuitParked(t *testing.T, e *Engine, store *state.Store, id domain.FeatureID) {
+	t.Helper()
+	if st := e.Get(id).State(); st != StatePaused {
+		t.Fatalf("session state after StopForQuit = %s, want paused", st)
 	}
-	evs, err := store.Events(context.Background(), "FD-001")
+	quit, err := store.QuitStopped(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, ev := range evs {
-		if ev.Kind == state.EventPark {
-			t.Fatalf("GateAttended session got a park event, want none: %+v", ev)
-		}
+	if _, ok := quit[id]; !ok {
+		t.Fatalf("%s carries no quit marker, so the reopen cannot offer it back", id)
 	}
 }
 
@@ -195,14 +201,11 @@ func TestQuitStoppedCardsEmptyWithNothingStopped(t *testing.T) {
 	}
 }
 
-// TestStopForQuitLeavesUnsetGateSessionRunning: a card whose GateApproval
-// was never set is attended, so quitting must leave it exactly as it
-// leaves an explicitly attended one. StopForQuit used to compare the
-// stored string, which read every such card — every card `bugs new` and
-// the GitHub import minted — as autopilot work: quitting parked it, and
-// the reopen prompt then offered to pick up work a human had been sitting
-// with.
-func TestStopForQuitLeavesUnsetGateSessionRunning(t *testing.T) {
+// TestStopForQuitParksAnUnsetGateSession: a card whose GateApproval was
+// never set is attended, and quitting treats it exactly as it treats an
+// explicitly attended one — stopped, and offered back on reopen, where
+// resuming it re-runs its stage rather than handing it to autopilot.
+func TestStopForQuitParksAnUnsetGateSession(t *testing.T) {
 	release := make(chan struct{})
 	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
 		<-release
@@ -227,16 +230,5 @@ func TestStopForQuitLeavesUnsetGateSessionRunning(t *testing.T) {
 
 	e.StopForQuit(context.Background())
 
-	if st := e.Get("FD-001").State(); st != StateRunning {
-		t.Fatalf("unset-gate session state after StopForQuit = %s, want still running", st)
-	}
-	evs, err := store.Events(context.Background(), "FD-001")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, ev := range evs {
-		if ev.Kind == state.EventPark {
-			t.Fatalf("unset-gate session got a park event, want none: %+v", ev)
-		}
-	}
+	assertQuitParked(t, e, store, "FD-001")
 }

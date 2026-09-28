@@ -23,13 +23,10 @@ import (
 	"github.com/morphis/gummi/internal/state"
 )
 
-// StopForQuit stops every live session belonging to an autopilot card —
-// GateMode() anything but domain.GateAttended, same as everywhere else
-// the field is interpreted — and records why in the card-event log, so a
+// StopForQuit stops every running or queued stage session — autopilot
+// and attended alike — and records why in the card-event log, so a
 // later QuitStoppedCards can tell this card apart from one a human
-// parked with p. An attended card is left untouched: the
-// process exiting stops it the same way it always did, and nothing about
-// it needs to be offered back specially on reopen.
+// parked with p, and the reopen can offer it back.
 //
 // Best-effort, like the rest of persistence (persist, persistDelete):
 // a failure here must never block quitting, so every store write's
@@ -45,13 +42,13 @@ func (e *Engine) StopForQuit(ctx context.Context) {
 		default:
 			continue
 		}
-		// GateMode(), not the raw field: an unset GateApproval reads as
-		// attended, and comparing the string parked every card `bugs new`
-		// ever minted as though a robot had been driving it — the reopen
-		// prompt then offered to resume work a human had been sitting with.
-		if s.Feature.GateMode() == domain.GateAttended {
-			continue
-		}
+		// An attended card's run is stopped and marked too. It used to be
+		// left to die with the process, which brought it back from a host
+		// restart reading plain "paused", with nothing saying the restart
+		// had cut it and nothing offering it back — on a web host the
+		// person who started it is usually not the one who restarted it.
+		// Marking it only makes the reopen ASK: nothing resumes without a
+		// yes (§10.17), attended or not.
 		targets = append(targets, s)
 	}
 	e.mu.Unlock()
@@ -114,7 +111,7 @@ type QuitStoppedCard struct {
 	Corrective int
 }
 
-// QuitStoppedCards is StopForQuit's read side: the autopilot cards the
+// QuitStoppedCards is StopForQuit's read side: the cards the
 // board stopped by quitting, restored by Restore into this process's
 // live sessions. Call it once, after Restore, to build the reopen
 // prompt. A quit-stopped card the store knows about but this process

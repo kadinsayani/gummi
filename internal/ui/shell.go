@@ -164,6 +164,9 @@ type Shell struct {
 	// rebase clears it (rebaseFeature); one that resolves nothing sets it
 	// again (rebaseSettled).
 	landConflicts map[domain.FeatureID][]string
+	// quitCut are the cards the last quit stopped mid-stage
+	// (quitresume.go), so a paused one says the quit cut it.
+	quitCut map[domain.FeatureID]bool
 
 	// bounceNotes holds the line the composer aimed at a decision's
 	// bounce answer: the card is rewound now, but its reborn work stage
@@ -2720,12 +2723,12 @@ func (m *Shell) quitCmd() tea.Cmd {
 		detail = "they stop where they are and pick up when you reopen."
 		if len(plainLive) > 0 {
 			detail += " quitting also stops " + strings.Join(plainLive, ", ") +
-				" mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)."
+				" mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk; reopening offers to pick them back up."
 		}
 		confirmLabel, cancelLabel = "Stop them and quit", "Cancel"
 	case len(plainLive) > 0:
 		question = "quit with live sessions " + strings.Join(plainLive, ", ") + "?"
-		detail = "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk (recoverable next run)"
+		detail = "quitting stops them mid-turn — the in-flight turn and its spend are discarded and the work is left uncommitted on disk; reopening offers to pick them back up"
 	// an ingest or bug-import pass is not an engine session, so
 	// liveAutopilotSplit never saw it. Both cost a paid architect pass,
 	// and esc already confirms before discarding one — quitting past
