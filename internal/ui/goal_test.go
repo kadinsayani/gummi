@@ -95,13 +95,27 @@ func TestGoalStageActions(t *testing.T) {
 	if len(run) != 2 || run[0].id != "goalpage" || run[1].id != "goalstop" {
 		t.Fatalf("a running goal offers its page, then stop: %+v", run)
 	}
-	ready := stageActions(nextInput{stage: domain.StageVerify, kind: domain.KindGoal, attn: attnGate, verdict: verdictPass})
-	var ids []string
-	for _, a := range ready {
-		ids = append(ids, a.id)
+	ids := func(in nextInput) string {
+		var out []string
+		for _, a := range stageActions(in) {
+			out = append(out, a.id)
+		}
+		return strings.Join(out, ",")
 	}
-	if strings.Join(ids, ",") != "advance,bounce,goalreverse,handoff,goalpage" {
-		t.Fatalf("a goal ready for you offers land, send back, reverse, hand off and its page: %v", ids)
+	decided := &engine.GoalReport{Decisions: []engine.GoalLogLine{{Ref: "D-1", Detail: "kept the old cache"}}}
+	ready := nextInput{stage: domain.StageVerify, kind: domain.KindGoal, attn: attnGate, verdict: verdictPass, goal: decided}
+	if got := ids(ready); got != "advance,bounce,goalreverse,handoff,goalpage" {
+		t.Fatalf("a goal ready for you offers land, send back, reverse, hand off and its page: %v", got)
+	}
+	// reversing needs a decision to reverse: a lead that took none offers
+	// no row that could only answer "has no decisions for review"
+	ready.goal = &engine.GoalReport{}
+	if got := ids(ready); got != "advance,bounce,handoff,goalpage" {
+		t.Fatalf("a goal with no decisions for review offers reverse anyway: %v", got)
+	}
+	ready.goal = nil
+	if got := ids(ready); strings.Contains(got, "goalreverse") {
+		t.Fatalf("a goal whose report is not loaded offers reverse: %v", got)
 	}
 }
 

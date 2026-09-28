@@ -1047,13 +1047,21 @@ func stageActions(in nextInput) []nextAction {
 			}, stopOrResume(in)...)
 		}
 		if in.kind == domain.KindGoal {
-			return []nextAction{
+			out := []nextAction{
 				nextStep("advance", "g", "land on "+in.landBase(), "one merge commit over its cards' commits, after a last catch-up with "+in.landBase()),
 				sendBackStep("bounce", "b", "send it back to its cards — your line goes to its lead"),
-				nextStep("goalreverse", "", "reverse a decision", "pick a decision for review and have the lead take the other way"),
+			}
+			// reversing takes a decision to reverse: offered only when the
+			// lead logged one for review, which is exactly the set the
+			// reverse dialog would list (the report's Decisions are the
+			// goal log's decision entries)
+			if in.goal != nil && len(in.goal.Decisions) > 0 {
+				out = append(out, nextStep("goalreverse", "", "reverse a decision", "pick a decision for review and have the lead take the other way"))
+			}
+			return append(out,
 				nextStep("handoff", "h", "hand off", "close the goal and keep its branch — nothing lands"),
 				nextStep("goalpage", "P", "open the goal page", "the report: done-when, cards (enter watches one), decisions, declined findings, spend"),
-			}
+			)
 		}
 		if in.kind == domain.KindResearch {
 			return append([]nextAction{
