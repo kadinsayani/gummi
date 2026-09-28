@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"slices"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/stack"
@@ -48,11 +49,21 @@ func (e *Engine) Restack(ctx context.Context, id domain.StackID) (RestackResult,
 		}
 		if res.Restacked != "" {
 			out.Replayed = append(out.Replayed, res.Restacked)
-			if view, verr := e.stackBaseView(ctx, id); verr == nil {
-				for _, m := range view.Members {
-					if m.ID == res.Restacked {
-						out.Push = append(out.Push, PushCommand(m.Branch))
-					}
+			if res.Push != "" {
+				out.Push = append(out.Push, res.Push)
+			}
+		}
+		if w := res.Settled; w != nil {
+			// The walk this call settled may have begun on the board's own
+			// ticks, before this call took the stack's lock: those replays
+			// moved branches too, and this answer is the one place their
+			// pushes are handed back now. The walk holds this call's own
+			// replays as well, in the order they happened, so it is the
+			// whole answer.
+			out.Replayed, out.Push = slices.Clone(w.Cards), nil
+			for _, p := range w.Push {
+				if p != "" {
+					out.Push = append(out.Push, p)
 				}
 			}
 		}

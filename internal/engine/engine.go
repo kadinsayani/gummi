@@ -474,6 +474,11 @@ type Engine struct {
 	// stackLock), so two ticks never replay two members at once.
 	stackLocksMu sync.Mutex
 	stackLocks   map[domain.StackID]*sync.Mutex
+	// stackReplays holds each stack's latest replay walk (stack.go's
+	// StackReplay), guarded by stackLocksMu: what a tick replayed and the
+	// pushes it now needs, kept so a surface opened after the walk still
+	// has the lines to show.
+	stackReplays map[domain.StackID]*stackWalk
 }
 
 // oneShotBusy reports whether a session-less pass (check discovery, its

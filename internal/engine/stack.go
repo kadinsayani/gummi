@@ -20,7 +20,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
+	"time"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/stack"
@@ -73,6 +75,87 @@ type StackTickResult struct {
 	// Again reports that more remains to do: tick once more when this
 	// one's work has settled.
 	Again bool
+	// Push is the `git push --force-with-lease` the replayed card's branch
+	// now needs, set beside Restacked on a clean replay.
+	Push string
+	// Settled is the replay walk this tick found finished: set once, on
+	// the tick that finds nothing left to replay after one or more ticks
+	// that did. Whoever ran that tick says what moved and what to push —
+	// a board tick as much as a forced restack, because gummi prints the
+	// push a replayed branch needs and never runs it (§18.5).
+	Settled *StackReplay
+}
+
+// StackReplay is one walk of replays over a stack: the cards whose
+// branches moved, in the order they did, the push each now needs (Push[i]
+// is Cards[i]'s, empty only for a card with no branch name on record), and
+// when the last of them happened. A walk is the run of ticks from the
+// first replay to the tick that finds the stack settled; a replay after
+// that starts a new one.
+type StackReplay struct {
+	Cards []domain.FeatureID
+	Push  []string
+	At    time.Time
+}
+
+// stackWalk is a stack's latest walk and whether it has been handed back.
+type stackWalk struct {
+	replay  StackReplay
+	settled bool
+}
+
+// LastReplay is the stack's latest replay walk, finished or still going,
+// and whether it has one. It lives as long as this engine does: the
+// branches' own state is the durable record, and the push lines are a
+// reminder of it, not a second copy anyone reads to decide anything.
+func (e *Engine) LastReplay(id domain.StackID) (StackReplay, bool) {
+	e.stackLocksMu.Lock()
+	defer e.stackLocksMu.Unlock()
+	w := e.stackReplays[id]
+	if w == nil {
+		return StackReplay{}, false
+	}
+	r := w.replay
+	r.Cards = slices.Clone(r.Cards)
+	r.Push = slices.Clone(r.Push)
+	return r, true
+}
+
+// noteReplay adds one clean replay to the stack's walk, starting a new
+// walk when the last one was already handed back.
+func (e *Engine) noteReplay(id domain.StackID, card domain.FeatureID, push string) {
+	e.stackLocksMu.Lock()
+	defer e.stackLocksMu.Unlock()
+	if e.stackReplays == nil {
+		e.stackReplays = map[domain.StackID]*stackWalk{}
+	}
+	w := e.stackReplays[id]
+	if w == nil || w.settled {
+		w = &stackWalk{}
+		e.stackReplays[id] = w
+	}
+	w.replay.At = time.Now()
+	if slices.Contains(w.replay.Cards, card) {
+		return
+	}
+	w.replay.Cards = append(w.replay.Cards, card)
+	w.replay.Push = append(w.replay.Push, push)
+}
+
+// settleReplay hands back the stack's walk if one is open, marking it
+// handed back; nil when there is nothing new to say.
+func (e *Engine) settleReplay(id domain.StackID) *StackReplay {
+	e.stackLocksMu.Lock()
+	defer e.stackLocksMu.Unlock()
+	w := e.stackReplays[id]
+	if w == nil || w.settled {
+		return nil
+	}
+	w.settled = true
+	r := w.replay
+	r.Cards = slices.Clone(r.Cards)
+	r.Push = slices.Clone(r.Push)
+	return &r
 }
 
 // StackTick conducts one stack a single step. Safe to call often and
@@ -107,15 +190,25 @@ func (e *Engine) StackTick(ctx context.Context, id domain.StackID) (StackTickRes
 				// The walk stops here. Everything below this card is
 				// already correct and everything above stays as it was,
 				// which is what makes a half-restacked stack legible.
+				// The replays before it stay in the open walk, said once
+				// the stack settles after the conflict is resolved.
 				res.Conflict = conflict
 				return res, nil
 			}
+			for _, m := range view.Snapshot.Members {
+				if m.ID == a.Card && m.Branch != "" {
+					res.Push = PushCommand(m.Branch)
+				}
+			}
+			e.noteReplay(id, a.Card, res.Push)
 			// A replay rewrites what the cards above fork from, so their
 			// staleness is only knowable now. Come back round.
 			res.Again = true
 			return res, nil
 		}
 	}
+	// nothing left to replay: a walk that was going has finished
+	res.Settled = e.settleReplay(id)
 	return res, nil
 }
 
