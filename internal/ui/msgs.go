@@ -1376,7 +1376,7 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 		if note != "" {
 			text += " — your line rides the next run's kickoff"
 		}
-		return noticeMsg{text: text, reload: true, clearInbox: id}
+		return sentBackMsg{id: id, to: back, notice: noticeMsg{text: text, reload: true, clearInbox: id}}
 	}
 }
 

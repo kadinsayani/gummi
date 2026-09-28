@@ -96,13 +96,35 @@ func GateCrosser(p state.GatePayload) string {
 	return "you"
 }
 
-// GateLine is a gate crossing's receipt: "you advanced plan → implement".
+// GateLine is a gate crossing's receipt: "you advanced plan → implement",
+// and "you sent it back verify → implement" for a move down the graph —
+// a send-back is not an advance, and a receipt saying it was reads as the
+// opposite of what the person chose.
 func GateLine(p state.GatePayload) string {
-	line := GateCrosser(p) + " advanced"
+	verb := " advanced"
+	if movesBack(domain.Stage(p.From), domain.Stage(p.To)) {
+		verb = " sent it back"
+	}
+	line := GateCrosser(p) + verb
 	if p.From != "" || p.To != "" {
 		line += " " + p.From + " → " + p.To
 	}
 	return line
+}
+
+// movesBack reports whether a crossing from → to walks the card down its
+// own stage sequence: a rerun edge taken, not a gate crossed forward.
+func movesBack(from, to domain.Stage) bool {
+	fi, ti := -1, -1
+	for i, st := range StageSequence() {
+		switch st {
+		case from:
+			fi = i
+		case to:
+			ti = i
+		}
+	}
+	return fi >= 0 && ti >= 0 && ti < fi
 }
 
 // ParkLine is a park's receipt: "parked — " and the sentence the person

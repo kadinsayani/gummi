@@ -267,15 +267,28 @@ func chipDetails(r featureRow, p *reentryReading) []string {
 		// arms used to carry said the same thing a longer way, and being the
 		// only site spelling it out is how the shorter, wrong spelling
 		// survived everywhere else.
+		//
+		// The line is written per target, because what happens depends on
+		// it: a rewind to the design stage passes a design gate on its way
+		// back to implement, and one to implement passes none — it runs
+		// straight on to verify. On autopilot the target runs as soon as
+		// the rewind lands (commitRewind); attended, nothing runs until
+		// the reader starts it.
+		auto := f.GateMode() != domain.GateAttended
+		target := string(out.Target)
 		switch {
-		case f.GateMode() != domain.GateAttended && !out.Edit.Empty():
+		case out.Target == domain.StagePlan && auto && !out.Edit.Empty():
 			// the open comment the rewind writes holds the gate until the
 			// architect resolves it; only then does autopilot cross
-			d = append(d, "Autopilot is on: once your comment is resolved the design gate crosses itself and implement runs straight away — /autopilot off first if you want to read the plan.")
-		case f.GateMode() != domain.GateAttended:
-			d = append(d, "Autopilot is on: the design gate crosses itself and implement runs straight away — /autopilot off first if you want to read the plan.")
+			d = append(d, "Autopilot is on: plan runs straight away, and once your comment is resolved the design gate crosses itself and implement runs — turn autopilot off first if you want to read the plan.")
+		case out.Target == domain.StagePlan && auto:
+			d = append(d, "Autopilot is on: plan runs straight away, and once its critique is clean the design gate crosses itself and implement runs — turn autopilot off first if you want to read the plan.")
+		case out.Target == domain.StagePlan:
+			d = append(d, "Nothing runs until you start plan, and the design gate stops for you before implement runs again.")
+		case auto:
+			d = append(d, "Autopilot is on: "+target+" runs straight away and carries on to the verify gate, which stops for you.")
 		default:
-			d = append(d, "The design gate stops for you before implement runs again.")
+			d = append(d, "Nothing runs until you start "+target+".")
 		}
 	}
 	if spends := spendStage(out); spends != "" {

@@ -371,8 +371,37 @@ func (m *Shell) commitRewind(f domain.Feature, out reentry.Outcome) tea.Cmd {
 		} else {
 			text += " — your line rides the next run's kickoff"
 		}
-		return noticeMsg{text: text, reload: true, clearInbox: id}
+		return sentBackMsg{id: id, to: target, notice: noticeMsg{text: text, reload: true, clearInbox: id}}
 	}
+}
+
+// sentBackMsg settles a send-back: the card has walked back to `to`, and
+// the notice says so. On a card handed to autopilot the stage it walked
+// back to is autopilot's to run — the card now sits idle at a stage, the
+// decision autopilot answers (§10.17) — so Update starts it with the line
+// the send-back stashed (continueSentBack). A send-back used to only walk
+// the card, which left an autopilot card idle at implement under a chip
+// that had promised it would run.
+type sentBackMsg struct {
+	id     domain.FeatureID
+	to     domain.Stage
+	notice noticeMsg
+}
+
+// continueSentBack runs the stage a send-back walked an autopilot card
+// back to, through runStageWithNote so the stashed line rides its
+// kickoff. It reads the stored card, not the row: the row is still the
+// one the send-back left. A card that is not on autopilot, has moved
+// since, or already has something running is left alone.
+func (m *Shell) continueSentBack(id domain.FeatureID, to domain.Stage) tea.Cmd {
+	f, ok := m.storedFeature(id)
+	if !ok || f.Stage != to || !autopilotAnswers(f.GateApproval, decisionIdle) || m.sessionWorking(id) {
+		return nil
+	}
+	if !autonomousStage(to) || m.engine == nil {
+		return nil
+	}
+	return m.runStageWithNote(f, "")
 }
 
 // fixedSendBack is the route the pressed row declares for itself, with

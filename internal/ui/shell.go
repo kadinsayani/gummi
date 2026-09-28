@@ -2095,6 +2095,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.inbox.remove(msg.id)
 		return m, tea.Batch(m.loadRows, m.autopilotRun(msg.id, msg.to))
 
+	case sentBackMsg:
+		// the send-back landed; on autopilot the stage it reached runs
+		// (reentry.go's sentBackMsg)
+		model, cmd := m.update(msg.notice)
+		return model, tea.Batch(cmd, m.continueSentBack(msg.id, msg.to))
+
 	case autopilotGateBlockedMsg:
 		// autopilotCrossGate (autopilot.go) already opened the gate's
 		// decision row before attempting the crossing, so parking here
