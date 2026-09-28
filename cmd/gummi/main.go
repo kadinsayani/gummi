@@ -8,10 +8,13 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -108,8 +111,40 @@ func runBoard() error {
 		return err
 	}
 	defer h.Close()
-	_, err = tea.NewProgram(h.shell).Run()
+	p := tea.NewProgram(h.shell)
+	defer quitOnHangup(p)()
+	_, err = p.Run()
 	return err
+}
+
+// quitOnHangup makes SIGHUP — the terminal closed, the tmux pane killed —
+// quit the board the way SIGTERM does (Bubble Tea handles that one), so
+// Run returns and openBoard's host is closed: the instance record removed
+// and the lock released. Left to the default, SIGHUP kills the process
+// where it stands and the record outlives it. A program that cannot quit
+// cleanly on a terminal that is gone is killed after webGrace, which
+// still returns from Run. The returned func stops listening.
+func quitOnHangup(p *tea.Program) func() {
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	done := make(chan struct{})
+	go func() {
+		select {
+		case <-hup:
+			p.Quit()
+		case <-done:
+			return
+		}
+		select {
+		case <-time.After(webGrace):
+			p.Kill()
+		case <-done:
+		}
+	}()
+	return func() {
+		signal.Stop(hup)
+		close(done)
+	}
 }
 
 // buildEngine constructs the agent orchestrator from environment

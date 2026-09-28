@@ -171,7 +171,7 @@ The event vocabulary (closed; a config typo is rejected at load):
 | `card.verified` | the verify gate passed and the branch is ready to land — where gummi's job ends, so it fires **there**, not at a later merge that may never come |
 | `card.parked` | the card stopped and waits (`reason`: needs-you, gave-up, blocked, quit) |
 | `card.merged` | the branch was squash-merged onto its base (`commit` is the sha) |
-| `gate.waiting` | the card blocked on a design-gate approval |
+| `gate.waiting` | the card waits at a gate for a person: a design-gate approval, an `--until` stop, and on a headless run the landing gate every `card.verified` leads to (a goal's own cards excepted — their goal lands them) |
 | `question.waiting` | the card's agent asked and awaits an answer |
 | `budget.exhausted` | the card's envelope is spent |
 | `card.failed` | a failing verify, a rebase conflict, or an idle stop (`decision_kind` distinguishes) |
@@ -181,9 +181,11 @@ stopped) then the decision that says how — `gate.waiting`,
 `question.waiting`, `budget.exhausted` or `card.failed`. Key a pager on
 the decision, not on the park. A landing likewise reports `card.merged`
 before the `stage.enter` that crosses to done, because the worktree
-reports the commit before the store commits the crossing. And a run
-stopped by `--until <stage>` raises only `card.parked` — nothing is
-waiting on a human, so no decision is opened.
+reports the commit before the store commits the crossing. A run stopped
+by `--until <stage>` is a stop like any other: the card waits for a
+person to approve it on, so it raises `card.parked` and then
+`gate.waiting`. So does a headless run that verifies: `card.verified`,
+then `card.parked` and `gate.waiting` for the landing it now waits on.
 
 The contract is advisory end to end: hooks run detached from the caller's
 path (a full queue drops the event, a hung script is killed after 15
@@ -227,7 +229,64 @@ re-raised decision that deduped to a no-op raises nothing).
 | `GUMMI_REVIEW_DIFF_MAX` | bytes of diff the reviewer is handed inline (default 48 KiB); above it the reviewer gets a stat and fetches what it reads, and 0 forces that shape |
 | `GUMMI_COPILOT_HINT` | `off` hides the status-bar Copilot quota pill (needs an authenticated `gh`) |
 | `GUMMI_THEME` | `dark` (default), `light`, `neon` |
-| `GUMMI_NOTIFY` | needs-attention hook: `bell` (default), `desktop`, `off` |
+| `GUMMI_NOTIFY` | needs-attention hook: `bell` (default), `desktop`, `off`; `gummi web` defaults to `off`, since its terminal is the server's log |
+| `GUMMI_WEB_ADDR` | where `gummi web` listens when `--addr` is not given (default `127.0.0.1:7878`) |
+| `TS_AUTHKEY` | a Tailscale auth key for `gummi web --tailscale` when `--ts-authkey` is not given; skips the browser login on the node's first run |
 | `GUMMI_MOTION` | `off` freezes every activity glyph and stops the clock tick |
 | `GUMMI_ATTACH_CMD` | command for the board's raw-attach (`a`) and the agent tab, ahead of `GUMMI_AGENT` and the `agent:` key |
 | `GUMMI_EVENT`, `GUMMI_CARD`, `GUMMI_WORKSPACE` | exported to `hooks:` scripts: the event name, the card id, the workspace root |
+
+## The web host on a tailnet
+
+`gummi web --tailscale` puts the board on your tailnet as a node of its
+own, next to the loopback listener. It embeds Tailscale (`tsnet`), so the
+host needs no `tailscaled`, no port forwarding and no public address.
+
+| flag | effect |
+|---|---|
+| `--tailscale` | join the tailnet and serve the board there too |
+| `--ts-hostname NAME` | the node's name on the tailnet (default `gummi`) |
+| `--ts-authkey KEY` | authenticate with an auth key instead of a browser login; falls back to `TS_AUTHKEY`. A flag shows in `ps` and shell history, so prefer the variable |
+| `--ts-tls` | serve HTTPS on port 443 with a tailnet certificate; without it the node serves plain HTTP on the loopback listener's port |
+| `--verbose` | pass the node's own log through to the server's log |
+| `--allow-host a,b` | further names a request's `Host` may carry (see below) |
+
+On the first run without a key, `gummi web` prints one line on stdout and
+waits for it, however long that takes:
+
+```
+tailscale: open https://login.tailscale.com/a/… to add this board to your tailnet
+```
+
+Open it on any device logged into the tailnet. Once the node is up it
+prints where the board is, and records that address, so a second board
+host started on this workspace names it:
+
+```
+gummi web: serving https://gummi.<tailnet>.ts.net
+```
+
+The node's identity lives in `.gummi/state/web/tsnet/` (0700). Keep it,
+and the board keeps its name and login across restarts; delete it to
+start as a new node.
+
+`--ts-tls` needs **MagicDNS** and **HTTPS certificates** enabled for the
+tailnet, one switch each in the Tailscale admin console (DNS page). It is
+also what Web Push needs: notifications and the installed page want a
+secure origin, and plain HTTP on a tailnet name is not one. The first
+certificate is fetched as soon as the node is up; a failure shows in the
+server's log.
+
+Pairing applies on the tailnet exactly as on loopback: being on the
+tailnet gets a browser to the pairing screen, not to the board.
+`--no-pairing` refuses `--tailscale`. If the machine already runs
+`tailscaled`, `tailscale serve` in front of a loopback `gummi web` remains
+an alternative; pass `--allow-host <name>.<tailnet>.ts.net`, since the
+proxy forwards the tailnet name as the request's `Host`.
+
+Every request's `Host` must be one of the server's own names — loopback,
+the address it was reached on, the `--addr` name, the `--tls-cert`
+certificate's names, the tailnet node's name and addresses once it is up,
+and `--allow-host` — or it is answered 421. That is what stops a web page
+elsewhere from reaching the board through a DNS name it points at
+127.0.0.1 (DNS rebinding), where the `Origin` check alone cannot.

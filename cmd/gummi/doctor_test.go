@@ -1071,8 +1071,8 @@ func TestProbeCacheExpired(t *testing.T) {
 }
 
 // A plain second TUI — no GUMMI_MCP_SOCK in its environment — still gets
-// told to close the other TUI. This is the pre-fix behavior and must not
-// regress.
+// told to close the other TUI, named by its holder record; a lock with no
+// record (an older gummi) is reported without guessing which host it is.
 func TestLockCheckSecondTUI(t *testing.T) {
 	t.Setenv("GUMMI_MCP_SOCK", "")
 	dir := t.TempDir()
@@ -1082,14 +1082,46 @@ func TestLockCheckSecondTUI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireLock: %v", err)
 	}
-	defer release()
 
 	c := lockCheck(ws)
-	if c.Status != statusWarn || !strings.Contains(c.Detail, "another TUI holds it") {
-		t.Fatalf("lockCheck = %+v, want the second-TUI warning", c)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "another gummi board holds it") {
+		t.Fatalf("lockCheck = %+v, want the busy warning", c)
+	}
+
+	// with the holder's record beside the lock, it is named
+	release()
+	release, err = state.AcquireInstance(ws, state.InstanceHolder{Host: state.HostTUI, PID: 4242, Hostname: "box"})
+	if err != nil {
+		t.Fatalf("AcquireInstance: %v", err)
+	}
+	defer release()
+	c = lockCheck(ws)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "another TUI holds it (pid 4242 on box)") {
+		t.Fatalf("lockCheck = %+v, want the second-TUI warning naming its pid", c)
 	}
 	if !strings.Contains(c.Remediation, "close the other TUI") {
 		t.Fatalf("lockCheck remediation = %q, want it to name closing the other TUI", c.Remediation)
+	}
+}
+
+// `gummi web` holds the same lock as the TUI. doctor must say that it is
+// the web host that has the board, and where, rather than send the reader
+// looking for a TUI that is not running.
+func TestLockCheckNamesTheWebHost(t *testing.T) {
+	t.Setenv("GUMMI_MCP_SOCK", "")
+	ws := state.Workspace{Root: t.TempDir()}
+	release, err := state.AcquireInstance(ws, state.InstanceHolder{Host: state.HostWeb, URL: "http://127.0.0.1:4711/", PID: 99, Hostname: "box"})
+	if err != nil {
+		t.Fatalf("AcquireInstance: %v", err)
+	}
+	defer release()
+
+	c := lockCheck(ws)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "gummi web serves this board at http://127.0.0.1:4711/ (pid 99 on box)") {
+		t.Fatalf("lockCheck = %+v, want the web host named with its URL and pid", c)
+	}
+	if strings.Contains(c.Detail+c.Remediation, "TUI holds") || !strings.Contains(c.Remediation, "http://127.0.0.1:4711/") {
+		t.Fatalf("lockCheck = %+v, want a remediation that points at the web board", c)
 	}
 }
 
@@ -1137,8 +1169,8 @@ func TestLockCheckHostedAgentOtherWorkspace(t *testing.T) {
 	t.Setenv("GUMMI_MCP_SOCK", sock)
 
 	c := lockCheck(ws)
-	if c.Status != statusWarn || !strings.Contains(c.Detail, "another TUI holds it") {
-		t.Fatalf("lockCheck = %+v, want the second-TUI warning for a foreign workspace socket", c)
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "workspace busy") {
+		t.Fatalf("lockCheck = %+v, want the busy warning for a foreign workspace socket", c)
 	}
 }
 

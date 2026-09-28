@@ -384,6 +384,33 @@ real command line, so it cannot document a flag the binary lacks. `gummi
 doctor` checks backend, auth, profile and envelope. The full reference, PR
 landing loop included, is in [docs/HEADLESS.md](docs/HEADLESS.md).
 
+## The board in a browser
+
+`gummi web` serves the same board to a browser: the rail of cards, the
+open card's conversation, and its spec, diff, pull request and stats
+beside it. It is a board host like the TUI — it builds the board the same
+way and runs the TUI's own model without a screen — so one board has one
+host at a time, and whichever starts second names the first and exits.
+
+```sh
+gummi web                  # 127.0.0.1:7878 (or GUMMI_WEB_ADDR); prints a pairing code
+gummi web pair --name Ana  # a code for another browser, from another terminal
+gummi web devices          # who is paired;  gummi web unpair <id> | --all
+gummi web --tailscale --ts-tls   # also https://gummi.<tailnet>.ts.net, for a phone
+```
+
+A browser pairs once with the six-digit code and a name; devices paired
+under one name are one person, and receipts carry it. It listens on
+loopback unless told otherwise: `--tls-cert`/`--tls-key` serve HTTPS, and
+`--tailscale` also puts the board on your tailnet as its own node
+(embedded; no `tailscaled`, no port forwarding). The first run prints a
+login URL to open on any device (or set `TS_AUTHKEY`, which unlike
+`--ts-authkey` stays out of `ps`);
+`--ts-tls` serves HTTPS with a tailnet certificate, which notifications
+need. Pairing still applies on the tailnet, and `--no-pairing` is refused
+on anything but loopback. See
+[docs/CONFIGURATION.md](docs/CONFIGURATION.md#the-web-host-on-a-tailnet).
+
 ## Backends and configuration
 
 Stages run on one of six backends. `GUMMI_AGENT` picks the default, and a

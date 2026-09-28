@@ -516,9 +516,10 @@ func envelopeCheck() doctorCheck {
 }
 
 // lockCheck probes the workspace's exclusive lock and releases it
-// immediately — reporting "busy" when another TUI holds it, so a caller
-// learns a second board would refuse before opening one. Headless drives
-// hold per-card locks (not this one), so a live run does not show up here.
+// immediately — reporting "busy" when another board host (a TUI or
+// `gummi web`) holds it, so a caller learns a second board would refuse
+// before opening one. Headless drives hold per-card locks (not this
+// one), so a live run does not show up here.
 //
 // A locked workspace has two very different callers, though: a genuinely
 // separate second TUI, and the agent tab's hosted CLI — a descendant of
@@ -537,15 +538,46 @@ func lockCheck(ws state.Workspace) doctorCheck {
 				Remediation: "drive it with the workspace MCP tools instead of a second gummi process; status/spec/diff/watch/doctor take no lock and stay available either way",
 			}
 		}
-		return doctorCheck{
-			Name: "lock", Status: statusWarn, Detail: "workspace busy — another TUI holds it",
-			Remediation: "close the other TUI before opening the board",
-		}
+		return lockHeldCheck(ws)
 	case err != nil:
 		return doctorCheck{Name: "lock", Status: statusWarn, Detail: "could not probe the workspace lock: " + err.Error()}
 	default:
 		release()
 		return doctorCheck{Name: "lock", Status: statusOK, Detail: "workspace is free"}
+	}
+}
+
+// lockHeldCheck is lockCheck's warning for a lock someone else holds,
+// naming the holder from the record the board host keeps beside the lock
+// (state.InstanceHolder): a TUI and `gummi web` are both board hosts, and
+// telling someone to "close the other TUI" while a browser has the board
+// sends them looking for a terminal that does not exist.
+func lockHeldCheck(ws state.Workspace) doctorCheck {
+	h, err := state.ReadInstanceHolder(ws)
+	if err != nil {
+		// An older gummi, or a holder caught between taking the lock and
+		// writing its record: all that is known is that something has it.
+		return doctorCheck{
+			Name: "lock", Status: statusWarn, Detail: "workspace busy — another gummi board holds it",
+			Remediation: "close the other board (a TUI, or stop gummi web) before opening one here",
+		}
+	}
+	where := fmt.Sprintf("pid %d", h.PID)
+	if h.Hostname != "" {
+		where += " on " + h.Hostname
+	}
+	if h.Host == state.HostWeb {
+		detail := "workspace busy — gummi web serves this board"
+		fix := "open the board in the browser, or stop gummi web before opening the TUI"
+		if h.URL != "" {
+			detail += " at " + h.URL
+			fix = "open the board at " + h.URL + ", or stop gummi web before opening the TUI"
+		}
+		return doctorCheck{Name: "lock", Status: statusWarn, Detail: detail + " (" + where + ")", Remediation: fix}
+	}
+	return doctorCheck{
+		Name: "lock", Status: statusWarn, Detail: "workspace busy — another TUI holds it (" + where + ")",
+		Remediation: "close the other TUI before opening the board",
 	}
 }
 

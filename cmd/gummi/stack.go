@@ -94,7 +94,7 @@ func runStackRm(args []string) error {
 	if err := env.store.RemoveFromStack(ctx, card); err != nil {
 		return err
 	}
-	fmt.Printf("%s removed from %s — the cards above it will be replayed onto their new base\n", card, was)
+	fmt.Printf("%s removed from %s — any card above it will be replayed onto its new base\n", card, was)
 	return printStack(ctx, env.store, was)
 }
 

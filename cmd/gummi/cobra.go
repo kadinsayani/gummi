@@ -323,6 +323,40 @@ var skillListCmd = &cobra.Command{
 	RunE:  func(_ *cobra.Command, _ []string) error { return skillList() },
 }
 
+// webCmd implements `gummi web`: the board in a browser, hosted by this
+// process with the TUI's own model running without a screen.
+var webCmd = &cobra.Command{
+	Use:   "web [--addr host:port] [--allow-host names] [--tls-cert file --tls-key file] [--tailscale [--ts-hostname name] [--ts-authkey key] [--ts-tls] [--verbose]] [--no-pairing]",
+	Short: "Serve the board to a browser",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runWeb(cmdFlags(cmd), args)
+	},
+}
+
+var webPairCmd = &cobra.Command{
+	Use:   "pair [--name person]",
+	Short: "Print a pairing code from the running web board",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runWebPair(cmdFlags(cmd))
+	},
+}
+
+var webDevicesCmd = &cobra.Command{
+	Use:   "devices [--json]",
+	Short: "List the browsers paired with this board",
+	RunE: func(cmd *cobra.Command, _ []string) error {
+		return runWebDevices(cmdFlags(cmd))
+	},
+}
+
+var webUnpairCmd = &cobra.Command{
+	Use:   "unpair <id> | --all",
+	Short: "Revoke a paired browser",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runWebUnpair(cmdFlags(cmd), args)
+	},
+}
+
 func init() {
 	bindRunFlags(runCmd.Flags())
 	bindResearchFlags(researchCmd.Flags())
@@ -346,12 +380,17 @@ func init() {
 	bindPRStatusFlags(prStatusCmd.Flags())
 	bindPRCommentsFlags(prCommentsCmd.Flags())
 	bindSkillInstallFlags(skillInstallCmd.Flags())
+	bindWebFlags(webCmd.Flags())
+	bindWebPairFlags(webPairCmd.Flags())
+	jsonFlag(webDevicesCmd.Flags(), "emit the paired devices as JSON")
+	webUnpairCmd.Flags().Bool("all", false, "unpair every device")
 
 	bugsCmd.AddCommand(bugsIngestCmd, bugsNewCmd)
 	depsCmd.AddCommand(depsAddCmd, depsRmCmd, depsListCmd)
 	stackCmd.AddCommand(stackNewCmd, stackAddCmd, stackRmCmd, stackMvCmd, stackListCmd, stackRestackCmd)
 	prCmd.AddCommand(prLinkCmd, prUnlinkCmd, prStatusCmd, prCommentsCmd)
 	skillCmd.AddCommand(skillShowCmd, skillInstallCmd, skillListCmd)
+	webCmd.AddCommand(webPairCmd, webDevicesCmd, webUnpairCmd)
 }
 
 // bindRunFlags declares `gummi run`'s flags: the shared driving surface
@@ -530,6 +569,26 @@ func bindSkillInstallFlags(fs *pflag.FlagSet) {
 	fs.Bool("force", false, "overwrite an existing skill bundle (default: refuse and warn on drift)")
 	fs.Bool("dry-run", false, "print what would be written, change nothing")
 	fs.Bool("check", false, "verify every target is up to date; write nothing, fail if any is absent/foreign/drifted")
+}
+
+// bindWebFlags declares `gummi web`'s flags.
+func bindWebFlags(fs *pflag.FlagSet) {
+	fs.String("addr", "", "address to serve the board on (default "+defaultWebAddr+"; falls back to GUMMI_WEB_ADDR)")
+	fs.String("allow-host", "", "comma-separated names the board also answers to, e.g. a reverse proxy's (`tailscale serve`); "+
+		"it always answers to its own address, localhost, the --addr name, the certificate's names and the tailnet's")
+	fs.String("tls-cert", "", "serve HTTPS with this certificate (PEM; needs --tls-key)")
+	fs.String("tls-key", "", "the private key for --tls-cert (PEM)")
+	fs.Bool("tailscale", false, "also serve on your tailnet as its own node (embedded tsnet; no tailscaled, no port forwarding)")
+	fs.String("ts-hostname", defaultTSHostname, "the board's node name on your tailnet (with --tailscale)")
+	fs.String("ts-authkey", "", "tailnet auth key instead of a browser login (with --tailscale); a flag shows in ps, "+
+		"so prefer TS_AUTHKEY in the environment, read when the flag is not given")
+	fs.Bool("ts-tls", false, "serve HTTPS on 443 with a tailnet certificate (with --tailscale; needs MagicDNS and HTTPS enabled for the tailnet)")
+	fs.Bool("verbose", false, "log the tailnet node's own messages (with --tailscale)")
+	fs.Bool("no-pairing", false, "serve without pairing, to anything that can reach the listener (refused unless every listener is loopback)")
+}
+
+func bindWebPairFlags(fs *pflag.FlagSet) {
+	fs.String("name", "", "pair the browser that redeems the code as this person")
 }
 
 // gateApproval normalizes the --gate-approval value every driving verb

@@ -65,6 +65,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(skillCmd)
 	rootCmd.AddCommand(completionCmd)
+	rootCmd.AddCommand(webCmd)
 	rootCmd.AddCommand(mcpCmd)
 	rootCmd.AddCommand(experimentCmd)
 }
