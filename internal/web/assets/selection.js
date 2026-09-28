@@ -35,8 +35,11 @@ function rowMoved (r, c) {
 // select opens a card. tab, when given, wins; otherwise the panel follows
 // the card's pinned decision (the spec for a design gate, the diff for a
 // failed verify), and stays where it was when there is none.
+let picks = 0
+
 export async function select (id, { tab = null, view = true } = {}) {
   if (!id) return
+  const mine = ++picks
   const changed = id !== state.sel
   if (changed) {
     set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false })
@@ -44,8 +47,12 @@ export async function select (id, { tab = null, view = true } = {}) {
   if (tab && tab !== state.tab) set({ tab })
   writeHash(id, tab)
   if (view && isMobile()) set({ view: 'thread' })
+  const tabBefore = state.tab
   const card = await loadCard(id)
-  if (changed && !tab && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
+  // the panel follows the decision only when nothing chose a tab while the
+  // card loaded: a later select (a link naming its tab) or a person's own
+  // click wins over a guess made from a head that was still in flight
+  if (changed && !tab && mine === picks && state.tab === tabBefore && card?.decision && card.decision.anchor !== 'thread' && state.sel === id) {
     set({ tab: card.decision.anchor })
   }
   if (changed) {
