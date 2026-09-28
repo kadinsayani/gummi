@@ -1064,6 +1064,13 @@ func (e *Engine) run(f domain.Feature, note string, flavor runFlavor) error {
 		e.mu.Unlock()
 		return err
 	}
+	// an answer the last run of this pass could not take (it had stopped
+	// on its budget) opens this one
+	if old != nil && old.Feature.Stage == f.Stage && old.flavor() == flavor {
+		if held := old.takeAnswerForNextRun(); held != "" {
+			note = strings.TrimSpace(strings.Join([]string{held, note}, "\n\n"))
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	pool := lanePoolFor(f)
 	s := &Session{Feature: f, Role: role, Critique: flavor == flavorCritique, Rebase: flavor == flavorRebase, ReadOnly: researchReadOnly(f), pool: pool, state: StateQueued, done: make(chan struct{}), ctx: ctx, cancel: cancel, kickoffNote: note, cardUnlock: unlock, startedAt: time.Now()}

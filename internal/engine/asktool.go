@@ -1282,7 +1282,17 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		// kickoff carries the exchange to a session that did not ask
 		carried := *ask
 		carried.CallID, carried.Outlived = "", false
-		if err := e.run(s.Feature, reentryTurn(&carried, answer), s.flavor()); err != nil {
+		turn := reentryTurn(&carried, answer)
+		if s.isExhausted() {
+			// ...unless it stopped on its budget. The answer stands, but
+			// running the stage again is the top-up's call: it widens the
+			// card's reach, and autopilot may never take it (§10.17). The
+			// exchange waits for the run the top-up starts, and the card
+			// is left on its budget stop.
+			s.holdAnswerForNextRun(turn)
+			return nil
+		}
+		if err := e.run(s.Feature, turn, s.flavor()); err != nil {
 			s.trySetPendingAsk(ask)
 			return err
 		}

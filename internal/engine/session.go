@@ -264,6 +264,13 @@ type Session struct {
 	// kickoff — the user's review comments delivered via RunWith. Set at
 	// construction, immutable after (like Feature/Role).
 	kickoffNote string
+	// answerForNextRun is an answer this stage's run could not take: the
+	// run stopped on its budget with its question up, and the person
+	// answered it there. Running the stage again is the top-up's call,
+	// not the answer's, so the exchange waits here and rides the kickoff
+	// of the next run of the same stage and pass (Engine.run). Written
+	// under s.mu.
+	answerForNextRun string
 	// specComments is the artifact's open user comments, compiled when a
 	// stage writer's run starts (Engine.openSpecComments) and appended to
 	// its kickoff. Kept apart from kickoffNote so a restart re-reads the
@@ -1038,6 +1045,23 @@ func (s *Session) callLive(callID string) bool {
 	}
 	_, native := a.(agent.ToolResolver)
 	return native && s.takesTurns()
+}
+
+// holdAnswerForNextRun parks an answer's re-entry turn for the stage's
+// next run (see answerForNextRun).
+func (s *Session) holdAnswerForNextRun(turn string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.answerForNextRun = turn
+}
+
+// takeAnswerForNextRun hands over a parked answer, once.
+func (s *Session) takeAnswerForNextRun() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	turn := s.answerForNextRun
+	s.answerForNextRun = ""
+	return turn
 }
 
 // takePendingAsk clears and returns the open ask (nil if none), so the

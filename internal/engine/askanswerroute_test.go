@@ -155,3 +155,74 @@ func TestAnAnswerThatCannotLandLeavesNoRecord(t *testing.T) {
 		t.Errorf("the log closed the question on an answer that did not land (%d ask events)", n)
 	}
 }
+
+// A run that spends its envelope behind its question stops on its budget
+// with the question still up, and the page puts the question first. The
+// answer stands — the question closes on it — but it does not run the
+// stage again: that is the top-up's call, which widens the card's reach
+// and which autopilot may never make. The exchange opens the run the
+// top-up starts instead.
+func TestAnAnswerDoesNotRunPastABudgetStop(t *testing.T) {
+	args := askArgs(t, Ask{ChangesSection: "Problem", Question: "Persist where?",
+		Options: []AskOption{{Label: "per-device"}, {Label: "synced"}}})
+	var mu sync.Mutex
+	var sent []string
+	ag := &agent.Fake{Caps: agent.Capabilities{ClientTools: true, Interrupt: true, UsageEvents: true}}
+	ag.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		defer mu.Unlock()
+		sent = append(sent, msg)
+		if len(sent) == 1 {
+			// asks, then goes on spending while the person reads
+			return []agent.Event{
+				{Kind: agent.EventClientToolCall, ToolCall: &agent.ToolCall{ID: "call-1", Name: "ask_user", Args: args}},
+				{Kind: agent.EventUsage, Usage: agent.Usage{Credits: 200}},
+				{Kind: agent.EventIdle},
+			}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1, StageBudget: 100})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+	f := feature(1, "Dark mode", domain.StagePlan)
+	if err := store.CreateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventExhausted)
+	s := e.Get(f.ID)
+	if s.Snapshot().PendingAsk == nil {
+		t.Fatal("the budget stop took the question with it")
+	}
+
+	if err := e.AnswerAs(ctx, f.ID, "synced", state.ActorAutopilot); err != nil {
+		t.Fatalf("the answer was refused: %v", err)
+	}
+	if e.Get(f.ID) != s || s.State() != StateDone {
+		t.Fatalf("the answer ran the stage past its budget stop (state %s)", e.Get(f.ID).State())
+	}
+	if s.Snapshot().PendingAsk != nil {
+		t.Error("the question is still open after its answer")
+	}
+	opens, err := store.OpenDecisions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(opens[f.ID]) != 1 || opens[f.ID][0].Kind != state.DecisionKindBudget {
+		t.Fatalf("open decisions = %+v, want the budget stop alone", opens[f.ID])
+	}
+
+	if err := e.Run(f); err != nil { // the top-up's run
+		t.Fatal(err)
+	}
+	waitState(t, e, f.ID, StateDone)
+	mu.Lock()
+	defer mu.Unlock()
+	if len(sent) != 2 || !strings.Contains(sent[1], "The answer is: synced") {
+		t.Fatalf("the top-up's run did not open with the answer: %q", sent)
+	}
+}
