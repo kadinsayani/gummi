@@ -73,6 +73,14 @@ func headlessBoard(t *testing.T, ag agent.Agent) (*Bridge, *changeLog, *engine.E
 // headlessBoardFor is headlessBoard with the one card given.
 func headlessBoardFor(t *testing.T, ag agent.Agent, f domain.Feature) (*Bridge, *changeLog, *engine.Engine, domain.Feature, *bytes.Buffer) {
 	t.Helper()
+	b, log, eng, out := headlessBoardWith(t, ag, []domain.Feature{f}, nil)
+	return b, log, eng, f, out
+}
+
+// headlessBoardWith is headlessBoard with the cards given, and the
+// engine's config tuned by tune (nil leaves it).
+func headlessBoardWith(t *testing.T, ag agent.Agent, feats []domain.Feature, tune func(*engine.Config)) (*Bridge, *changeLog, *engine.Engine, *bytes.Buffer) {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -105,11 +113,17 @@ func headlessBoardFor(t *testing.T, ag agent.Agent, f domain.Feature) (*Bridge, 
 		t.Fatal(err)
 	}
 	pool := worktree.WrapSingle(wt)
-	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model", Persist: true})
+	cfg := engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model", Persist: true}
+	if tune != nil {
+		tune(&cfg)
+	}
+	eng := engine.New(cfg)
 	t.Cleanup(func() { eng.Close() })
 
-	if err := store.CreateFeature(context.Background(), &f); err != nil {
-		t.Fatal(err)
+	for i := range feats {
+		if err := store.CreateFeature(context.Background(), &feats[i]); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	m := NewShell(theme.GummiDark(), "v0-test")
@@ -124,7 +138,7 @@ func headlessBoardFor(t *testing.T, ag agent.Agent, f domain.Feature) (*Bridge, 
 	b := NewHeadless(m, tea.WithOutput(&out))
 	go func() { _ = b.Run() }()
 	t.Cleanup(b.Stop)
-	return b, log, eng, f, &out
+	return b, log, eng, &out
 }
 
 // waitBoard polls the board through the bridge until ok accepts it.

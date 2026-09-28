@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -320,5 +322,45 @@ func waitChangeAfter(t *testing.T, log *changeLog, mark int, kind webapi.ChangeK
 			t.Fatalf("%s never reached its page (no %s change for %s)", what, kind, id)
 		}
 		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// A queued card is not running: the header's count said "3 running" with
+// two of the three waiting for a lane. And a queued card says what it
+// waits for, in the words the TUI's own thread uses for it.
+func TestAQueuedCardIsCountedApartAndSaysWhy(t *testing.T) {
+	release := make(chan struct{})
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	card := func(n int, slug string) domain.Feature {
+		return domain.Feature{ID: domain.FeatureID(fmt.Sprintf("FD-%03d", n)), Num: n, Title: slug, Slug: slug,
+			Stage: domain.StageImplement, GateApproval: domain.GateAutopilot}
+	}
+	feats := []domain.Feature{card(1, "one"), card(2, "two")}
+	b, _, eng, _ := headlessBoardWith(t, ag, feats, func(c *engine.Config) { c.AutopilotLanes = 1 })
+	t.Cleanup(func() { close(release) })
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 2 })
+	for _, f := range feats {
+		withWorktree(t, b, f)
+		if err := eng.Run(f); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bd := waitBoard(t, b, func(bd webapi.Board) bool { return bd.Counts.Running+bd.Counts.Queued == 2 })
+	if bd.Counts.Running != 1 || bd.Counts.Queued != 1 {
+		t.Fatalf("counts = %+v, want 1 running and 1 queued", bd.Counts)
+	}
+	for _, r := range bd.Rows {
+		if r.ID != "FD-002" {
+			continue
+		}
+		if r.Running == nil || r.Running.Verb != "queued" {
+			t.Fatalf("FD-002 = %+v, want queued", r.Running)
+		}
+		if want := "queued — the autopilot lane is busy with FD-001"; r.Running.Why != want {
+			t.Errorf("why = %q, want %q", r.Running.Why, want)
+		}
 	}
 }

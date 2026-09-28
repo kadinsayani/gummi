@@ -951,8 +951,12 @@ func TestThreadShowsQueuedWait(t *testing.T) {
 		t.Fatal("enter did not open the queued card's page")
 	}
 	view := ansi.Strip(m.threadView(100, 30))
-	if !strings.Contains(view, "◔ "+queuedLabel()) {
+	if !strings.Contains(view, "◔ "+m.queuedLabelFor("FD-001")) {
 		t.Fatalf("queued card's thread missing the wait line:\n%s", view)
+	}
+	// and the line says what it waits for: the card holding the lane
+	if !strings.Contains(m.queuedLabelFor("FD-001"), "busy with FD-002") {
+		t.Errorf("the wait line does not name the card holding the lane: %q", m.queuedLabelFor("FD-001"))
 	}
 
 	// the slot opens: the wait line disappears with the state it named

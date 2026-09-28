@@ -43,7 +43,11 @@ func (m *Shell) WebBoard() webapi.Board {
 		case webapi.StatusNeeds:
 			b.Counts.Needs++
 		case webapi.StatusRunning:
-			b.Counts.Running++
+			if row.Running != nil && row.Running.Verb == "queued" {
+				b.Counts.Queued++
+			} else {
+				b.Counts.Running++
+			}
 		}
 		b.Rows = append(b.Rows, row)
 	}
@@ -92,7 +96,7 @@ func (m *Shell) webRow(r featureRow, titles map[domain.FeatureID]string) webapi.
 		row.Needs = webNeeds(it, f.Stage)
 	case sess != nil && sess.State() == engine.StateQueued:
 		row.Status = webapi.StatusRunning
-		row.Running = &webapi.RowRunning{Verb: "queued", Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
+		row.Running = &webapi.RowRunning{Verb: "queued", Why: m.queuedLabelFor(f.ID), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}
 	case m.cardBusy(r):
 		row.Status = webapi.StatusRunning
 		row.Running = &webapi.RowRunning{Verb: m.cardBusyWord(r), Autopilot: r.AutopilotDriving, Pausing: m.pausing[f.ID]}

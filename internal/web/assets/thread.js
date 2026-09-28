@@ -304,7 +304,7 @@ function renderLive () {
       parts.push(...conversation('stage', l, role, stage))
       if (l.busy || l.state === 'queued') {
         const words = l.state === 'queued' && !l.busy
-          ? 'queued for a free slot'
+          ? (r.running?.why || 'queued for a free slot')
           : [`${role} is ${l.verb || 'working'}`, l.tool ? String(l.tool.label || l.tool.tool).replace(/\s+/g, ' ') : null].filter(Boolean).join(' · ')
         parts.push(h('div', { class: 'live', testid: 'live' },
           h('span', { class: ['spinner', !l.busy && 'still'] }),

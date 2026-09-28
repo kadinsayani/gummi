@@ -642,6 +642,42 @@ func (e *Engine) LaneCounts() LaneCounts {
 	}
 }
 
+// LaneWait is why a queued run is waiting: the attention pool it waits
+// in, that pool's cap, the cards holding the pool's slots right now, and
+// how many runs are queued ahead of it.
+type LaneWait struct {
+	Autopilot bool
+	Max       int
+	Holders   []domain.FeatureID
+	Ahead     int
+}
+
+// LaneWait reports what card id's queued run waits for. ok is false when
+// the card has no run in a queue.
+func (e *Engine) LaneWait(id domain.FeatureID) (LaneWait, bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	s := e.live[id]
+	if s == nil || s.State() != StateQueued {
+		return LaneWait{}, false
+	}
+	for p := range e.lanes {
+		i := slices.Index(e.lanes[p].queue, id)
+		if i < 0 {
+			continue
+		}
+		w := LaneWait{Autopilot: lanePool(p) == poolAutopilot, Max: e.lanes[p].max, Ahead: i}
+		for fid, other := range e.live {
+			if held, pool := other.slot(); held && int(pool) == p {
+				w.Holders = append(w.Holders, fid)
+			}
+		}
+		slices.Sort(w.Holders)
+		return w, true
+	}
+	return LaneWait{}, false
+}
+
 // Repool moves a card's live autonomous run into the attention pool its
 // gate-approval mode now names, and is what every writer of that mode
 // must call after persisting it.

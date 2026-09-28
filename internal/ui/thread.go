@@ -1429,7 +1429,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.
 		// live-computed per frame, so neither outlives the state it names.
 		switch {
 		case snap.State == engine.StateQueued:
-			lines = append(lines, "  "+s.Faint.Render("◔ "+queuedLabel()))
+			lines = append(lines, "  "+s.Faint.Render("◔ "+m.queuedLabelFor(r.F.ID)))
 		case snap.Busy:
 			// at, not r.F.UpdatedAt: the row field names when the STAGE
 			// began, which a retry after a failed run does not move, so a

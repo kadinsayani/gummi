@@ -577,6 +577,14 @@ func (s *Session) takeSlot() {
 	s.heldSlot = true
 }
 
+// slot reports whether the session holds an attention slot, and in
+// which pool.
+func (s *Session) slot() (held bool, pool lanePool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.heldSlot, s.pool
+}
+
 // repool re-binds the pool this session competes in, reporting whether
 // the pool actually changed and — when it did — whether a slot is
 // currently held and which pool it came out of, so the engine can move
