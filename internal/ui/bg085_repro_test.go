@@ -12,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // TestBG085PeriodClosesWhenAutopilotHandsOver is BG-085's regression
@@ -45,25 +46,25 @@ func TestBG085PeriodClosesWhenAutopilotHandsOver(t *testing.T) {
 
 	// live: the TUI that ran the stage is still up and still holds the
 	// card's live file, which is the case the defect lived in.
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(events), events, true))
-	if st.running() {
+	st := onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, true))
+	if st.Running() {
 		t.Fatal("the period is still open while the card waits at a gate for you")
 	}
-	if st.closed != stretchParked {
-		t.Errorf("closed = %q, want %q", st.closed, stretchParked)
+	if st.Closed != threadfold.StretchParked {
+		t.Errorf("closed = %q, want %q", st.Closed, threadfold.StretchParked)
 	}
 	// dated from the stop itself, not from now
-	if !st.closedAt.Equal(at(6)) {
-		t.Errorf("closedAt = %v, want the park's own stamp %v", st.closedAt, at(6))
+	if !st.ClosedAt.Equal(at(6)) {
+		t.Errorf("closedAt = %v, want the park's own stamp %v", st.ClosedAt, at(6))
 	}
-	if st.reason == "" {
+	if st.Reason == "" {
 		t.Error("the park's reason was dropped — it is what the rule tells the reader to go and do")
 	}
 
 	// and it is NOT reported as a crash: orphaned is reserved for a
 	// driver that died, and reusing it here would tell the reader
 	// something went wrong when nothing did.
-	if st.closed == stretchOrphaned {
+	if st.Closed == threadfold.StretchOrphaned {
 		t.Error("a designed handover is reported as a driver that stopped without saying so")
 	}
 }
@@ -80,16 +81,16 @@ func TestBG085AutonomousStageKeepsThePeriodOpen(t *testing.T) {
 		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(6)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if !st.running() {
-		t.Fatalf("closed = %q, want the period still open — implement is autopilot's to drive", st.closed)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if !st.Running() {
+		t.Fatalf("closed = %q, want the period still open — implement is autopilot's to drive", st.Closed)
 	}
 
 	// and with the driver gone, that same period reads as orphaned, so
 	// BG-059's judgement still lands on the case it was made for
-	st = onlyStretch(t, closeOrphaned(autopilotStretches(events), events, false))
-	if st.closed != stretchOrphaned {
-		t.Errorf("closed = %q, want %q for a dead driver mid-route", st.closed, stretchOrphaned)
+	st = onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, false))
+	if st.Closed != threadfold.StretchOrphaned {
+		t.Errorf("closed = %q, want %q for a dead driver mid-route", st.Closed, threadfold.StretchOrphaned)
 	}
 }
 

@@ -448,7 +448,7 @@ func (m *Shell) backlogView(w, h int) string {
 		sortLabel = "severity (todo)"
 	}
 	// "1 cards" was never plural-agreed (BACKLOG was renamed above; this
-	// count had the same live-drive report). plural() (receipt.go) is the
+	// count had the same live-drive report). plural() (reviewloop.go) is the
 	// package's existing singular/plural switch, reused here rather than
 	// hand-rolling a second one.
 	n := len(m.rows)

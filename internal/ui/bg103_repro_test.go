@@ -13,6 +13,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -31,11 +32,11 @@ func TestBG103EveryClosingRuleCarriesItsTime(t *testing.T) {
 	at := time.Date(2026, 9, 4, 8, 38, 0, 0, time.UTC)
 	clock := regexp.MustCompile(` \d\d:\d\d ──$`)
 
-	for _, how := range []stretchClose{stretchParked, stretchFinished, stretchTakenBack, stretchOrphaned} {
-		st := autopilotStretch{closed: how, closedAt: at}
+	for _, how := range []threadfold.StretchClose{threadfold.StretchParked, threadfold.StretchFinished, threadfold.StretchTakenBack, threadfold.StretchOrphaned} {
+		st := threadfold.Stretch{Closed: how, ClosedAt: at}
 		got := ansi.Strip(stretchCloseLines(m0Styles(), st, 100)[0])
 		if !clock.MatchString(got) {
-			t.Errorf("%q carries no time: %q", stretchLabel(how), got)
+			t.Errorf("%q carries no time: %q", threadfold.StretchLabel(how), got)
 		}
 	}
 
@@ -74,7 +75,7 @@ func TestBG103EveryClosingRuleCarriesItsTime(t *testing.T) {
 
 	w, h := m.threadSize()
 	body := ansi.Strip(m.threadView(w, h))
-	label := stretchLabel(stretchOrphaned)
+	label := threadfold.StretchLabel(threadfold.StretchOrphaned)
 	var rule string
 	for _, line := range strings.Split(body, "\n") {
 		if strings.Contains(line, label) {

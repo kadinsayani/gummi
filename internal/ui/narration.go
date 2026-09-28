@@ -7,6 +7,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // The narration is the short paragraph above the answer set: what a
@@ -187,13 +188,13 @@ func (m *Shell) cardNarration(in nextInput, r featureRow) []claim {
 			out = append(out, sentence(s))
 		}
 	}
-	// liveStretches, not autopilotStretches: a period the driving process
+	// threadfold.LiveStretches, not threadfold.Stretches: a period the driving process
 	// abandoned, or one autopilot ended by carrying the card into a stage
 	// it may not drive, are both closed by query-time judgement rather
 	// than by any row in the log (stretch.go). Reading the raw stretches
 	// here would report a period as still running while the card sits in
 	// front of you waiting.
-	if c := unattendedClaim(liveStretches(r.F, events, m.ws), events); c.text != "" {
+	if c := unattendedClaim(threadfold.LiveStretches(r.F, events, m.ws), events); c.text != "" {
 		out = append(out, c)
 	}
 	// The third question, and the only one that costs anything. It is
@@ -578,12 +579,12 @@ func loopBreaker(in nextInput) string {
 // without bound and stop being about the stop you are looking at, and
 // the older ones are already drawn where they happened, bracketed among
 // the history (stretch.go).
-func unattendedClaim(stretches []autopilotStretch, events []state.CardEvent) claim {
+func unattendedClaim(stretches []threadfold.Stretch, events []state.CardEvent) claim {
 	if len(stretches) == 0 {
 		return claim{}
 	}
 	st := stretches[len(stretches)-1]
-	if st.decidedNothing() {
+	if st.DecidedNothing() {
 		// "it ran a stage while you were out" is worth a rule in the
 		// history, but it is not worth a sentence at the stop: the folded
 		// receipt above already says which stage ran, and a sentence that
@@ -591,24 +592,24 @@ func unattendedClaim(stretches []autopilotStretch, events []state.CardEvent) cla
 		return claim{}
 	}
 	var parts []string
-	if n := len(st.gates); n > 0 {
+	if n := len(st.Gates); n > 0 {
 		parts = append(parts, "crossed "+itoa(n)+" gate"+plural(n))
 	}
-	if n := len(st.answers); n > 0 {
+	if n := len(st.Answers); n > 0 {
 		parts = append(parts, "took "+itoa(n)+" answer"+plural(n))
 	}
 	lead := "Before that, autopilot "
-	if st.running() {
+	if st.Running() {
 		lead = "Autopilot has the card and has "
 	}
 	text := lead + strings.Join(parts, " and ") + " without you."
 	// The period's OPENING event is the citation: it is the row in the
 	// thread where the stretch begins, and from there the crossings the
 	// sentence counts are drawn in order below it. st.from indexes the
-	// same slice autopilotStretches walked, so the seq is always a real
+	// same slice threadfold.Stretches walked, so the seq is always a real
 	// event on this card.
-	if st.from >= 0 && st.from < len(events) {
-		return cite(text, "event", itoa64(events[st.from].Seq))
+	if st.From >= 0 && st.From < len(events) {
+		return cite(text, "event", itoa64(events[st.From].Seq))
 	}
 	return sentence(text)
 }

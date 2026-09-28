@@ -11,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // A card's whole history is a slice of events, so these fixtures build
@@ -53,12 +54,12 @@ func evAsk(answer, by string, t time.Time) state.CardEvent {
 }
 
 func evMessage(author, content string, t time.Time) state.CardEvent {
-	p, _ := json.Marshal(messagePayload{Author: author, Content: content})
+	p, _ := json.Marshal(threadfold.MessagePayload{Author: author, Content: content})
 	return state.CardEvent{Kind: state.EventMessage, At: t, Payload: string(p)}
 }
 
 func evExit(stage domain.Stage, verdict string, t time.Time) state.CardEvent {
-	p, _ := json.Marshal(stageExitPayload{Verdict: verdict})
+	p, _ := json.Marshal(threadfold.StageExitPayload{Verdict: verdict})
 	return state.CardEvent{Kind: state.EventStageExit, Stage: stage, At: t, Payload: string(p)}
 }
 
@@ -66,7 +67,7 @@ func aFeature() domain.Feature {
 	return domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageImplement}
 }
 
-func onlyStretch(t *testing.T, sts []autopilotStretch) autopilotStretch {
+func onlyStretch(t *testing.T, sts []threadfold.Stretch) threadfold.Stretch {
 	t.Helper()
 	if len(sts) != 1 {
 		t.Fatalf("stretches = %d, want exactly 1: %+v", len(sts), sts)
@@ -85,7 +86,7 @@ func TestStretchOpensOnlyOnAnExplicitRow(t *testing.T) {
 		evGate(domain.StageImplement, domain.StageVerify, "review", at(10)),
 		evPark(domain.StageVerify, "review needs you", at(20)),
 	}
-	if got := autopilotStretches(events); len(got) != 0 {
+	if got := threadfold.Stretches(events); len(got) != 0 {
 		t.Fatalf("stretches = %+v, want none — nobody handed this card over", got)
 	}
 }
@@ -99,7 +100,7 @@ func TestModeChangeIsNotABoundary(t *testing.T) {
 		evModeChange(domain.GateAutopilot, at(0)),
 		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, at(5)),
 	}
-	if got := autopilotStretches(events); len(got) != 0 {
+	if got := threadfold.Stretches(events); len(got) != 0 {
 		t.Fatalf("stretches = %+v, want none — a mode change is a preference, not a period", got)
 	}
 }
@@ -114,15 +115,15 @@ func TestStretchCollectsWhatAutopilotDecided(t *testing.T) {
 		evAsk("8080", state.ActorUser, at(21)), // a person: closes the period
 		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(24)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if len(st.gates) != 1 || st.gates[0].from != domain.StagePlan {
-		t.Fatalf("gates = %+v, want only the spec crossing (the plan one is after the close)", st.gates)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if len(st.Gates) != 1 || st.Gates[0].From != domain.StagePlan {
+		t.Fatalf("gates = %+v, want only the spec crossing (the plan one is after the close)", st.Gates)
 	}
-	if len(st.answers) != 1 || st.answers[0].answer != "stream rows" {
-		t.Fatalf("answers = %+v, want only autopilot's own", st.answers)
+	if len(st.Answers) != 1 || st.Answers[0].Answer != "stream rows" {
+		t.Fatalf("answers = %+v, want only autopilot's own", st.Answers)
 	}
-	if st.closed != stretchTakenBack {
-		t.Fatalf("closed = %q, want %q — a person answered", st.closed, stretchTakenBack)
+	if st.Closed != threadfold.StretchTakenBack {
+		t.Fatalf("closed = %q, want %q — a person answered", st.Closed, threadfold.StretchTakenBack)
 	}
 }
 
@@ -134,18 +135,18 @@ func TestStretchClosers(t *testing.T) {
 	cases := []struct {
 		name   string
 		tail   []state.CardEvent
-		want   stretchClose
+		want   threadfold.StretchClose
 		reason string
 	}{
 		{
 			name: "an explicit handback",
 			tail: []state.CardEvent{evHandedBack("you turned autopilot off", at(30))},
-			want: stretchTakenBack, reason: "you turned autopilot off",
+			want: threadfold.StretchTakenBack, reason: "you turned autopilot off",
 		},
 		{
 			name: "a park short of the end",
 			tail: []state.CardEvent{evPark(domain.StageImplement, "implement finished, review it", at(30))},
-			want: stretchParked, reason: "implement finished, review it",
+			want: threadfold.StretchParked, reason: "implement finished, review it",
 		},
 		{
 			name: "a park at the landing gate after a pass",
@@ -153,7 +154,7 @@ func TestStretchClosers(t *testing.T) {
 				evExit(domain.StageVerify, state.StatusOK, at(29)),
 				evPark(domain.StageVerify, "verify passed — ready to land", at(30)),
 			},
-			want: stretchFinished, reason: "verify passed — ready to land",
+			want: threadfold.StretchFinished, reason: "verify passed — ready to land",
 		},
 		{
 			name: "a park at the landing gate after a failure",
@@ -161,17 +162,17 @@ func TestStretchClosers(t *testing.T) {
 				evExit(domain.StageVerify, state.StatusFail, at(29)),
 				evPark(domain.StageVerify, "verify failed", at(30)),
 			},
-			want: stretchParked, reason: "verify failed",
+			want: threadfold.StretchParked, reason: "verify failed",
 		},
 		{
 			name: "a gate a person crossed",
 			tail: []state.CardEvent{evGate(domain.StageImplement, domain.StageVerify, "user", at(30))},
-			want: stretchTakenBack,
+			want: threadfold.StretchTakenBack,
 		},
 		{
 			name: "a turn a person typed",
 			tail: []state.CardEvent{evMessage(string(engine.AuthorUser), "hold on", at(30))},
-			want: stretchTakenBack,
+			want: threadfold.StretchTakenBack,
 		},
 		{
 			// A card inside a goal never parks at the landing gate — its
@@ -180,25 +181,25 @@ func TestStretchClosers(t *testing.T) {
 			// opened on "autopilot stopped without saying so".
 			name: "the goal's own landing, which crosses to done unattended",
 			tail: []state.CardEvent{evGate(domain.StageVerify, domain.StageDone, "goal", at(30))},
-			want: stretchFinished,
+			want: threadfold.StretchFinished,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			events := append([]state.CardEvent{evTookOver(domain.GateAutopilot, at(0))}, tc.tail...)
-			st := onlyStretch(t, autopilotStretches(events))
-			if st.closed != tc.want {
-				t.Fatalf("closed = %q, want %q", st.closed, tc.want)
+			st := onlyStretch(t, threadfold.Stretches(events))
+			if st.Closed != tc.want {
+				t.Fatalf("closed = %q, want %q", st.Closed, tc.want)
 			}
-			if st.reason != tc.reason {
-				t.Fatalf("reason = %q, want %q", st.reason, tc.reason)
+			if st.Reason != tc.reason {
+				t.Fatalf("reason = %q, want %q", st.Reason, tc.reason)
 			}
 			// the closer is the last row of the tail, and the took-over
 			// occupies index 0 — so the period ends at the tail's length,
 			// bounded by the closing event rather than containing it.
-			if st.to != len(tc.tail) {
+			if st.To != len(tc.tail) {
 				t.Fatalf("to = %d, want %d — the closing event bounds the period, it is not inside it",
-					st.to, len(tc.tail))
+					st.To, len(tc.tail))
 			}
 		})
 	}
@@ -213,9 +214,9 @@ func TestAgentTurnDoesNotClose(t *testing.T) {
 		evMessage("implementer", "wired the theme layer", at(5)),
 		evMessage(string(engine.AuthorSystem), "kickoff", at(6)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if !st.running() {
-		t.Fatalf("closed = %q, want still running — only a person ends a period", st.closed)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if !st.Running() {
+		t.Fatalf("closed = %q, want still running — only a person ends a period", st.Closed)
 	}
 }
 
@@ -230,9 +231,9 @@ func TestSecondTookOverInsideAPeriodIsIgnored(t *testing.T) {
 		evTookOver(domain.GateAutopilot, at(5)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if st.from != 0 || !st.openedAt.Equal(at(0)) {
-		t.Fatalf("period opened at index %d / %s, want the first row", st.from, st.openedAt)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if st.From != 0 || !st.OpenedAt.Equal(at(0)) {
+		t.Fatalf("period opened at index %d / %s, want the first row", st.From, st.OpenedAt)
 	}
 }
 
@@ -245,15 +246,15 @@ func TestStretchStaysOpen(t *testing.T) {
 		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if !st.running() {
-		t.Fatalf("closed = %q, want running", st.closed)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if !st.Running() {
+		t.Fatalf("closed = %q, want running", st.Closed)
 	}
-	if st.to != len(events) {
-		t.Fatalf("to = %d, want %d", st.to, len(events))
+	if st.To != len(events) {
+		t.Fatalf("to = %d, want %d", st.To, len(events))
 	}
-	if st.mode != domain.GateAttended {
-		t.Fatalf("mode = %q, want the mode it was handed over under", st.mode)
+	if st.Mode != domain.GateAttended {
+		t.Fatalf("mode = %q, want the mode it was handed over under", st.Mode)
 	}
 }
 
@@ -266,12 +267,12 @@ func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
 		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(events), events, false))
-	if st.running() {
-		t.Fatalf("closed = %q, want orphaned — nothing is driving this card", st.closed)
+	st := onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, false))
+	if st.Running() {
+		t.Fatalf("closed = %q, want orphaned — nothing is driving this card", st.Closed)
 	}
-	if st.closed != stretchOrphaned {
-		t.Fatalf("closed = %q, want %q", st.closed, stretchOrphaned)
+	if st.Closed != threadfold.StretchOrphaned {
+		t.Fatalf("closed = %q, want %q", st.Closed, threadfold.StretchOrphaned)
 	}
 }
 
@@ -281,8 +282,8 @@ func TestCloseOrphanedDowngradesAnOpenPeriod(t *testing.T) {
 // liveness check found alive.
 func TestCloseOrphanedLeavesALiveOneRunning(t *testing.T) {
 	events := []state.CardEvent{evTookOver(domain.GateAttended, at(0))}
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(events), events, true))
-	if !st.running() {
+	st := onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, true))
+	if !st.Running() {
 		t.Fatal("closeOrphaned closed a period a live session is still driving")
 	}
 }
@@ -296,9 +297,9 @@ func TestCloseOrphanedLeavesAnAlreadyClosedPeriodAlone(t *testing.T) {
 		evTookOver(domain.GateAttended, at(0)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 	}
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(events), events, false))
-	if st.closed != stretchParked {
-		t.Fatalf("closed = %q, want %q — closeOrphaned must not touch a period the log already closed", st.closed, stretchParked)
+	st := onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, false))
+	if st.Closed != threadfold.StretchParked {
+		t.Fatalf("closed = %q, want %q — closeOrphaned must not touch a period the log already closed", st.Closed, threadfold.StretchParked)
 	}
 }
 
@@ -339,12 +340,12 @@ func TestLiveStretchesClosesAKilledDriversOpenPeriod(t *testing.T) {
 		evTookOver(domain.GateAttended, at(0)),
 		evGate(domain.StagePlan, domain.StagePlan, state.ActorAutopilot, at(6)),
 	}
-	st := onlyStretch(t, liveStretches(f, events, ws))
-	if st.running() {
-		t.Fatalf("closed = %q, want orphaned — the driving pid %d is dead", st.closed, owner.Process.Pid)
+	st := onlyStretch(t, threadfold.LiveStretches(f, events, ws))
+	if st.Running() {
+		t.Fatalf("closed = %q, want orphaned — the driving pid %d is dead", st.Closed, owner.Process.Pid)
 	}
-	if st.closed != stretchOrphaned {
-		t.Fatalf("closed = %q, want %q", st.closed, stretchOrphaned)
+	if st.Closed != threadfold.StretchOrphaned {
+		t.Fatalf("closed = %q, want %q", st.Closed, threadfold.StretchOrphaned)
 	}
 }
 
@@ -360,17 +361,17 @@ func TestTwoStretchesAlternate(t *testing.T) {
 		evTookOver(domain.GateAutopilot, at(30)),
 		evGate(domain.StageImplement, domain.StageVerify, state.ActorAutopilot, at(36)),
 	}
-	got := autopilotStretches(events)
+	got := threadfold.Stretches(events)
 	if len(got) != 2 {
 		t.Fatalf("stretches = %d, want 2: %+v", len(got), got)
 	}
-	if got[0].closed != stretchParked || !got[1].running() {
-		t.Fatalf("want a closed period then an open one, got %q and %q", got[0].closed, got[1].closed)
+	if got[0].Closed != threadfold.StretchParked || !got[1].Running() {
+		t.Fatalf("want a closed period then an open one, got %q and %q", got[0].Closed, got[1].Closed)
 	}
-	if _, in := stretchAt(got, 3); in {
+	if _, in := threadfold.StretchAt(got, 3); in {
 		t.Fatal("the turn you typed between the two periods belongs to neither")
 	}
-	if _, in := stretchAt(got, 5); !in {
+	if _, in := threadfold.StretchAt(got, 5); !in {
 		t.Fatal("the second period's own crossing is inside it")
 	}
 }
@@ -384,12 +385,12 @@ func TestStretchDecidedNothingStillOpens(t *testing.T) {
 		evMessage("implementer", "did the work", at(5)),
 		evPark(domain.StageImplement, "implement finished, review it", at(10)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if !st.decidedNothing() {
-		t.Fatalf("tally = %+v / %+v, want empty", st.gates, st.answers)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if !st.DecidedNothing() {
+		t.Fatalf("tally = %+v / %+v, want empty", st.Gates, st.Answers)
 	}
-	if st.closed != stretchParked {
-		t.Fatalf("closed = %q, want the period still bounded", st.closed)
+	if st.Closed != threadfold.StretchParked {
+		t.Fatalf("closed = %q, want the period still bounded", st.Closed)
 	}
 }
 
@@ -397,13 +398,13 @@ func TestStretchDecidedNothingStillOpens(t *testing.T) {
 // as far as it is allowed to go, and how far that is comes out of the
 // graph rather than out of the word "verify".
 func TestLandingGateIsTheGraphsLastDecision(t *testing.T) {
-	if !landingGate(domain.StageVerify) {
+	if !threadfold.LandingGate(domain.StageVerify) {
 		t.Fatal("the last decision on the graph is verify")
 	}
-	if landingGate(domain.StageImplement) {
+	if threadfold.LandingGate(domain.StageImplement) {
 		t.Fatal("implement is not a landing gate")
 	}
-	if landingGate(domain.StageDone) {
+	if threadfold.LandingGate(domain.StageDone) {
 		t.Fatal("done is not a gate — it is the far side of one")
 	}
 }
@@ -431,25 +432,25 @@ func TestUnseenStretchIsTheNewestClosedOne(t *testing.T) {
 		evPark(domain.StageImplement, "second", at(40)),        // 5
 		evTookOver(domain.GateAutopilot, at(50)),               // 6
 	})
-	sts := autopilotStretches(events)
+	sts := threadfold.Stretches(events)
 	if len(sts) != 3 {
 		t.Fatalf("stretches = %d, want 3: %+v", len(sts), sts)
 	}
 
-	got, ok := unseenStretch(sts, events, 0)
-	if !ok || got.reason != "second" {
+	got, ok := threadfold.UnseenStretch(sts, events, 0)
+	if !ok || got.Reason != "second" {
 		t.Fatalf("unseen = %+v (ok=%v), want the newest CLOSED period, not the open one", got, ok)
 	}
 
 	// Having read to the end, nothing is unread — including the period
 	// still running, which never counts.
-	if _, ok := unseenStretch(sts, events, newestSeq(events)); ok {
+	if _, ok := threadfold.UnseenStretch(sts, events, newestSeq(events)); ok {
 		t.Fatal("everything read, but a period still reported unread")
 	}
 
 	// Read only as far as the first park: the second period is unread.
-	got, ok = unseenStretch(sts, events, 2)
-	if !ok || got.reason != "second" {
+	got, ok = threadfold.UnseenStretch(sts, events, 2)
+	if !ok || got.Reason != "second" {
 		t.Fatalf("unseen = %+v (ok=%v), want the second period", got, ok)
 	}
 }
@@ -461,8 +462,8 @@ func TestNoUnseenStretchWithoutAPeriod(t *testing.T) {
 		evGate(domain.StageVerify, domain.StageImplement, "review", at(0)),
 		evPark(domain.StageImplement, "needs you", at(10)),
 	})
-	sts := autopilotStretches(events)
-	if _, ok := unseenStretch(sts, events, 0); ok {
+	sts := threadfold.Stretches(events)
+	if _, ok := threadfold.UnseenStretch(sts, events, 0); ok {
 		t.Fatal("a card with no period reported one to jump to")
 	}
 }
@@ -481,10 +482,10 @@ func TestInterruptedLandingGateIsNotFinished(t *testing.T) {
 		// verify itself never exits: the board quit mid-run
 		evPark(domain.StageVerify, "stopped when the board quit", at(20)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if st.closed != stretchParked {
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if st.Closed != threadfold.StretchParked {
 		t.Fatalf("closed = %q, want %q — verify never finished, it was interrupted",
-			st.closed, stretchParked)
+			st.Closed, threadfold.StretchParked)
 	}
 }
 
@@ -497,9 +498,9 @@ func TestLandingGateFinishesOnItsOwnVerdict(t *testing.T) {
 		evExit(domain.StageVerify, state.StatusOK, at(19)),   // verify's own pass
 		evPark(domain.StageVerify, "verify passed — ready to land", at(20)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if st.closed != stretchFinished {
-		t.Fatalf("closed = %q, want %q — verify passed on its own exit", st.closed, stretchFinished)
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if st.Closed != threadfold.StretchFinished {
+		t.Fatalf("closed = %q, want %q — verify passed on its own exit", st.Closed, threadfold.StretchFinished)
 	}
 }
 
@@ -540,7 +541,7 @@ func TestAutopilotDriving(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := autopilotDriving(autopilotStretches(tc.events))
+			got := threadfold.Driving(threadfold.Stretches(tc.events))
 			if got != tc.want {
 				t.Fatalf("autopilotDriving = %v, want %v", got, tc.want)
 			}
@@ -571,15 +572,15 @@ func TestAutopilotAnsweredAskKeepsStretchOpen(t *testing.T) {
 		// the unattended run carries on and crosses the gate.
 		evGate(domain.StagePlan, domain.StageImplement, state.ActorAutopilot, at(10)),
 	}
-	st := onlyStretch(t, autopilotStretches(events))
-	if !st.running() {
+	st := onlyStretch(t, threadfold.Stretches(events))
+	if !st.Running() {
 		t.Fatalf("closed = %q at %s, want still running — autopilot answering its own ask is not a person taking over",
-			st.closed, st.closedAt)
+			st.Closed, st.ClosedAt)
 	}
-	if len(st.answers) != 1 || st.answers[0].answer != "Yes, move on" {
-		t.Fatalf("answers = %+v, want the one answer autopilot took", st.answers)
+	if len(st.Answers) != 1 || st.Answers[0].Answer != "Yes, move on" {
+		t.Fatalf("answers = %+v, want the one answer autopilot took", st.Answers)
 	}
-	if len(st.gates) != 1 || st.gates[0].from != domain.StagePlan {
-		t.Fatalf("gates = %+v, want the crossing that followed the answer", st.gates)
+	if len(st.Gates) != 1 || st.Gates[0].From != domain.StagePlan {
+		t.Fatalf("gates = %+v, want the crossing that followed the answer", st.Gates)
 	}
 }

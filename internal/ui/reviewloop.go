@@ -503,6 +503,14 @@ func (m *Shell) autoStepStage(id domain.FeatureID, to domain.Stage, note, actor 
 
 func itoa(n int) string { return strconv.Itoa(n) }
 
+// plural is "" for exactly one, "s" otherwise.
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
 // ordinal renders 2 → "2nd", 3 → "3rd" for the repeat-failure warning.
 func ordinal(n int) string {
 	suffix := "th"

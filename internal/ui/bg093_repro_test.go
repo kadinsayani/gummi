@@ -12,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // TestBG093AStageThatNeverStartedKeepsItsOwnHeading is BG-093's
@@ -69,19 +70,19 @@ func TestBG093AStageThatNeverStartedKeepsItsOwnHeading(t *testing.T) {
 
 	// the reconstruction: the receipt belongs to a review segment, not to
 	// the shape session that happened to be the last one open.
-	segs := stageSegments(m.cardEvents[f.ID])
+	segs := threadfold.Segments(m.cardEvents[f.ID])
 	var found bool
 	for _, seg := range segs {
-		for _, ev := range seg.events {
+		for _, ev := range seg.Events {
 			if ev.Kind != state.EventPark {
 				continue
 			}
 			found = true
-			if seg.stage != domain.StageVerify {
-				t.Errorf("the review park was filed under the %s segment", seg.stage)
+			if seg.Stage != domain.StageVerify {
+				t.Errorf("the review park was filed under the %s segment", seg.Stage)
 			}
-			if seg.role != "" || seg.model != "" {
-				t.Errorf("a stage that never started was given a role/model: %q/%q", seg.role, seg.model)
+			if seg.Role != "" || seg.Model != "" {
+				t.Errorf("a stage that never started was given a role/model: %q/%q", seg.Role, seg.Model)
 			}
 		}
 	}
@@ -138,7 +139,7 @@ func TestBG093SameStageEventsStayInOneBlock(t *testing.T) {
 	gate, _ := json.Marshal(state.GatePayload{
 		From: string(domain.StagePlan), To: string(domain.StagePlan), Actor: state.ActorUser,
 	})
-	segs := stageSegments([]state.CardEvent{
+	segs := threadfold.Segments([]state.CardEvent{
 		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: at, Payload: string(enter)},
 		{Stage: domain.StagePlan, Kind: state.EventMessage, At: at.Add(time.Minute), Payload: string(says)},
 		{Stage: domain.StagePlan, Kind: state.EventGate, At: at.Add(2 * time.Minute), Payload: string(gate)},
@@ -146,8 +147,8 @@ func TestBG093SameStageEventsStayInOneBlock(t *testing.T) {
 	if len(segs) != 1 {
 		t.Fatalf("one stage session produced %d segments", len(segs))
 	}
-	if len(segs[0].events) != 2 {
-		t.Errorf("the spec segment holds %d events, want the message and the crossing", len(segs[0].events))
+	if len(segs[0].Events) != 2 {
+		t.Errorf("the spec segment holds %d events, want the message and the crossing", len(segs[0].Events))
 	}
 }
 
@@ -160,7 +161,7 @@ func TestBG093EventsBeforeAnyStageAreStillDropped(t *testing.T) {
 	gate, _ := json.Marshal(state.GatePayload{
 		From: string(domain.StageTodo), To: string(domain.StagePlan), Actor: "caller",
 	})
-	segs := stageSegments([]state.CardEvent{
+	segs := threadfold.Segments([]state.CardEvent{
 		{Stage: domain.StageTodo, Kind: state.EventGate, At: at, Payload: string(gate)},
 	})
 	if len(segs) != 0 {

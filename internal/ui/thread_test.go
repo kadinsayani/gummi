@@ -15,6 +15,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -36,13 +37,13 @@ func TestStageSequence(t *testing.T) {
 		domain.StageTodo, domain.StagePlan, domain.StageImplement,
 		domain.StageVerify, domain.StageDone,
 	}
-	got := stageSequence()
+	got := threadfold.StageSequence()
 	if len(got) != len(want) {
-		t.Fatalf("stageSequence() = %v, want %v", got, want)
+		t.Fatalf("threadfold.StageSequence() = %v, want %v", got, want)
 	}
 	for i := range got {
 		if got[i] != want[i] {
-			t.Errorf("stageSequence()[%d] = %s, want %s (full: %v)", i, got[i], want[i], got)
+			t.Errorf("threadfold.StageSequence()[%d] = %s, want %s (full: %v)", i, got[i], want[i], got)
 		}
 	}
 }
@@ -103,33 +104,33 @@ func TestStageSegmentsReconstructsHistory(t *testing.T) {
 			Payload: `{"label":"edit spec.md"}`,
 		},
 	}
-	segs := stageSegments(events)
+	segs := threadfold.Segments(events)
 	if len(segs) != 2 {
-		t.Fatalf("stageSegments() = %d segments, want 2: %+v", len(segs), segs)
+		t.Fatalf("threadfold.Segments() = %d segments, want 2: %+v", len(segs), segs)
 	}
 	first := segs[0]
-	if first.stage != domain.StagePlan || !first.exited || first.credits != 6 {
+	if first.Stage != domain.StagePlan || !first.Exited || first.Credits != 6 {
 		t.Errorf("first segment wrong: %+v", first)
 	}
-	if got := len(first.events); got != 2 {
+	if got := len(first.Events); got != 2 {
 		t.Errorf("first segment carries %d events, want 2 (the two messages)", got)
 	}
 	second := segs[1]
-	if second.stage != domain.StagePlan || second.exited {
+	if second.Stage != domain.StagePlan || second.Exited {
 		t.Errorf("second segment should be the open (live) one: %+v", second)
 	}
-	if len(second.events) != 1 {
-		t.Errorf("second segment carries %d events, want 1 (the tool call)", len(second.events))
+	if len(second.Events) != 1 {
+		t.Errorf("second segment carries %d events, want 1 (the tool call)", len(second.Events))
 	}
 }
 
 // TestFoldedReceiptLineIsOneLine is the fold's whole point: whatever a
 // finished stage carried, it renders as exactly one line.
 func TestFoldedReceiptLineIsOneLine(t *testing.T) {
-	seg := stageSegment{
-		stage: domain.StagePlan, role: "architect", exited: true,
-		credits: 6, exitAt: time.Date(2026, 8, 1, 12, 4, 0, 0, time.UTC),
-		events: []state.CardEvent{
+	seg := threadfold.Segment{
+		Stage: domain.StagePlan, Role: "architect", Exited: true,
+		Credits: 6, ExitAt: time.Date(2026, 8, 1, 12, 4, 0, 0, time.UTC),
+		Events: []state.CardEvent{
 			{Kind: state.EventMessage}, {Kind: state.EventMessage}, {Kind: state.EventTool},
 		},
 	}
@@ -150,10 +151,10 @@ func TestFoldedReceiptLineIsOneLine(t *testing.T) {
 // back to the segment's enterAt instead, labeled as a start rather than
 // an end so it isn't mistaken for when the stage finished.
 func TestFoldedReceiptFallsBackToEnterTime(t *testing.T) {
-	seg := stageSegment{
-		stage: domain.StagePlan, role: "architect", exited: false,
-		enterAt: time.Date(2026, 8, 1, 20, 35, 0, 0, time.UTC),
-		events: []state.CardEvent{
+	seg := threadfold.Segment{
+		Stage: domain.StagePlan, Role: "architect", Exited: false,
+		EnterAt: time.Date(2026, 8, 1, 20, 35, 0, 0, time.UTC),
+		Events: []state.CardEvent{
 			{Kind: state.EventMessage}, {Kind: state.EventMessage},
 		},
 	}
@@ -214,8 +215,8 @@ func TestAutopilotLabel(t *testing.T) {
 		domain.GateAutopilot: "on",
 	}
 	for in, want := range cases {
-		if got := autopilotLabel(in); got != want {
-			t.Errorf("autopilotLabel(%q) = %q, want %q", in, got, want)
+		if got := threadfold.AutopilotLabel(in); got != want {
+			t.Errorf("threadfold.AutopilotLabel(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -333,7 +334,7 @@ func m0Styles() *theme.Styles { return NewShell(theme.GummiDark(), "test").style
 // only as a fallback, and only when the stage ran exactly once, for a
 // card whose payload predates the credits field.
 func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
-	seg := stageSegment{stage: domain.StageImplement, role: "implementer", exited: true, credits: 6}
+	seg := threadfold.Segment{Stage: domain.StageImplement, Role: "implementer", Exited: true, Credits: 6}
 	metered := map[domain.Stage]float64{domain.StageImplement: 41}
 
 	// one segment: the payload wins over the rollup even though both exist.
@@ -347,7 +348,7 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 
 	// no payload (predates the credits field), one segment: the rollup is
 	// still better than nothing.
-	bare := stageSegment{stage: domain.StageImplement, role: "implementer", exited: true}
+	bare := threadfold.Segment{Stage: domain.StageImplement, Role: "implementer", Exited: true}
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, metered, 1, 0, 80))
 	if !strings.Contains(line, "41 credits") {
 		t.Errorf("receipt %q dropped the rollup fallback", line)
@@ -370,8 +371,8 @@ func TestFoldedReceiptPrefersPerSegmentSpend(t *testing.T) {
 // Each segment must show its own payload instead.
 func TestFoldedReceiptPerSessionSpendDiffers(t *testing.T) {
 	rollup := map[domain.Stage]float64{domain.StageImplement: 53.5} // the misleading stage total
-	first := stageSegment{stage: domain.StageImplement, exited: true, credits: 12}
-	second := stageSegment{stage: domain.StageImplement, exited: true, credits: 34}
+	first := threadfold.Segment{Stage: domain.StageImplement, Exited: true, Credits: 12}
+	second := threadfold.Segment{Stage: domain.StageImplement, Exited: true, Credits: 34}
 
 	l1 := ansi.Strip(foldedReceiptLine(m0Styles(), first, rollup, 2, 0, 80))
 	l2 := ansi.Strip(foldedReceiptLine(m0Styles(), second, rollup, 2, 0, 80))
@@ -420,7 +421,7 @@ func TestFoldedReceiptVerdictMarker(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			seg := stageSegment{stage: tt.stage, role: tt.role, exited: true, verdict: tt.verdict, credits: 18}
+			seg := threadfold.Segment{Stage: tt.stage, Role: tt.role, Exited: true, Verdict: tt.verdict, Credits: 18}
 			line := ansi.Strip(foldedReceiptLine(m0Styles(), seg, nil, 1, 0, 80))
 			hasCheck := strings.Contains(line, "✓")
 			hasCross := strings.Contains(line, "✗")
@@ -1420,14 +1421,14 @@ func TestStageSegmentsConsumesEnterExit(t *testing.T) {
 		{Kind: state.EventMessage, Stage: domain.StagePlan, Payload: `{"author":"user","content":"hi"}`},
 		{Kind: state.EventStageExit, Stage: domain.StagePlan, Payload: `{"verdict":"ok"}`},
 	}
-	segs := stageSegments(events)
+	segs := threadfold.Segments(events)
 	if len(segs) != 1 {
-		t.Fatalf("stageSegments() = %d segments, want 1", len(segs))
+		t.Fatalf("threadfold.Segments() = %d segments, want 1", len(segs))
 	}
-	if len(segs[0].events) != 1 || segs[0].events[0].Kind != state.EventMessage {
-		t.Fatalf("segment events = %v, want exactly the one message", segs[0].events)
+	if len(segs[0].Events) != 1 || segs[0].Events[0].Kind != state.EventMessage {
+		t.Fatalf("segment events = %v, want exactly the one message", segs[0].Events)
 	}
-	for _, ev := range segs[0].events {
+	for _, ev := range segs[0].Events {
 		if ev.Kind == state.EventStageEnter || ev.Kind == state.EventStageExit {
 			t.Errorf("segment retained a %s event; stageSegments should have consumed it", ev.Kind)
 		}
@@ -1589,12 +1590,12 @@ func TestAnsweredDecisions(t *testing.T) {
 		{Kind: state.EventAsk, Payload: `{"question":"q","answer":"a","actor":"user","id":"d2"}`},
 		{Kind: state.EventDecisionOpen, Payload: `{"id":"d3","kind":"gate"}`}, // never answered
 	}
-	got := answeredDecisions(events)
+	got := threadfold.AnsweredDecisions(events)
 	if !got["d1"] || !got["d2"] {
-		t.Errorf("answeredDecisions() = %v, want d1 and d2 answered", got)
+		t.Errorf("threadfold.AnsweredDecisions() = %v, want d1 and d2 answered", got)
 	}
 	if got["d3"] {
-		t.Error("answeredDecisions() marked d3 answered, but nothing in the log ever answered it")
+		t.Error("threadfold.AnsweredDecisions() marked d3 answered, but nothing in the log ever answered it")
 	}
 }
 
@@ -1609,17 +1610,17 @@ func TestReceiptClaimsTheStagesUnaccountedSpend(t *testing.T) {
 	unclaimed := map[domain.Stage]float64{domain.StagePlan: 60.1 - 25}
 	unknown := map[domain.Stage]int{domain.StagePlan: 1}
 
-	bare := stageSegment{stage: domain.StagePlan, role: "architect"} // no credits recorded
-	known := stageSegment{stage: domain.StagePlan, role: "architect", credits: 25}
+	bare := threadfold.Segment{Stage: domain.StagePlan, Role: "architect"} // no credits recorded
+	known := threadfold.Segment{Stage: domain.StagePlan, Role: "architect", Credits: 25}
 
 	line := ansi.Strip(foldedReceiptLine(m0Styles(), bare, rollup, 2,
-		remainderFor(bare, unclaimed, unknown), 90))
+		threadfold.Remainder(bare, unclaimed, unknown), 90))
 	if !strings.Contains(line, "35.1 credits") {
 		t.Errorf("the unclaimed remainder is still missing from the receipt: %q", line)
 	}
 	// the segment that knows its own cost is untouched
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), known, rollup, 2,
-		remainderFor(known, unclaimed, unknown), 90))
+		threadfold.Remainder(known, unclaimed, unknown), 90))
 	if !strings.Contains(line, "25 credits") {
 		t.Errorf("a segment with its own figure lost it: %q", line)
 	}
@@ -1628,7 +1629,7 @@ func TestReceiptClaimsTheStagesUnaccountedSpend(t *testing.T) {
 	// there is no honest way to split it.
 	unknown[domain.StagePlan] = 2
 	line = ansi.Strip(foldedReceiptLine(m0Styles(), bare, rollup, 2,
-		remainderFor(bare, unclaimed, unknown), 90))
+		threadfold.Remainder(bare, unclaimed, unknown), 90))
 	if strings.Contains(line, "credits") {
 		t.Errorf("a remainder was split across two segments that cannot be told apart: %q", line)
 	}
@@ -1646,11 +1647,11 @@ func TestSessionlessSpendGetsItsOwnLine(t *testing.T) {
 		{Stage: domain.StageImplement, Role: "helper", Credits: 0.4},
 		{Stage: domain.StageImplement, Role: "reviewer", Credits: 50.8},
 	}
-	segs := []stageSegment{
-		{stage: domain.StageImplement, role: "implementer", credits: 39.6},
-		{stage: domain.StageImplement, role: "reviewer", credits: 50.8},
+	segs := []threadfold.Segment{
+		{Stage: domain.StageImplement, Role: "implementer", Credits: 39.6},
+		{Stage: domain.StageImplement, Role: "reviewer", Credits: 50.8},
 	}
-	got := sessionlessSpend(rows, segs)
+	got := threadfold.SessionlessSpend(rows, segs)
 	if len(got[domain.StageImplement]) != 2 {
 		t.Fatalf("sessionless rows = %+v, want the scribe and the helper", got)
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
 	"github.com/morphis/gummi/internal/worktree"
@@ -120,7 +121,7 @@ func autopilotHandoverEdge(f domain.Feature) (domain.Stage, bool) {
 	case domain.StageVerify, domain.StageDone, domain.StageTodo:
 		return "", false
 	}
-	seq := stageSequence()
+	seq := threadfold.StageSequence()
 	for i, st := range seq {
 		if st != f.Stage {
 			continue
@@ -133,12 +134,12 @@ func autopilotHandoverEdge(f domain.Feature) (domain.Stage, bool) {
 	return "", false
 }
 
-// remainingStages is stageSequence's (thread.go) ordered stage list,
+// remainingStages is threadfold.StageSequence's ordered stage list,
 // truncated to start at `from` (inclusive) and to exclude
 // domain.StageDone — the one stop a non-off mode never carries a card
 // into by itself.
 func remainingStages(from domain.Stage) []domain.Stage {
-	seq := stageSequence()
+	seq := threadfold.StageSequence()
 	idx := -1
 	for i, st := range seq {
 		if st == from {
@@ -165,10 +166,10 @@ func (m *Shell) planAutopilot(f domain.Feature) autopilotPlan {
 	if f.Stage == domain.StageTodo {
 		// workflow.Initial names the stage every item is *created* in
 		// (domain.StageTodo itself), not the one to run — that is the
-		// next stop on f's own sequence (thread.go's stageSequence),
+		// next stop on f's own sequence (threadfold.StageSequence),
 		// which already resolves brainstorm vs. spec vs. plan for a
 		// skip-flagged card the same way advanceStage does.
-		if seq := stageSequence(); len(seq) > 1 {
+		if seq := threadfold.StageSequence(); len(seq) > 1 {
 			to := seq[1]
 			return autopilotPlan{bucket: "todo", to: to, remaining: remainingStages(to)}
 		}

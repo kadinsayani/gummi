@@ -9,6 +9,7 @@ import (
 
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // BG-046 repro: once a stage becomes history, its message label must
@@ -20,7 +21,7 @@ import (
 func TestBG046ReproHistoryLabelUsesRawAuthorNotRole(t *testing.T) {
 	s := m0Styles()
 	answered := map[string]bool{}
-	payload, _ := json.Marshal(messagePayload{
+	payload, _ := json.Marshal(threadfold.MessagePayload{
 		Author:  string(engine.AuthorAssistant),
 		Content: "Repo checks clean; verification plan satisfied.\n\nVERDICT: pass",
 	})

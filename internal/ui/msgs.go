@@ -16,6 +16,7 @@ import (
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/verify"
 	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
@@ -73,7 +74,7 @@ type featureRow struct {
 	DrivenAbroad bool
 	// AutopilotDriving is whether an autopilot period is open on this card
 	// right now — a load-time snapshot, recomputed every load from the
-	// event log via autopilotStretches, never persisted.
+	// event log via threadfold.Stretches, never persisted.
 	AutopilotDriving bool
 	// Events is the card's event log (state.CardEvent, card_events table),
 	// populated for the SELECTED card only, lazily, once the card page
@@ -316,7 +317,7 @@ func (m *Shell) loadRows() tea.Msg {
 		row.DepBlocked = len(m.dependencyBlockers(ctx, f.ID)) > 0
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		if events, err := m.store.Events(ctx, f.ID); err == nil {
-			row.AutopilotDriving = autopilotDriving(liveStretches(f, events, m.ws))
+			row.AutopilotDriving = threadfold.Driving(threadfold.LiveStretches(f, events, m.ws))
 			row.ExitVerdict, row.Exited = stageExited(events, row.History, f.Stage)
 		}
 		if f.IsGoal() && m.engine != nil {

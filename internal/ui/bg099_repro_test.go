@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // TestBG099PlanNeverPromisesAStageItHandsBack is BG-099's regression
@@ -31,7 +32,7 @@ func TestBG099PlanNeverPromisesAStageItHandsBack(t *testing.T) {
 				ID: "XX-001", Num: 1, Title: "a card", Slug: "a-card",
 				Kind: kind, Stage: domain.StageTodo, Budget: domain.Budget{Envelope: 2400},
 			}
-			seq := stageSequence()
+			seq := threadfold.StageSequence()
 			if len(seq) < 2 {
 				t.Fatalf("%s has no stage after todo to plan against: %v", kind, seq)
 			}

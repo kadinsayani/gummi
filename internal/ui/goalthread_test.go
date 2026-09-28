@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // goalEvent is one row of a goal's log as the store writes it: kind
@@ -114,8 +115,8 @@ func TestEveryRenderedEventKindHasItsOwnArm(t *testing.T) {
 		state.EventToolResult: true,
 	}
 	payloads := map[string]any{
-		state.EventMessage:      messagePayload{Author: "assistant", Content: "verdict: pass"},
-		state.EventTool:         toolPayload{Label: "Bash  make test"},
+		state.EventMessage:      threadfold.MessagePayload{Author: "assistant", Content: "verdict: pass"},
+		state.EventTool:         state.ToolPayload{Label: "Bash  make test"},
 		state.EventAsk:          state.AskPayload{Question: "ship it?", Answer: "yes", Actor: state.ActorUser},
 		state.EventGate:         state.GatePayload{From: "plan", To: "implement", Actor: state.ActorUser},
 		state.EventPark:         state.ParkPayload{Reason: state.ParkReasonNeedsYou},

@@ -12,6 +12,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // The code-vs-plan sentence, its cache, and the contract that lets it on
@@ -521,8 +522,8 @@ func (m *Shell) scrollThreadToEvent(r featureRow, seq int64) bool {
 		if ev.Seq != seq {
 			continue
 		}
-		for _, st := range liveStretches(r.F, r.Events, m.ws) {
-			if st.from == i {
+		for _, st := range threadfold.LiveStretches(r.F, r.Events, m.ws) {
+			if st.From == i {
 				m.anchorTo, m.anchorFrom = r.F.ID, i
 				return true
 			}

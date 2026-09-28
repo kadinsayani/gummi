@@ -246,7 +246,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	n := dv.openCount()
 	// The three notices below used to hard-code "comment(s)" and let a
 	// single open comment read "sent 1 diff comment(s) to the
-	// implementer" verbatim. plural(n) (receipt.go) picks the right
+	// implementer" verbatim. plural(n) (reviewloop.go) picks the right
 	// suffix instead of punting the choice onto the reader.
 	turn := engine.CompileDiffComments(dv.anns, m.engine.ClientTools())
 	m.diff = nil // close the surface; the fix runs on the board

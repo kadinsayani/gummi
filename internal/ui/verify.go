@@ -329,7 +329,7 @@ func baselineNotice(id domain.FeatureID, results []verify.Result) noticeMsg {
 	// "check(s) ... pass" never agreed: a single-check repo read "all 1
 	// repo check(s) pass on the fresh branch" verbatim on screen. Both the
 	// noun and its verb have to flex together (one check passes, several
-	// checks pass), so plural() (receipt.go) picks the noun's suffix and a
+	// checks pass), so plural() (reviewloop.go) picks the noun's suffix and a
 	// local switch on the same count picks the verb.
 	verb := "pass"
 	if len(results) == 1 {

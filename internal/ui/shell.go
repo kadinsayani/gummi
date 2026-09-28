@@ -21,6 +21,7 @@ import (
 	"github.com/morphis/gummi/internal/rounds"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/layout"
 	"github.com/morphis/gummi/internal/ui/logo"
 	"github.com/morphis/gummi/internal/ui/overlay"
@@ -1067,8 +1068,8 @@ func (m *Shell) markSeen(id domain.FeatureID, events []state.CardEvent) tea.Cmd 
 	// even one read in a previous session (BG-056).
 	if m.cardOpen && m.lastSeen != nil {
 		if r, ok := m.selected(); ok && r.F.ID == id {
-			if st, unread := unseenStretch(liveStretches(r.F, events, m.ws), events, m.lastSeen[id]); unread {
-				m.anchorTo, m.anchorFrom = id, st.from
+			if st, unread := threadfold.UnseenStretch(threadfold.LiveStretches(r.F, events, m.ws), events, m.lastSeen[id]); unread {
+				m.anchorTo, m.anchorFrom = id, st.From
 			}
 		}
 	}
@@ -2032,7 +2033,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// failed): baseline whatever block the artifact now carries.
 		m.scribeSettled(msg.id)
 		if msg.n > 0 {
-			// plural (receipt.go) is "" for exactly one check and "s"
+			// plural (reviewloop.go) is "" for exactly one check and "s"
 			// otherwise — "check(s)" read as literal punctuation on
 			// screen instead of agreeing with msg.n the way every other
 			// count on this notice's neighbors does.

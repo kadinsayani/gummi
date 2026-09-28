@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/livelog"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // TestBG105HandoverOnARunningCardKeepsThePeriodOpen is BG-105's
@@ -42,9 +43,9 @@ func TestBG105HandoverOnARunningCardKeepsThePeriodOpen(t *testing.T) {
 		evTookOver(domain.GateAutopilot, at(4)),
 	}
 
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(events), events, true))
-	if !st.running() {
-		t.Fatalf("closed = %q, want the period still open — the plan stage is running and nothing stopped it", st.closed)
+	st := onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, true))
+	if !st.Running() {
+		t.Fatalf("closed = %q, want the period still open — the plan stage is running and nothing stopped it", st.Closed)
 	}
 }
 
@@ -125,14 +126,14 @@ func TestBG105ACardComeToRestClosesFromItsPark(t *testing.T) {
 		evPark(domain.StagePlan, "plan critiqued: clean — review & approve", at(20)),
 	}
 
-	st := onlyStretch(t, closeOrphaned(autopilotStretches(events), events, true))
-	if st.closed != stretchParked {
-		t.Fatalf("closed = %q, want %q — the gate's own park ended it", st.closed, stretchParked)
+	st := onlyStretch(t, threadfold.CloseOrphaned(threadfold.Stretches(events), events, true))
+	if st.Closed != threadfold.StretchParked {
+		t.Fatalf("closed = %q, want %q — the gate's own park ended it", st.Closed, threadfold.StretchParked)
 	}
-	if !st.closedAt.Equal(at(20)) {
-		t.Errorf("closedAt = %v, want the park's own stamp %v", st.closedAt, at(20))
+	if !st.ClosedAt.Equal(at(20)) {
+		t.Errorf("closedAt = %v, want the park's own stamp %v", st.ClosedAt, at(20))
 	}
-	if st.reason == "" {
+	if st.Reason == "" {
 		t.Error("the park's reason was dropped — it is what the rule tells the reader to go and do")
 	}
 }

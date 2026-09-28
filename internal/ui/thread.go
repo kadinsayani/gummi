@@ -14,9 +14,9 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/spec"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // The card thread: a single scrollable surface a card's page opens onto.
@@ -213,7 +213,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	add := func(str string) { body = append(body, clip(str)); bodyEventAt = append(bodyEventAt, -1) }
 	blank := func() { body = append(body, ""); bodyEventAt = append(bodyEventAt, -1) }
 
-	segs := stageSegments(r.Events)
+	segs := threadfold.Segments(r.Events)
 	// Computed once from the card's whole event log rather than once per
 	// line: stageEventLine only ever sees the one event it is asked to
 	// render, and it needs this set to tell an answered decision_open
@@ -222,13 +222,13 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// hold many decision_open rows, so re-deriving the set inside the
 	// per-line renderer would redo the same scan of r.Events once per
 	// line for no reason.
-	answered := answeredDecisions(r.Events)
+	answered := threadfold.AnsweredDecisions(r.Events)
 	// The periods this card ran itself (stretch.go), derived once from the
 	// same event slice the segments came from so both are indexed against
 	// it. Folding a stage to one receipt loses its position, and the rules
 	// that bracket a period are placed by position, so the two have to be
 	// resolved together or not at all.
-	stretches := liveStretches(f, r.Events, m.ws)
+	stretches := threadfold.LiveStretches(f, r.Events, m.ws)
 	// segOf answers which folded segment an event index fell in, and -1
 	// for an index before the first stage ever started — where the switch
 	// writes its takeover when it starts a card sitting in todo, since
@@ -236,7 +236,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	segOf := func(idx int) int {
 		seg := -1
 		for i := range segs {
-			if segs[i].enterIdx <= idx {
+			if segs[i].EnterIdx <= idx {
 				seg = i
 			}
 		}
@@ -245,7 +245,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// A period opening before any stage started still opens above the
 	// first one: max(_, 0). Its rule cannot be drawn earlier than the
 	// history it brackets.
-	openSeg := func(st autopilotStretch) int { return max(segOf(st.from), 0) }
+	openSeg := func(st threadfold.Stretch) int { return max(segOf(st.From), 0) }
 	// closeSeg clamps the same way openSeg does, and for the same reason.
 	// A period can both open and close before any stage ever started —
 	// hand a card in todo to autopilot with no agent configured, then
@@ -253,7 +253,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// rule would be drawn against the first segment while its closing
 	// rule matched no segment at all, leaving a period on screen that
 	// never ends.
-	closeSeg := func(st autopilotStretch) int { return max(segOf(st.to), 0) }
+	closeSeg := func(st threadfold.Stretch) int { return max(segOf(st.To), 0) }
 	live := len(segs) - 1
 	// The period this card should open on rather than on its newest line,
 	// and where its opening rule ends up in the body. anchorIdx stays -1
@@ -288,8 +288,8 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// alt+a on such a period cleared the anchor and moved nothing.
 	anchoring := !measure && m.anchorTo == f.ID
 	anchorIdx := -1
-	markAnchor := func(st autopilotStretch) {
-		if anchoring && st.from == m.anchorFrom {
+	markAnchor := func(st threadfold.Stretch) {
+		if anchoring && st.From == m.anchorFrom {
 			anchorIdx = len(body)
 		}
 	}
@@ -301,7 +301,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// started — the switch pressed on a card sitting in todo — into
 	// whichever of the two owns the first segment. A card with a single
 	// stage has no folded loop at all, so that is this one.
-	var liveOpens []autopilotStretch
+	var liveOpens []threadfold.Stretch
 	for _, st := range stretches {
 		if live >= 0 && openSeg(st) == live {
 			liveOpens = append(liveOpens, st)
@@ -314,45 +314,27 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	// and draws them exactly where they happened — this slice is what
 	// the two branches that render from a session snapshot instead have,
 	// since a snapshot carries no event indices to place a rule against.
-	var liveCloses []autopilotStretch
+	var liveCloses []threadfold.Stretch
 	for _, st := range stretches {
-		if live >= 0 && !st.running() && closeSeg(st) == live {
+		if live >= 0 && !st.Running() && closeSeg(st) == live {
 			liveCloses = append(liveCloses, st)
 		}
 	}
 	if len(segs) > 1 {
-		spend := stageSpendByStage(r.StageSpend)
+		spend := threadfold.SpendByStage(r.StageSpend)
 		// how many segments each stage folds to a receipt for — the review
 		// →fix loop can bounce a card through fix four times, and a stage
 		// with more than one segment can only trust its own stage_exit
-		// payload for its spend (foldedReceiptLine's comment on why).
+		// payload for its spend (threadfold.ReceiptCredits says why).
 		folded := segs[:len(segs)-1]
 		counts := make(map[domain.Stage]int, len(folded))
 		for _, seg := range folded {
-			counts[seg.stage]++
+			counts[seg.Stage]++
 		}
-		// What each stage spent that no segment claims. A segment's own
-		// figure comes from its stage_exit payload, and a session that
-		// ended without one leaves a receipt line with no credits at all —
-		// on the lxd autopilot drive's case B the card's first plan
-		// session, 35.1 credits of it, printed as "plan · architect · 5
-		// turns" and nothing else, while the masthead counted the money.
-		// stage_spend knows the stage's true total, so the remainder —
-		// the total less what the segments do account for — is exactly
-		// what is missing, and when one segment is missing its figure the
-		// remainder IS that figure.
-		unclaimed := map[domain.Stage]float64{}
-		unknown := map[domain.Stage]int{}
-		for st, total := range spend {
-			unclaimed[st] = total
-		}
-		for _, seg := range folded {
-			if seg.credits > 0 {
-				unclaimed[seg.stage] -= seg.credits
-				continue
-			}
-			unknown[seg.stage]++
-		}
+		// What each stage spent that no segment claims — the figure a
+		// receipt with none of its own falls back to (threadfold.Unclaimed
+		// says why).
+		unclaimed, unknown := threadfold.Unclaimed(spend, folded)
 		// Roles that spent on a stage without ever being a session of it:
 		// the scribe's check discovery and its baseline, and the backend's
 		// own side-model. They hold a feature rather than a Session, so
@@ -361,12 +343,12 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		// lxd autopilot drive, 14–25% of each card). The page a person
 		// reads to ask "what did this cost me and on what" could not
 		// explain 39% of one card's bill, most of it this.
-		sessionless := sessionlessSpend(r.StageSpend, folded)
+		sessionless := threadfold.SessionlessSpend(r.StageSpend, folded)
 		printed := map[domain.Stage]bool{}
 		for i, seg := range folded {
-			if !printed[seg.stage] {
-				printed[seg.stage] = true
-				for _, row := range sessionless[seg.stage] {
+			if !printed[seg.Stage] {
+				printed[seg.Stage] = true
+				for _, row := range sessionless[seg.Stage] {
 					add(sessionlessReceiptLine(s, row, inner))
 				}
 			}
@@ -376,13 +358,13 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 			// happened after the stage started, and goes below in the order
 			// the log recorded it.
 			for _, st := range stretches {
-				if openSeg(st) == i && st.from < seg.enterIdx {
+				if openSeg(st) == i && st.From < seg.EnterIdx {
 					markAnchor(st)
 					add(stretchOpenLine(s, st, inner))
 				}
 			}
-			add(foldedReceiptLine(s, seg, spend, counts[seg.stage],
-				remainderFor(seg, unclaimed, unknown), inner))
+			add(foldedReceiptLine(s, seg, spend, counts[seg.Stage],
+				threadfold.Remainder(seg, unclaimed, unknown), inner))
 			// The rest of the segment, sorted by the event that produced
 			// it. Drawing all the openings first and all the closings last
 			// was what let a card handed to autopilot twice read as one
@@ -401,19 +383,19 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 			// the card changed hands, not above it.
 			var inside []segItem
 			for _, st := range stretches {
-				if openSeg(st) == i && st.from >= seg.enterIdx {
-					inside = append(inside, segItem{at: st.from, open: st, isOpen: true})
+				if openSeg(st) == i && st.From >= seg.EnterIdx {
+					inside = append(inside, segItem{at: st.From, open: st, isOpen: true})
 				}
 			}
 			for _, st := range stretches {
-				if !st.running() && closeSeg(st) == i {
-					inside = append(inside, segItem{at: st.to, lines: stretchCloseLines(s, st, inner)})
+				if !st.Running() && closeSeg(st) == i {
+					inside = append(inside, segItem{at: st.To, lines: stretchCloseLines(s, st, inner)})
 				}
 			}
-			for k, ev := range seg.events {
-				_, in := stretchAt(stretches, seg.evIdx[k])
+			for k, ev := range seg.Events {
+				_, in := threadfold.StretchAt(stretches, seg.EvIdx[k])
 				if l := stretchDecisionLine(s, ev, in, inner-2); l != "" {
-					inside = append(inside, segItem{at: seg.evIdx[k], lines: []string{"  " + l}})
+					inside = append(inside, segItem{at: seg.EvIdx[k], lines: []string{"  " + l}})
 				}
 			}
 			// stable, so an event that both closes a period and is itself
@@ -512,7 +494,7 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 	if len(segs) == 0 && len(stretches) > 0 {
 		for _, st := range stretches {
 			add(stretchOpenLine(s, st, inner))
-			if !st.running() {
+			if !st.Running() {
 				for _, l := range stretchCloseLines(s, st, inner) {
 					add(l)
 				}
@@ -1000,7 +982,7 @@ func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
 	// card `bugs new` mints fall through to the live-session branch — so an
 	// attended card with a stage running rendered "autopilot: off ·
 	// running", claiming autopilot held work it had never been given.
-	label := "autopilot: " + autopilotLabel(f.GateMode())
+	label := "autopilot: " + threadfold.AutopilotLabel(f.GateMode())
 	if f.GateMode() == domain.GateAttended {
 		return s.Faint.Render(label)
 	}
@@ -1021,18 +1003,6 @@ func autopilotField(s *theme.Styles, m *Shell, f domain.Feature) string {
 	default:
 		return s.Faint.Render(label)
 	}
-}
-
-// autopilotLabel names the card's gate-approval mode for a field already
-// labelled "autopilot:", so it answers that field's own question rather
-// than repeating the mode's name back ("autopilot: autopilot"). Two modes
-// means the answer is a state: on for domain.GateAutopilot, off for
-// attended and for the empty value that reads as it.
-func autopilotLabel(mode string) string {
-	if mode == domain.GateAutopilot {
-		return "on"
-	}
-	return "off"
 }
 
 // roundLabel renders the "⟲ n of m" badge for whichever automatic loop
@@ -1069,7 +1039,7 @@ func roundLabel(m *Shell, f domain.Feature) string {
 //
 // The strip windows itself around the current stage rather than trusting
 // the page's generic right-side clip: a plain left-to-right join truncates
-// from the right, and stageSequence always runs todo→done, so "cut from
+// from the right, and threadfold.StageSequence always runs todo→done, so "cut from
 // the right" and "cut the stages closest to done" are the same operation —
 // exactly wrong, since a card spends the second half of its life in those
 // stages. The lit stage is the one thing this row exists to show, so it is
@@ -1096,7 +1066,7 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 		}
 		return pill
 	}
-	seq := stageSequence()
+	seq := threadfold.StageSequence()
 	cur := 0
 	for i, st := range seq {
 		if st == f.Stage {
@@ -1139,37 +1109,6 @@ func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
 		return positional
 	}
 	return pill
-}
-
-// stageSequence derives the ordered stage list a card walks, read out of
-// the workflow package rather than written down as a string. One graph
-// serves every kind now, so the sequence no longer varies by card — it
-// takes no feature and callers pass none. At each stage it picks the
-// same edge engine.Engine.nextStage (advance.go) would resolve g into:
-// workflow.Next lists the primary forward edge first and the rerun
-// bounces after it, so the first entry is always the one to take.
-func stageSequence() []domain.Stage {
-	cur := workflow.Initial()
-	seq := []domain.Stage{cur}
-	// A backward edge picked here would walk in a circle, and this runs
-	// on every frame: stop the first time a stage repeats rather than
-	// trusting the edge tables to stay acyclic under this rule.
-	seen := map[domain.Stage]bool{cur: true}
-	for !workflow.Terminal(cur) {
-		nexts := workflow.Next(cur)
-		if len(nexts) == 0 {
-			break
-		}
-		// nexts[0] is the forward edge; the rerun bounces follow it.
-		next := nexts[0]
-		if seen[next] {
-			break
-		}
-		seen[next] = true
-		seq = append(seq, next)
-		cur = next
-	}
-	return seq
 }
 
 // currentSpecSection names the artifact section most relevant to a
@@ -1271,142 +1210,19 @@ func threadEmptyLine(s *theme.Styles, f domain.Feature) string {
 	return s.Faint.Render("nothing has run yet")
 }
 
-// stageEnterPayload/stageExitPayload/messagePayload/toolPayload mirror
-// the JSON shapes the engine writes into card_events (see
-// internal/engine/persist.go's mirrorEvents) — kept local because they
-// are a rendering-side concern, not something the store needs typed.
-type (
-	stageEnterPayload struct {
-		Role   string `json:"role"`
-		Model  string `json:"model"`
-		Flavor string `json:"flavor"`
-	}
-	stageExitPayload struct {
-		Verdict string  `json:"verdict"`
-		Credits float64 `json:"credits"`
-	}
-	messagePayload struct {
-		Author  string `json:"author"`
-		Content string `json:"content"`
-	}
-	toolPayload struct {
-		Label string `json:"label"`
-	}
-)
-
-// stageSegment is one generation of a stage session, reconstructed from
-// its stage_enter/stage_exit event pair — or, for a stage that never
-// opened a session at all, from the first event recorded at it.
-//
-// An unclosed segment (exited == false) has no stage_exit yet. That is
-// usually the last segment in the slice, the live stage; it is not a
-// rule. The interactive stages never earn a stage_exit on an ordinary
-// approval, and a stage whose session was refused never earns one
-// either, so an unclosed segment can be folded like any other —
-// foldedReceiptLine dates those from when they opened.
-type stageSegment struct {
-	stage   domain.Stage
-	role    string
-	model   string
-	enterAt time.Time
-	exited  bool
-	verdict string
-	credits float64
-	exitAt  time.Time
-	events  []state.CardEvent // messages/tools recorded within this segment
-	// enterIdx is where this segment's stage_enter sat in the event slice
-	// it was reconstructed from, and evIdx holds the same index for each
-	// entry of events. Folding loses position — a segment becomes one
-	// receipt line — and the autopilot stretches drawn around those
-	// receipts are bounded by event indices, so without a way back to the
-	// original position there is no way to say which side of a boundary a
-	// folded stage fell on.
-	enterIdx int
-	evIdx    []int
-}
-
-// stageSegments reconstructs a card's session history from its event
-// log, in seq order: each stage_enter opens a segment, the matching
-// stage_exit (same stage, still open) closes it, and every other event
-// belongs to the open segment for its own stage. Nil input (events not
-// loaded yet, or none recorded) yields no segments — the caller degrades
-// to omitting the folded receipts and the live-stage fallback, exactly
-// as required.
-//
-// "for its own stage" is the part that is easy to lose. Every event
-// carries the stage it happened at, and most of the time that is the
-// stage whose session is open, so appending to the newest segment and
-// never looking is right — until a stage never opens a session at all.
-// A stage the agent was refused entry to (the backend cannot run it)
-// writes its park receipt and nothing else: no stage_enter, so no
-// segment, so the receipt landed under the previous stage's heading,
-// naming that stage's role and model as the ones that failed. It looked
-// right while the failed session was still in memory, because the card
-// page renders a live block for that instead, and then moved on the next
-// restart. A stage with something to say opens a segment for it.
-func stageSegments(events []state.CardEvent) []stageSegment {
-	var segs []stageSegment
-	for i, ev := range events {
-		switch ev.Kind {
-		case state.EventStageEnter:
-			var p stageEnterPayload
-			_ = json.Unmarshal([]byte(ev.Payload), &p)
-			segs = append(segs, stageSegment{
-				stage: ev.Stage, role: p.Role, model: p.Model, enterAt: ev.At, enterIdx: i,
-			})
-		case state.EventStageExit:
-			if len(segs) == 0 {
-				continue
-			}
-			last := &segs[len(segs)-1]
-			if last.exited || last.stage != ev.Stage {
-				continue
-			}
-			var p stageExitPayload
-			_ = json.Unmarshal([]byte(ev.Payload), &p)
-			last.exited, last.verdict, last.credits, last.exitAt = true, p.Verdict, p.Credits, ev.At
-		default:
-			if len(segs) == 0 {
-				// nothing has started yet: the todo→first-stage crossing
-				// is recorded before any session exists and has no block
-				// of its own to sit in.
-				continue
-			}
-			if ev.Stage != "" && segs[len(segs)-1].stage != ev.Stage {
-				// a stage that never opened a session — see the doc
-				// comment. enterAt/enterIdx come from the event itself,
-				// which is the only moment this stage is known to have
-				// been reached; role and model stay empty because no
-				// session was ever chosen for it, and foldedReceiptLine
-				// already renders a segment that has neither.
-				segs = append(segs, stageSegment{stage: ev.Stage, enterAt: ev.At, enterIdx: i})
-			}
-			last := &segs[len(segs)-1]
-			last.events = append(last.events, ev)
-			last.evIdx = append(last.evIdx, i)
-		}
-	}
-	return segs
-}
-
 // foldedReceiptLine renders one finished stage session as the single
 // line folding really means: stage, role, turn count, spend, and the
 // outcome marker with the time it closed.
-func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage]float64, stageSegs int, remainder float64, w int) string {
-	turns := 0
-	for _, ev := range seg.events {
-		if ev.Kind == state.EventMessage {
-			turns++
-		}
-	}
+func foldedReceiptLine(s *theme.Styles, seg threadfold.Segment, spend map[domain.Stage]float64, stageSegs int, remainder float64, w int) string {
+	turns := seg.Turns()
 	// no chevron: a folded receipt used to unfold either through
 	// Shell.expandedStages or the transcript view (t), and neither exists
 	// any more — the thread is the only view there is, so the glyph would
 	// promise an expansion this line can no longer deliver. pinnedSpecLine
 	// keeps its own chevron; that one still opens something (alt+s).
-	head := string(seg.stage)
-	if seg.role != "" {
-		head += " · " + seg.role
+	head := string(seg.Stage)
+	if seg.Role != "" {
+		head += " · " + seg.Role
 	}
 	// A stage with no message turns says nothing about them: "0 turns" is
 	// a count of a thing that did not happen, and a plan stage that only
@@ -1418,73 +1234,25 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 			head += "s"
 		}
 	}
-	// stage_spend's primary key is (feature, stage, model, role): it rolls
-	// every session of a stage into one number, so it can answer "what did
-	// fix cost this card" but not "what did this fix session cost" — a
-	// card that bounced through review→fix four times has four segments
-	// and one rollup between them, and printing that rollup on each of
-	// their receipts is how a ~172-credit card reads as 53.5 (all four
-	// print the same total). The stage_exit event payload is the only
-	// per-session record there is, so it wins whenever there is more than
-	// one segment to tell apart; the rollup is kept as a fallback for a
-	// stage that only ran once, in case its payload predates the credits
-	// field.
-	credits := seg.credits
-	if credits == 0 && stageSegs == 1 {
-		credits = spend[seg.stage]
-	}
-	if credits == 0 {
-		// the stage's unaccounted remainder, when this is the one segment
-		// of it that does not know what it cost
-		credits = remainder
-	}
-	if credits > 0 {
+	// which figure a receipt trusts, and why the per-session one wins over
+	// the stage rollup, is threadfold.ReceiptCredits' to say.
+	if credits := threadfold.ReceiptCredits(seg, spend, stageSegs, remainder); credits > 0 {
 		head += fmt.Sprintf(" · %g credits", roundSpend(credits))
 	}
-	mark := eventMarker(s, "")
-	if seg.exited {
-		// The reviewer's own sessions — a stage's critique, and verify —
-		// are the ones that submit a verdict. Keyed on the ROLE rather
-		// than the stage, because a work stage now hosts both: its writer
-		// (implementer, no verdict, ✓ on a clean exit) and its critique
-		// (reviewer, a real verdict). Keying on the stage would have made
-		// every finished implement look unverdicted and lose its check.
-		switch seg.role {
-		case string(agent.RoleReviewer):
-			// a critique and a verify carry a real pass/changes/fail/blocked
-			// verdict (internal/verdict); only a resolved "pass" earns ✓, and
-			// only "fail" earns ✗ — anything else (including "", the shape
-			// left behind by a session that exited without ever calling
-			// submit_verdict) stays the neutral · rather than defaulting to
-			// a pass that was never recorded.
-			switch seg.verdict {
-			case verdict.Pass.String():
-				mark = eventMarker(s, state.StatusOK)
-			case verdict.Fail.String():
-				mark = eventMarker(s, state.StatusFail)
-			}
-		default:
-			// every other session never calls submit_verdict, so verdict==""
-			// is its only possible value and isn't itself a negative signal —
-			// exited and not failed still reads ✓.
-			if seg.verdict == state.StatusFail {
-				mark = eventMarker(s, state.StatusFail)
-			} else {
-				mark = eventMarker(s, state.StatusOK)
-			}
-		}
-	}
+	// an open segment keeps the neutral mark; a finished one's is
+	// threadfold's Outcome, keyed on the role that ran it.
+	mark := eventMarker(s, seg.Outcome())
 	ts := ""
-	if !seg.exitAt.IsZero() {
-		ts = seg.exitAt.Format("15:04")
-	} else if !seg.enterAt.IsZero() {
+	if !seg.ExitAt.IsZero() {
+		ts = seg.ExitAt.Format("15:04")
+	} else if !seg.EnterAt.IsZero() {
 		// The interactive stages (brainstorm, spec, triage, diagnose,
 		// shape) never earn a stage_exit on an ordinary approval — Advance
 		// tears the session down via Drop without recording one — so
-		// seg.exitAt stays zero forever for them. Falling back to when the
+		// seg.ExitAt stays zero forever for them. Falling back to when the
 		// segment opened, labeled as a start rather than an end, keeps
 		// every row in this chronological column placeable in time.
-		ts = "from " + seg.enterAt.Format("15:04")
+		ts = "from " + seg.EnterAt.Format("15:04")
 	}
 	tail := mark + s.Faint.Render(ts)
 	fill := max(w-ansi.StringWidth(head)-ansi.StringWidth(ts)-4, 1)
@@ -1543,7 +1311,7 @@ func foldedReceiptLine(s *theme.Styles, seg stageSegment, spend map[domain.Stage
 // through rather than recomputed because the caller may already have
 // found the row from an earlier, unrelated loop (the "before this
 // session" one) and a later match here must never overwrite that one.
-func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []autopilotStretch, anchorFrom, anchorAt int, w int) ([]string, int) {
+func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []threadfold.Stretch, anchorFrom, anchorAt int, w int) ([]string, int) {
 	for _, st := range closes {
 		lines = append(lines, "")
 		// A period that also opened in this stage has had no rule drawn
@@ -1553,8 +1321,8 @@ func appendStretchCloses(s *theme.Styles, lines []string, opens, closes []autopi
 		// is worse than a period drawn without room inside it: the pair
 		// at least reads as one run that began and ended in this stage.
 		for _, op := range opens {
-			if op.from == st.from {
-				if op.from == anchorFrom && anchorAt < 0 {
+			if op.From == st.From {
+				if op.From == anchorFrom && anchorAt < 0 {
 					anchorAt = len(lines)
 				}
 				lines = append(lines, stretchOpenLine(s, st, w))
@@ -1603,13 +1371,13 @@ func (m *Shell) liveBusyLabel(snap engine.Snapshot, since time.Time) string {
 	return withElapsed(verb, m.now(), since)
 }
 
-func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegment, w int, answered map[string]bool, stretches, liveOpens, liveCloses []autopilotStretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
+func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []threadfold.Segment, w int, answered map[string]bool, stretches, liveOpens, liveCloses []threadfold.Stretch, anchorFrom int) (lines []string, anchorAt int, evAt []int) {
 	f := r.F
 	if sess := m.sessionFor(f.ID); sess != nil && !r.DrivenAbroad {
 		snap := sess.Snapshot()
 		at := time.Time{}
 		if len(segs) > 0 {
-			at = segs[len(segs)-1].enterAt
+			at = segs[len(segs)-1].EnterAt
 		}
 		// the rule names a context reset; the blank line under it is what
 		// makes it read as a boundary rather than a heading glued to the
@@ -1636,8 +1404,8 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// a position the way a still-running one would.
 		if len(segs) > 0 {
 			for _, st := range liveOpens {
-				if st.running() && st.from < segs[len(segs)-1].enterIdx {
-					if st.from == anchorFrom {
+				if st.Running() && st.From < segs[len(segs)-1].EnterIdx {
+					if st.From == anchorFrom {
 						anchorAt = len(lines)
 					}
 					lines = append(lines, stretchOpenLine(s, st, w), "")
@@ -1696,7 +1464,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		snap := m.follow.fl.Snapshot()
 		at := time.Time{}
 		if len(segs) > 0 {
-			at = segs[len(segs)-1].enterAt
+			at = segs[len(segs)-1].EnterAt
 		}
 		stage := snap.Feature.Stage
 		if stage == "" {
@@ -1719,7 +1487,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	}
 	last := segs[len(segs)-1]
 	anchorAt = -1
-	lines = []string{boundaryRule(s, string(last.stage), last.role, last.model, last.enterAt, w), ""}
+	lines = []string{boundaryRule(s, string(last.Stage), last.Role, last.Model, last.EnterAt, w), ""}
 	// pad fills evAt up to len(lines) with idx, so every append above can
 	// stay exactly as it was and the tagging happens as a single extra
 	// call afterwards instead of touching each one.
@@ -1739,10 +1507,10 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	// ordinary, and hoisting that rule to the top of the stage would put
 	// it above the turns you typed before you pressed it.
 	for _, st := range liveOpens {
-		if st.from >= last.enterIdx {
+		if st.From >= last.EnterIdx {
 			continue
 		}
-		if st.from == anchorFrom {
+		if st.From == anchorFrom {
 			anchorAt = len(lines)
 		}
 		lines = append(lines, stretchOpenLine(s, st, w), "")
@@ -1751,7 +1519,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// inline loop below can only close periods whose closing event is
 		// one of this stage's own, so without this its rule would have no
 		// end anywhere on the page.
-		if !st.running() && st.to < last.enterIdx {
+		if !st.Running() && st.To < last.EnterIdx {
 			lines = append(lines, stretchCloseLines(s, st, w)...)
 			lines = append(lines, "")
 		}
@@ -1762,8 +1530,8 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 	// without it the cap just hid history with no way back to it. The body
 	// region scrolls (pgup/pgdn, maxThreadScroll), so a long session is
 	// still reachable — it just does not require a second view to see.
-	for k, ev := range last.events {
-		idx := last.evIdx[k]
+	for k, ev := range last.Events {
+		idx := last.EvIdx[k]
 		// A period that ends inside this stage closes exactly where it
 		// ended, so everything after it — the turns you typed once the
 		// card was yours again — falls below the rule saying so. The
@@ -1771,8 +1539,8 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		// rule already carries its sentence, and printing both would say
 		// one ending twice.
 		for _, st := range liveOpens {
-			if st.from == idx {
-				if st.from == anchorFrom {
+			if st.From == idx {
+				if st.From == anchorFrom {
 					anchorAt = len(lines)
 				}
 				lines = append(lines, stretchOpenLine(s, st, w), "")
@@ -1781,7 +1549,7 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		pad(-1)
 		closed := false
 		for _, st := range stretches {
-			if st.running() || st.to != idx {
+			if st.Running() || st.To != idx {
 				continue
 			}
 			// The rules sit at column 0 like the session boundary above
@@ -1799,25 +1567,25 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 		if closed {
 			continue
 		}
-		if dl := stretchDecisionLine(s, ev, inStretch(stretches, idx), w-2); dl != "" {
+		if dl := stretchDecisionLine(s, ev, threadfold.InStretch(stretches, idx), w-2); dl != "" {
 			lines = append(lines, "  "+dl)
 			pad(idx)
 			continue
 		}
-		for _, l := range stageEventLines(s, ev, w, m.threadOutputs, last.role, answered) {
+		for _, l := range stageEventLines(s, ev, w, m.threadOutputs, last.Role, answered) {
 			lines = append(lines, "  "+l)
 		}
 		pad(idx)
 	}
 	// A period nothing in the log ever closed, closed instead by the
-	// render-time judgement — closeOrphaned, when the driver went away
+	// render-time judgement — threadfold.CloseOrphaned, when the driver went away
 	// without writing a thing — has no closing event to be placed
 	// against: its `to` is the end of the log, past every index the loop
 	// above walks. Its rule closes here, after everything this stage
 	// holds, or it is derived and never drawn at all and the page still
 	// says a machine has the card (BG-085).
 	for _, st := range stretches {
-		if st.running() || st.to < len(r.Events) {
+		if st.Running() || st.To < len(r.Events) {
 			continue
 		}
 		lines = append(lines, "")
@@ -2091,61 +1859,23 @@ func stageEventLines(s *theme.Styles, ev state.CardEvent, w int, showOutput bool
 	return append(lines, toolOutputLines(s, status, ev.Output, w, showOutput)...)
 }
 
-// answeredDecisions returns the set of decision ids this card's event
-// log has already answered: every GatePayload.ID and AskPayload.ID that
-// shows up on a gate or ask event anywhere in events. Those two fields
-// are the correlation EventDecisionOpen's own doc comment describes
-// (state/cardevents.go) — a decision_open row and the gate/ask row that
-// answers it share one id — so a decision whose id appears here has
-// collapsed into that answer's row per DESIGN §6.3, and stageEventLine's
-// EventDecisionOpen case uses this set to render nothing for it rather
-// than saying the same stop twice.
-//
-// Callers compute this once per render (threadRender) rather than once
-// per line: stageEventLine only ever sees the single event it is asked
-// to render, and a card's history can carry many decision_open rows, so
-// re-scanning the whole event log inside the per-line renderer would
-// redo the same work once per line for nothing.
-func answeredDecisions(events []state.CardEvent) map[string]bool {
-	answered := map[string]bool{}
-	for _, ev := range events {
-		var id string
-		switch ev.Kind {
-		case state.EventGate:
-			var p state.GatePayload
-			_ = json.Unmarshal([]byte(ev.Payload), &p)
-			id = p.ID
-		case state.EventAsk:
-			var p state.AskPayload
-			_ = json.Unmarshal([]byte(ev.Payload), &p)
-			id = p.ID
-		default:
-			continue
-		}
-		if id != "" {
-			answered[id] = true
-		}
-	}
-	return answered
-}
-
 // stageEventLine renders one logged card event as a single line, the
 // event-log counterpart to a live session's tool ticker (transcript.go's
 // transcriptLines).
 //
 // answered is the set of decision ids this card's log has already
-// answered (answeredDecisions, computed once per render in threadRender
+// answered (threadfold.AnsweredDecisions, computed once per render in threadRender
 // and threaded down through liveStageBlock/stageEventLines) — it is what
 // the EventDecisionOpen case below needs to tell an answered decision
 // from a superseded one.
 func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, answered map[string]bool) string {
 	switch ev.Kind {
 	case state.EventTool:
-		var p toolPayload
+		var p state.ToolPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		return eventMarker(s, ev.Status) + toolLineView(s, sanitize(p.Label), max(w-6, 8))
 	case state.EventMessage:
-		var p messagePayload
+		var p threadfold.MessagePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
 		// who said it decides the weight, the same way the live
 		// transcript does (transcript.go): rendering every logged turn at
@@ -2168,7 +1898,7 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// budget.
 		rows := strings.Split(wrapText(sanitize(p.Content), max(w-6, 8)), "\n")
 		out := make([]string, 0, len(rows)+1)
-		out = append(out, s.Faint.Render(messageAuthorLabel(p.Author, role)))
+		out = append(out, s.Faint.Render(threadfold.AuthorLabel(p.Author, role)))
 		for _, l := range rows {
 			out = append(out, "  "+body.Render(l))
 		}
@@ -2176,55 +1906,17 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 	case state.EventAsk:
 		var p state.AskPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		who := "you"
-		if p.Actor == state.ActorAutopilot {
-			who = "autopilot"
-		}
-		line := who + " answered"
-		if p.Question != "" {
-			line += " “" + sanitize(p.Question) + "”"
-		}
-		if p.Answer != "" {
-			line += " — " + sanitize(p.Answer)
-		}
-		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(threadfold.AskLine(p), max(w-2, 8), "…"))
 	case state.EventGate:
 		var p state.GatePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		who := "you"
-		if p.Actor != "" && p.Actor != state.ActorUser {
-			who = p.Actor
-		}
-		line := who + " advanced"
-		if p.From != "" || p.To != "" {
-			line += " " + p.From + " → " + p.To
-		}
-		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+		return s.Success.Render("✓ ") + s.Subtle.Render(ansi.Truncate(threadfold.GateLine(p), max(w-2, 8), "…"))
 	case state.EventPark:
 		var p state.ParkPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		// Detail is kept verbatim (ParkPayload's own doc comment,
-		// state/cardevents.go) precisely so history explains itself
-		// without the reader reconstructing it from the reason code, so it
-		// wins whenever a row has one. Only an old row, written before
-		// ParkPayload carried Detail at all, falls back to a sentence
-		// derived from Reason — the same three-way split QuitStopped
-		// already treats ParkReasonQuit as load-bearing and everything
-		// else as "a human should look at this," here spelled out as
-		// prose instead of a boolean.
-		sentence := p.Detail
-		if sentence == "" {
-			switch p.Reason {
-			case state.ParkReasonQuit:
-				sentence = "the board quit"
-			case state.ParkReasonGaveUp:
-				sentence = "it gave up"
-			default: // ParkReasonNeedsYou, and any reason not yet named
-				sentence = "it needs you"
-			}
-		}
-		line := "parked — " + sanitize(sentence)
-		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+		// the sentence, and why Detail wins over the reason code, is
+		// threadfold.ParkLine's.
+		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(threadfold.ParkLine(p), max(w-2, 8), "…"))
 	case state.EventDecisionOpen:
 		var p state.DecisionPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
@@ -2245,8 +1937,7 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// The pinned open-decision control only ever shows the *current*
 		// decision, so without this line a superseded-but-unanswered
 		// decision would have no trace anywhere in the card's history.
-		line := sanitize(p.Question) + " — unanswered, superseded"
-		return s.Faint.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+		return s.Faint.Render(ansi.Truncate(threadfold.SupersededLine(p), max(w-2, 8), "…"))
 	case state.EventAutopilot:
 		var p state.AutopilotPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
@@ -2265,26 +1956,9 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		// every SetGateApproval mode change, human or driver, gets a row
 		// here regardless of whether the card is under autopilot at all —
 		// this is not a boundary crossing, just the stored mode changing to
-		// p.Mode, and it renders as exactly that one fact.
-		//
-		// Normalized, then labelled. The event log is history: a row
-		// written before the three modes collapsed carries a retired
-		// spelling ("full", "gates", "caller"), and labelling that
-		// directly would render an old handover as "off" — the exact
-		// opposite of what happened. NormalizeGateApproval is the one
-		// place those spellings resolve, so the past reads correctly for
-		// the same reason a stored row does.
-		//
-		// Labelling at all, rather than printing p.Mode raw: the empty
-		// string is a legal stored mode (domain.ValidGateApproval accepts
-		// it), and printing it would leave the row trailing off after
-		// "set to" as though the value had gone missing.
-		mode := p.Mode
-		if canonical, ok := domain.NormalizeGateApproval(mode); ok {
-			mode = canonical
-		}
-		line := "autopilot set to " + sanitize(autopilotLabel(mode))
-		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(line, max(w-2, 8), "…"))
+		// p.Mode, and it renders as exactly that one fact (threadfold.ModeLine
+		// says how an old spelling reads).
+		return eventMarker(s, "") + s.Subtle.Render(ansi.Truncate(threadfold.ModeLine(p), max(w-2, 8), "…"))
 	case state.EventGoal:
 		// A goal's log — every landing, drop, raise, decision and lead
 		// turn — is written as card_events rows on the goal card itself
@@ -2297,47 +1971,10 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || p.Action == "" {
 			return s.Faint.Render(ev.Kind)
 		}
-		return eventMarker(s, ev.Status) + s.Subtle.Render(ansi.Truncate(goalEventSentence(p), max(w-2, 8), "…"))
+		return eventMarker(s, ev.Status) + s.Subtle.Render(ansi.Truncate(threadfold.GoalSentence(p), max(w-2, 8), "…"))
 	default:
 		return s.Faint.Render(ev.Kind)
 	}
-}
-
-// goalEventSentence says one goal log entry in a line, in the vocabulary
-// the goal page's own log already prints (goalpage.go): the action, the
-// card it is about, the decision number when it has one, and the detail
-// that explains it. Two surfaces naming the same entry two ways would be
-// two things to learn, so the wording is shared rather than re-invented
-// for the thread.
-//
-// The checks entry is the one exception it makes: its Detail is the
-// verify stage's check results as JSON, which is for the goal page to
-// unpack, not for a line of prose.
-func goalEventSentence(p state.GoalPayload) string {
-	line := p.Action
-	if p.Card != "" {
-		line += " " + string(p.Card)
-	}
-	if p.Item != "" {
-		line += " " + p.Item
-	}
-	if p.N > 0 {
-		line += " " + (state.GoalEntry{GoalPayload: p}).DecisionRef()
-	}
-	// An amount pair is the whole fact of a raise or a re-estimated
-	// reserve, and the Detail beside it carries the reason rather than
-	// the numbers. Both ends have to be there to say "from x to y": an
-	// entry with only To (a goal stopped on a card it cannot fund) is
-	// naming what is needed, not a move, and "0 → 1500" would read as a
-	// card that had been given nothing.
-	if p.From > 0 && p.To > 0 {
-		line += " " + itoa(p.From) + " → " + itoa(p.To)
-	}
-	if p.Detail != "" && p.Action != state.GoalChecks {
-		first, _, _ := strings.Cut(p.Detail, "\n")
-		line += " — " + first
-	}
-	return sanitize(line)
 }
 
 // eventMarker is toolMarker's (transcript.go) counterpart for a logged
@@ -2353,40 +1990,6 @@ func eventMarker(s *theme.Styles, status string) string {
 	}
 }
 
-// stageSpendByStage rolls the per-stage/model spend rows up to one total
-// per stage, the shape a folded receipt line needs. stage_spend is the
-// meter of record for credits; the event log only carries a copy.
-func stageSpendByStage(rows []state.StageSpend) map[domain.Stage]float64 {
-	if len(rows) == 0 {
-		return nil
-	}
-	out := make(map[domain.Stage]float64, len(rows))
-	for _, r := range rows {
-		out[r.Stage] += r.Credits
-	}
-	return out
-}
-
-// messageAuthorLabel names a logged turn's author the way the live pane
-// labels the same turn: the user by name, gummi's own kickoffs as gummi,
-// and the agent by whichever role was speaking.
-func messageAuthorLabel(author, role string) string {
-	switch author {
-	case string(engine.AuthorUser):
-		return "you"
-	case string(engine.AuthorSystem):
-		return "gummi"
-	default:
-		if role != "" {
-			return role
-		}
-		if author == "" {
-			return "agent"
-		}
-		return author
-	}
-}
-
 // segItem is one thing drawn under a folded stage's receipt, tagged with
 // the event index that produced it so the whole group can be put back
 // into log order. A period's opening rule carries the period itself
@@ -2395,51 +1998,8 @@ func messageAuthorLabel(author, role string) string {
 type segItem struct {
 	at     int
 	lines  []string
-	open   autopilotStretch
+	open   threadfold.Stretch
 	isOpen bool
-}
-
-// remainderFor returns the spend a segment may claim as its own when its
-// own receipt carries none: the stage's total less what its other
-// segments accounted for, and only when this is the single segment of
-// that stage without a figure. With two such segments there is no honest
-// way to split the remainder between them, so neither takes it — a wrong
-// attribution is worse than a missing one on a page a person reads to
-// answer "what did this cost me, and on what".
-func remainderFor(seg stageSegment, unclaimed map[domain.Stage]float64, unknown map[domain.Stage]int) float64 {
-	if seg.credits > 0 || unknown[seg.stage] != 1 {
-		return 0
-	}
-	if r := unclaimed[seg.stage]; r > 0 {
-		return r
-	}
-	return 0
-}
-
-// sessionlessSpend groups the stage_spend rows whose role never ran as a
-// session of that stage — the one-shot passes (check discovery and its
-// baseline, on the scribe) and the backend's own side-model spend (the
-// helper role). Both are booked against the card and neither folds to a
-// receipt, so without this they are money the page cannot explain.
-func sessionlessSpend(rows []state.StageSpend, segs []stageSegment) map[domain.Stage][]state.StageSpend {
-	if len(rows) == 0 {
-		return nil
-	}
-	ran := map[domain.Stage]map[string]bool{}
-	for _, seg := range segs {
-		if ran[seg.stage] == nil {
-			ran[seg.stage] = map[string]bool{}
-		}
-		ran[seg.stage][seg.role] = true
-	}
-	out := map[domain.Stage][]state.StageSpend{}
-	for _, r := range rows {
-		if r.Credits <= 0 || ran[r.Stage][r.Role] {
-			continue
-		}
-		out[r.Stage] = append(out[r.Stage], r)
-	}
-	return out
 }
 
 // sessionlessReceiptLine draws one of those rows the way a folded session

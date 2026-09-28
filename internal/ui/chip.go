@@ -7,6 +7,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/reentry"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/workflow"
 )
@@ -300,7 +301,7 @@ func spendStage(out reentry.Outcome) domain.Stage {
 // on this card, and what is left — the two numbers a reader weighs
 // before pressing y.
 func lastRunCost(r featureRow, stage domain.Stage) string {
-	spend := stageSpendByStage(r.StageSpend)
+	spend := threadfold.SpendByStage(r.StageSpend)
 	cost := spend[stage]
 	var b strings.Builder
 	if cost > 0 {

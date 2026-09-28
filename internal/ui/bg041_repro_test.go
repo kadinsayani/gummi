@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 )
 
 // BG-041 repro: a multi-line message must not lose trailing lines when
@@ -16,7 +17,7 @@ import (
 func TestBG041ReproMultiLineMessageDropped(t *testing.T) {
 	s := m0Styles()
 	answered := map[string]bool{}
-	payload, _ := json.Marshal(messagePayload{
+	payload, _ := json.Marshal(threadfold.MessagePayload{
 		Author:  "reviewer",
 		Content: "Repo checks clean; verification plan satisfied.\n\nVERDICT: pass",
 	})

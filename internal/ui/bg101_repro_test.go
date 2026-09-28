@@ -10,6 +10,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -94,7 +95,7 @@ func TestBG101NoTakeoverWithNothingRunning(t *testing.T) {
 
 	// and the page draws no period at all, which is the half a log-level
 	// assertion cannot see
-	stretches := liveStretches(f, events, ws)
+	stretches := threadfold.LiveStretches(f, events, ws)
 	if len(stretches) != 0 {
 		t.Fatalf("the thread would draw %d period(s) on a card that sat still: %+v", len(stretches), stretches)
 	}
