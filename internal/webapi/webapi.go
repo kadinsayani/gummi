@@ -51,6 +51,12 @@ const (
 	// its proposals, a review edit, its approval. Refetch
 	// GET /api/ingest/{run}.
 	ChangeIngest ChangeKind = "ingest"
+	// ChangePairing: a device asked to be let in, or was let in, turned
+	// away or unpaired while it waited (ID is the device). A page at the
+	// board refetches GET /api/devices/pending; the page of the device it
+	// names refetches GET /api/session. It is the one event a device still
+	// waiting is sent, and only about itself.
+	ChangePairing ChangeKind = "pairing"
 )
 
 // EventResync is the event a reconnecting page gets instead of the events
@@ -84,7 +90,7 @@ type Change struct {
 // Toasts never coalesce with each other, since each says something.
 func (c Change) Key() string {
 	switch c.Kind {
-	case ChangeCard, ChangeLive, ChangeIngest:
+	case ChangeCard, ChangeLive, ChangeIngest, ChangePairing:
 		return string(c.Kind) + ":" + c.ID
 	case ChangeToast:
 		return ""
@@ -101,6 +107,10 @@ type Error struct {
 	// Remaining is how many guesses a live pairing code survives (403 on
 	// POST /api/pair).
 	Remaining *int `json:"remaining,omitempty"`
+	// Approval is ApprovalPending on the 403 every route but the session,
+	// the event stream and unpairing answers a device still waiting to be
+	// let in.
+	Approval string `json:"approval,omitempty"`
 	// By names who got there first, on a 409 "answered" or "moved".
 	By string `json:"by,omitempty"`
 	// Receipt is the line the thread shows for the answer that won.

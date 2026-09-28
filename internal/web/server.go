@@ -135,6 +135,16 @@ func New(o Options) (*Server, error) {
 		hosts:   map[string]struct{}{},
 	}
 	s.AllowHosts(o.Hosts...)
+	if !o.OpenAccess {
+		// The devices file is the operator's, and so writable by whatever
+		// runs as the operator: from here on the server honours a device
+		// only as it knows it (Devices.Pin), so a row written in behind
+		// its back is not a way past being let in.
+		o.Devices.Pin(func(d Device) {
+			o.Log("web: devices.json gained %s on %s (%s), which this server did not pair; it is not honoured — "+
+				"`gummi web unpair %s` removes it", d.Person, d.Name, d.ID, d.ID)
+		})
+	}
 	if o.Push != nil && !o.OpenAccess {
 		// A subscription outlives nothing its device does not: a device
 		// unpaired while this server was down (or by an older gummi) is

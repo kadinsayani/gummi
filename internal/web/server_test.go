@@ -712,15 +712,16 @@ func TestTooManyWrongGuessesLockPairing(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("the operator's code from a locked-out address = %d %v", res.StatusCode, body)
 	}
+	if body["pending"] != true {
+		t.Errorf("a second device paired with `gummi web pair`'s code = %v, want it waiting to be let in", body)
+	}
 	if !h.logged("via the local CLI") {
 		t.Errorf("the pairing was not logged with where its code came from: %v", h.log)
 	}
-	// and the device already on the board hears of it
-	for {
-		ev := events.until(string(webapi.ChangeToast))
-		if strings.Contains(ev.data, "new device paired: Ana") && strings.Contains(ev.data, "local CLI") {
-			return
-		}
+	// and the device already on the board hears of it, as a request
+	ev := events.until(string(webapi.ChangePairing))
+	if !strings.Contains(ev.data, fmt.Sprint(body["deviceId"])) {
+		t.Errorf("pairing event = %s, want it about %v", ev.data, body["deviceId"])
 	}
 }
 

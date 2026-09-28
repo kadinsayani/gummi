@@ -16,10 +16,16 @@ const cookieName = "gummi_web"
 // Who is the person behind a request: the paired device's person and the
 // device itself. Every write records Person as the actor where the board
 // takes one.
+//
+// Pending is a device paired but still waiting to be let in (approval.go):
+// it reaches only the routes registered with s.waiting. Status is where
+// the device stands, also for one identify refused (turned away, lapsed).
 type Who struct {
 	Person   string
 	Device   string
 	DeviceID string
+	Pending  bool
+	Status   string
 }
 
 // openWho is the synthetic viewer of a --no-pairing board.
@@ -43,7 +49,9 @@ func (s *Server) who(r *http.Request) (Who, bool) {
 }
 
 // identify is who, also reporting the token to renew the cookie with when
-// the device's last-seen just slid forward (empty otherwise).
+// the device's last-seen just slid forward (empty otherwise). A device
+// waiting to be let in is identified, with Pending set; one whose wait
+// ended without it is not, and comes back with its id and Status only.
 func (s *Server) identify(r *http.Request) (_ Who, _ bool, renew string) {
 	if s.opt.OpenAccess {
 		return openWho, true, ""
@@ -57,7 +65,7 @@ func (s *Server) identify(r *http.Request) (_ Who, _ bool, renew string) {
 	// is no key to this board by another name or port
 	dev, ok, touched := s.opt.Devices.VerifyAt(c.Value, requestOrigin(r))
 	if !ok {
-		return Who{}, false, ""
+		return Who{DeviceID: dev.ID, Status: dev.Status}, false, ""
 	}
 	if touched {
 		renew = c.Value
@@ -67,7 +75,7 @@ func (s *Server) identify(r *http.Request) (_ Who, _ bool, renew string) {
 		// a device paired before pairing asked for a name
 		person = dev.Name
 	}
-	return Who{Person: person, Device: dev.Name, DeviceID: dev.ID}, true, renew
+	return Who{Person: person, Device: dev.Name, DeviceID: dev.ID, Pending: dev.Status == StatusPending, Status: dev.Status}, true, renew
 }
 
 // setDeviceCookie sets (or, with an empty token, clears) the device
@@ -90,13 +98,22 @@ func (s *Server) setDeviceCookie(w http.ResponseWriter, r *http.Request, token s
 	})
 }
 
+// errAwaitingApproval is what every route but the few a waiting device may
+// reach answers it.
+const errAwaitingApproval = "waiting for approval on a paired device"
+
 // authed wraps a handler so it runs only for a paired device, with the
-// person on the request's context.
-func (s *Server) authed(h http.HandlerFunc) http.Handler {
+// person on the request's context. A device still waiting to be let in is
+// refused 403 unless waitingOK.
+func (s *Server) authed(h http.HandlerFunc, waitingOK bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		who, ok, renew := s.identify(r)
 		if !ok {
 			writeError(w, http.StatusUnauthorized, "this browser is not paired with the board")
+			return
+		}
+		if who.Pending && !waitingOK {
+			writeJSON(w, http.StatusForbidden, webapi.Error{Error: errAwaitingApproval, Approval: webapi.ApprovalPending})
 			return
 		}
 		if renew != "" {
@@ -106,8 +123,15 @@ func (s *Server) authed(h http.HandlerFunc) http.Handler {
 	})
 }
 
-// api registers an authenticated route.
-func (s *Server) api(pattern string, h http.HandlerFunc) { s.mux.Handle(pattern, s.authed(h)) }
+// api registers an authenticated route: a device with the board only.
+func (s *Server) api(pattern string, h http.HandlerFunc) { s.mux.Handle(pattern, s.authed(h, false)) }
+
+// waiting registers an authenticated route a device still waiting to be
+// let in may reach too: its event stream, which tells it only about
+// itself, and unpairing, which withdraws its request. Nothing else.
+func (s *Server) waiting(pattern string, h http.HandlerFunc) {
+	s.mux.Handle(pattern, s.authed(h, true))
+}
 
 // public registers a route that answers without a cookie.
 func (s *Server) public(pattern string, h http.HandlerFunc) { s.mux.HandleFunc(pattern, h) }

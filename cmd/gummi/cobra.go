@@ -343,7 +343,7 @@ var webPairCmd = &cobra.Command{
 
 var webDevicesCmd = &cobra.Command{
 	Use:   "devices [--json]",
-	Short: "List the browsers paired with this board",
+	Short: "List the browsers paired with this board, and any waiting to be let in",
 	RunE: func(cmd *cobra.Command, _ []string) error {
 		return runWebDevices(cmdFlags(cmd))
 	},
@@ -351,7 +351,7 @@ var webDevicesCmd = &cobra.Command{
 
 var webUnpairCmd = &cobra.Command{
 	Use:   "unpair <id> | --all",
-	Short: "Revoke a paired browser",
+	Short: "Revoke a paired browser, or withdraw one waiting to be let in",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return runWebUnpair(cmdFlags(cmd), args)
 	},

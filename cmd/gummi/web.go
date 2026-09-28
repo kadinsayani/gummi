@@ -416,6 +416,13 @@ func doctorForWeb(r doctorReport) webapi.Doctor {
 
 // announce prints what an operator needs: where the board is, and how to
 // get a browser onto it.
+//
+// The code printed here goes to this terminal and nowhere else — not to
+// server.json, not to any file under .gummi — which is why a device
+// paired with it is let in without asking a paired one (internal/web's
+// approval.go). Keep it that way: a code that crosses a file an agent
+// can read is a code an agent can redeem. (If this terminal's output is
+// itself sent to a file, that file carries the code.)
 func announce(logf func(string, ...any), url string, open bool, devices *web.Devices, pairing *web.Pairing) {
 	fmt.Printf("gummi web: serving %s\n", url)
 	switch {
@@ -430,7 +437,7 @@ func announce(logf func(string, ...any), url string, open bool, devices *web.Dev
 		logf("web: pairing code %s — enter it in the browser (good for %s)", code, time.Until(expires).Round(time.Second))
 	default:
 		n := devices.Count()
-		logf("web: %d paired device%s; `gummi web pair` prints a code for a new one", n, cardPlural(n))
+		logf("web: %d paired device%s; `gummi web pair` prints a code for a new one, which a paired device then lets in", n, cardPlural(n))
 	}
 }
 
@@ -522,9 +529,16 @@ func runWebPair(fl cliFlags) error {
 		}
 		if name != "" {
 			fmt.Printf("pairing code %s — pairs a browser as %s (good for %ds)\n", code.Code, name, code.ExpiresInSecs)
-			return nil
+		} else {
+			fmt.Printf("pairing code %s — enter it in the browser (good for %ds)\n", code.Code, code.ExpiresInSecs)
 		}
-		fmt.Printf("pairing code %s — enter it in the browser (good for %ds)\n", code.Code, code.ExpiresInSecs)
+		if devices, err := web.OpenDevices(filepath.Join(ws.WebDir(), devicesFile), nil); err == nil && devices.Count() > 0 {
+			// Said here so nobody waits on the phone wondering: a code
+			// from this command pairs a browser that a paired one must
+			// then let in (DESIGN §20.3) — and there is deliberately no
+			// command that does that instead.
+			fmt.Println("the browser then waits until you approve it on a device already paired with this board")
+		}
 		return nil
 	})
 }
@@ -585,9 +599,16 @@ func runWebDevices(fl cliFlags) error {
 			fmt.Println("no paired devices — `gummi web` prints a code for the first one")
 			return nil
 		}
+		waiting := false
 		for _, d := range list {
-			fmt.Printf("%s  %-14s %-18s paired %s%s, last seen %s%s\n",
-				d.ID, d.Person, d.Name, d.PairedAt.Format("2006-01-02"), deviceVia(d), humanSince(d.LastSeen), deviceAt(d))
+			if d.Status == web.StatusPending {
+				waiting = true
+			}
+			fmt.Printf("%s  %-14s %-18s paired %s%s, %s%s\n",
+				d.ID, d.Person, d.Name, d.PairedAt.Format("2006-01-02"), deviceVia(d), deviceStanding(d), deviceAt(d))
+		}
+		if waiting {
+			fmt.Println("a waiting device is let in or turned away from the page on a paired device; `gummi web unpair <id>` withdraws it")
 		}
 		return nil
 	})
@@ -673,6 +694,32 @@ func deviceVia(d web.Device) string {
 		return ""
 	}
 	return " " + web.CodeOrigin(d.Via).Via()
+}
+
+// deviceStanding says where a device stands: when it was last seen, or
+// that it waits to be let in, or how its wait ended.
+func deviceStanding(d web.Device) string {
+	from := ""
+	if d.Source != "" {
+		from = " from " + d.Source
+	}
+	by := ""
+	if d.DecidedBy != "" {
+		by = " by " + d.DecidedBy
+	}
+	switch d.Status {
+	case web.StatusPending:
+		return "WAITING to be let in" + from + " (asked " + humanSince(d.PairedAt) + ")"
+	case web.StatusRejected:
+		return "turned away" + by + " " + humanSince(d.DecidedAt)
+	case web.StatusExpired:
+		return "not let in: nobody answered" + from
+	case web.StatusApproved:
+		if by != "" {
+			return "let in" + by + ", last seen " + humanSince(d.LastSeen)
+		}
+	}
+	return "last seen " + humanSince(d.LastSeen)
 }
 
 // deviceAt names where a device's token is honoured, when it is bound.

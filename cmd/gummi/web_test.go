@@ -181,3 +181,50 @@ func TestLoopbackOnly(t *testing.T) {
 		t.Error("127.0.0.1 is not loopback?")
 	}
 }
+
+// `gummi web devices` shows a device waiting to be let in, and says how it
+// is answered: from a paired page, not from here.
+func TestWebDevicesShowsWaitingDevices(t *testing.T) {
+	root := boardRepo(t)
+	ws, err := ensureWorkspace(root, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	devices, err := web.OpenDevices(filepath.Join(ws.WebDir(), devicesFile), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := devices.Request("Simon", "Mac", web.Arrival{Via: web.OriginTerminal}); err != nil {
+		t.Fatal(err)
+	}
+	_, dev, err := devices.Request("Ana", "iPhone", web.Arrival{Via: web.OriginCLI, Source: "100.64.0.9"})
+	if err != nil || dev.Status != web.StatusPending {
+		t.Fatalf("second device = %+v %v, want it waiting", dev, err)
+	}
+	out := captureStdout(t, func() { mustCLI(t, "web", "devices") })
+	for _, want := range []string{dev.ID, "WAITING to be let in from 100.64.0.9", "from the page on a paired device"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("devices = %q, want %q", out, want)
+		}
+	}
+	var list []web.Device
+	out = captureStdout(t, func() { mustCLI(t, "web", "devices", "--json") })
+	if err := json.Unmarshal([]byte(out), &list); err != nil || len(list) != 2 || list[1].Status != web.StatusPending {
+		t.Errorf("devices --json = %q (%v)", out, err)
+	}
+	captureStdout(t, func() { mustCLI(t, "web", "unpair", dev.ID) })
+	if len(devices.Pending()) != 0 {
+		t.Error("unpair did not withdraw the waiting device")
+	}
+}
+
+// Letting a device in is done from a paired page only. A command for it
+// would be run as easily by an agent as by the operator — the very hole
+// waiting closes — so there is none.
+func TestNoCommandLetsADeviceIn(t *testing.T) {
+	for _, c := range webCmd.Commands() {
+		if name := c.Name(); name == "approve" || name == "reject" || name == "allow" {
+			t.Errorf("`gummi web %s` exists; approval must stay on a paired page", name)
+		}
+	}
+}

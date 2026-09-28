@@ -49,10 +49,13 @@ const (
 )
 
 // sseEvent is one event as sent: its id, its name, and its JSON data.
+// about is the change's ID, for the one filter the stream applies (a
+// device waiting to be let in hears only about itself).
 type sseEvent struct {
-	id   uint64
-	name string
-	data []byte
+	id    uint64
+	name  string
+	data  []byte
+	about string
 }
 
 // client is one connected page.
@@ -143,7 +146,7 @@ func (h *hub) emitLocked(c webapi.Change) {
 		return
 	}
 	h.next++
-	ev := sseEvent{id: h.next, name: string(c.Kind), data: data}
+	ev := sseEvent{id: h.next, name: string(c.Kind), data: data, about: c.ID}
 	h.ring = append(h.ring, ev)
 	if len(h.ring) > ringSize {
 		h.ring = append(h.ring[:0:0], h.ring[len(h.ring)-ringSize:]...)
@@ -249,6 +252,9 @@ func (h *hub) viewers() []webapi.Viewer {
 func (h *hub) viewersLocked() []webapi.Viewer {
 	byDevice := map[string]webapi.Viewer{}
 	for cl := range h.clients {
+		if cl.who.Pending {
+			continue // not at the board yet
+		}
 		v := cl.who.viewer()
 		v.Since = cl.since
 		if have, ok := byDevice[v.DeviceID]; !ok || v.Since.Before(have.Since) {
@@ -306,7 +312,12 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		}
 		return rc.Flush() == nil
 	}
+	// A device waiting to be let in is sent nothing about the board: only
+	// the pairing events about itself, which tell its page to look again.
 	send := func(ev sseEvent) bool {
+		if who.Pending && (ev.name != string(webapi.ChangePairing) || ev.about != who.DeviceID) {
+			return true
+		}
 		return write("id: %d\nevent: %s\ndata: %s\n\n", ev.id, ev.name, ev.data)
 	}
 
@@ -339,6 +350,20 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	revoke := time.NewTicker(min(beat, revokeCheck))
 	defer revoke.Stop()
 	paired := func() bool { return s.opt.OpenAccess || s.opt.Devices.Has(who.DeviceID) }
+	if who.Pending {
+		// A waiting device's stream lasts while it waits. Once it is let
+		// in, turned away, withdrawn or lapsed, its page is told to look
+		// again and the stream ends: a device let in reconnects as one at
+		// the board, and one turned away has nothing to hear.
+		paired = func() bool {
+			if st, ok := s.opt.Devices.StatusOf(who.DeviceID); ok && st == StatusPending {
+				return true
+			}
+			data, _ := json.Marshal(webapi.Change{Kind: webapi.ChangePairing, ID: who.DeviceID})
+			write("event: %s\ndata: %s\n\n", webapi.ChangePairing, data)
+			return false
+		}
+	}
 	for {
 		select {
 		case ev := <-cl.ch:

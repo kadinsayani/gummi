@@ -33,6 +33,10 @@ import (
 // and by gummi as a SHA-256 hash. Hashing is the difference between a
 // leaked devices.json being an inconvenience and being a key — gummi
 // never needs the token back, only the ability to recognize it.
+//
+// Once a device has the board, those two steps pair a new browser but do
+// not yet let it in: unless it used the code printed at start, it waits
+// until a person on a paired device approves it (approval.go).
 const (
 	// codeTTL is how long a minted pairing code stays redeemable.
 	codeTTL = 3 * time.Minute
@@ -346,6 +350,17 @@ func (p *Pairing) Live() bool {
 	return p.liveLocked() && (p.origin != OriginBrowser || !p.public.locked(p.now()))
 }
 
+// LiveOrigin reports who minted the live code, empty when no code is
+// live.
+func (p *Pairing) LiveOrigin() CodeOrigin {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if !p.liveLocked() {
+		return ""
+	}
+	return p.origin
+}
+
 // LiveFor reports the person the live code was minted for, empty when it
 // was minted for nobody in particular or no code is live.
 func (p *Pairing) LiveFor() string {
@@ -441,6 +456,13 @@ func (p *Pairing) RedeemFrom(source, guess string) (Redeemed, error) {
 // reach another server on this machine; bound to its origin, it is no key
 // to this board through any other name or port. Via says how it paired
 // (CodeOrigin.Via), for `gummi web devices`.
+//
+// Status is where the device stands with the board (approval.go): empty
+// for a device that has the board, StatusPending while it waits for a
+// paired device to let it in, and StatusRejected or StatusExpired once
+// that wait ended without it. Source and UserAgent are what the request
+// to be let in showed the people asked; DecidedAt and DecidedBy record
+// who answered it.
 type Device struct {
 	ID          string    `json:"id"`
 	Person      string    `json:"person"`
@@ -450,6 +472,11 @@ type Device struct {
 	LastSeen    time.Time `json:"last_seen"`
 	Origin      string    `json:"origin,omitempty"`
 	Via         string    `json:"via,omitempty"`
+	Status      string    `json:"status,omitempty"`
+	Source      string    `json:"source,omitempty"`
+	UserAgent   string    `json:"user_agent,omitempty"`
+	DecidedAt   time.Time `json:"decided_at,omitzero"`
+	DecidedBy   string    `json:"decided_by,omitempty"`
 }
 
 // devicesFile is the on-disk shape. Version exists so a later format can
@@ -478,6 +505,18 @@ type Devices struct {
 	// unpair from another terminal) is noticed and a self-write is not
 	// re-read for nothing.
 	stamp fileStamp
+
+	// The running server's own memory of each device (Pin): nil until
+	// pinned, then the status this process last gave each token hash. A
+	// row the file gained behind the server's back is not honoured, and a
+	// status the file claims is never kinder than the one remembered
+	// (approval.go).
+	known    map[string]string
+	warned   map[string]bool
+	onForged func(Device)
+	// asked are the times this process let a device ask to be let in,
+	// for the limit on how often that may happen (approval.go).
+	asked []time.Time
 }
 
 type fileStamp struct {
@@ -531,8 +570,12 @@ func (d *Devices) loadLocked() error {
 
 // refreshLocked re-reads the file when it changed underneath us. A stat
 // error (including a file somebody deleted) collapses to "no devices",
-// which is the safe direction: a missing store pairs nobody in.
+// which is the safe direction: a missing store pairs nobody in. Every
+// method starts here, so it is also where lapsed requests are written
+// down and old answers dropped (sweepLocked) — in memory, for the next
+// save to carry, and before any method holds an index into the rows.
 func (d *Devices) refreshLocked() {
+	defer func() { d.sweepLocked(d.now()) }()
 	st, err := statStamp(d.path)
 	if errors.Is(err, os.ErrNotExist) {
 		d.devices, d.stamp = nil, fileStamp{}
@@ -566,37 +609,59 @@ func (d *Devices) Pair(person, name string) (token string, dev Device, err error
 }
 
 // PairAt is Pair for a device bound to origin (see Device), paired via
-// the code origin named.
+// the code origin named. The device has the board at once: the server's
+// own pairings go through Request, which decides that.
 func (d *Devices) PairAt(person, name, origin string, via CodeOrigin) (token string, dev Device, err error) {
+	token, dev, err = d.mint(person, name, Arrival{Origin: origin, Via: via})
+	if err != nil {
+		return "", Device{}, err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.refreshLocked()
+	if err := d.addLocked(dev); err != nil {
+		return "", Device{}, err
+	}
+	return token, dev, nil
+}
+
+// mint makes a device and its token, stored nowhere yet.
+func (d *Devices) mint(person, name string, in Arrival) (string, Device, error) {
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {
 		return "", Device{}, fmt.Errorf("generating a device token: %w", err)
 	}
-	token = base64.RawURLEncoding.EncodeToString(raw)
+	token := base64.RawURLEncoding.EncodeToString(raw)
 	id := make([]byte, 4)
 	if _, err := rand.Read(id); err != nil {
 		return "", Device{}, fmt.Errorf("generating a device id: %w", err)
 	}
 	now := d.now()
-	dev = Device{
+	return token, Device{
 		ID:          hex.EncodeToString(id),
 		Person:      person,
 		Name:        name,
 		TokenSHA256: hashToken(token),
 		PairedAt:    now,
 		LastSeen:    now,
-		Origin:      origin,
-		Via:         string(via),
-	}
+		Origin:      in.Origin,
+		Via:         string(in.Via),
+		Source:      in.Source,
+		UserAgent:   clip(in.UserAgent, maxUserAgent),
+	}, nil
+}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.refreshLocked()
+// addLocked stores dev, remembering its status when the store is pinned.
+func (d *Devices) addLocked(dev Device) error {
 	d.devices = append(d.devices, dev)
-	if err := d.saveLocked(); err != nil {
-		return "", Device{}, err
+	if d.known != nil {
+		d.known[dev.TokenSHA256] = dev.Status
 	}
-	return token, dev, nil
+	if err := d.saveLocked(); err != nil {
+		d.devices = d.devices[:len(d.devices)-1]
+		return err
+	}
+	return nil
 }
 
 // Verify recognizes a token, expiring devices unseen for deviceTTL. It
@@ -620,6 +685,12 @@ func (d *Devices) VerifyTouch(token string) (dev Device, ok, touched bool) {
 // origin is not recognized. A device paired before devices were bound is
 // bound to the first origin it is presented at. An empty origin checks
 // nothing.
+//
+// ok is true for a device that has the board and for one still waiting to
+// be let in; the returned device's Status says which (approval.go). A
+// device whose wait ended without it comes back with its Status and ok
+// false, so the page can say what happened; one the store does not honour
+// at all comes back empty.
 func (d *Devices) VerifyAt(token, origin string) (dev Device, ok, touched bool) {
 	if token == "" {
 		return Device{}, false, false
@@ -650,19 +721,31 @@ func (d *Devices) VerifyAt(token, origin string) (dev Device, ok, touched bool) 
 			_ = d.saveLocked()
 			return Device{}, false, false
 		}
+		switch st := d.statusLocked(d.devices[i], now); st {
+		case StatusApproved, StatusPending:
+		case statusForged:
+			return Device{}, false, false
+		default:
+			out := d.devices[i]
+			out.Status = st
+			return out, false, false
+		}
 		if now.Sub(d.devices[i].LastSeen) >= lastSeenResolution {
 			d.devices[i].LastSeen = now
 			_ = d.saveLocked()
 			touched = true
 		}
-		return d.devices[i], true, touched
+		out := d.devices[i]
+		out.Status = d.statusLocked(out, now)
+		return out, true, touched
 	}
 	return Device{}, false, false
 }
 
-// Has reports whether device id is still paired (and not expired). An open
-// event stream asks on every heartbeat, so a device unpaired from another
-// terminal stops hearing about the board.
+// Has reports whether device id has the board: paired, let in, and not
+// expired. An open event stream asks on every heartbeat, so a device
+// unpaired from another terminal stops hearing about the board; a device
+// still waiting to be let in does not have it, and is sent nothing.
 func (d *Devices) Has(id string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -670,18 +753,24 @@ func (d *Devices) Has(id string) bool {
 	now := d.now()
 	for _, dev := range d.devices {
 		if dev.ID == id {
-			return now.Sub(dev.LastSeen) <= deviceTTL
+			return now.Sub(dev.LastSeen) <= deviceTTL && d.statusLocked(dev, now) == StatusApproved
 		}
 	}
 	return false
 }
 
-// List returns the paired devices, newest pairing last.
+// List returns every device the store holds — waiting, turned away and
+// expired ones too, each with the Status that applies now — newest
+// pairing last.
 func (d *Devices) List() []Device {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.refreshLocked()
+	now := d.now()
 	out := append([]Device(nil), d.devices...)
+	for i := range out {
+		out[i].Status = d.statusLocked(out[i], now)
+	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].PairedAt.Before(out[j].PairedAt) })
 	return out
 }
@@ -736,12 +825,14 @@ func (d *Devices) ForgetAll() (int, error) {
 	return n, nil
 }
 
-// Count reports how many devices are paired.
+// Count reports how many devices have the board: paired and let in. A
+// device still waiting to be let in is not counted — with none let in, the
+// next pairing is the board's first (approval.go).
 func (d *Devices) Count() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.refreshLocked()
-	return len(d.devices)
+	return d.approvedLocked(d.now())
 }
 
 func hashToken(token string) string {

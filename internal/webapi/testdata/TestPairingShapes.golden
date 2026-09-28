@@ -1,0 +1,53 @@
+{
+  "change": {
+    "kind": "pairing",
+    "id": "e5f6a7b8"
+  },
+  "pairWaiting": {
+    "person": "Ana",
+    "device": "iPhone · Safari",
+    "deviceId": "e5f6a7b8",
+    "pending": true,
+    "expiresInSecs": 600
+  },
+  "pending": {
+    "devices": [
+      {
+        "id": "e5f6a7b8",
+        "person": "Ana",
+        "device": "iPhone · Safari",
+        "userAgent": "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1",
+        "source": "100.64.0.9",
+        "code": "cli",
+        "via": "via the local CLI (`gummi web pair`)",
+        "origin": "gummi.tail1234.ts.net",
+        "requestedAt": "2026-09-27T09:12:00Z",
+        "expiresInSecs": 540
+      }
+    ]
+  },
+  "refusedWaiting": {
+    "error": "waiting for approval on a paired device",
+    "approval": "pending"
+  },
+  "sessionAtTheBoard": {
+    "authed": true,
+    "person": "Simon",
+    "device": "Mac · Firefox",
+    "deviceId": "a1b2c3d4",
+    "version": "v1",
+    "repo": "gummi",
+    "host": "box"
+  },
+  "sessionWaiting": {
+    "authed": false,
+    "person": "Ana",
+    "device": "iPhone · Safari",
+    "deviceId": "e5f6a7b8",
+    "version": "",
+    "repo": "",
+    "host": "",
+    "approval": "pending",
+    "expiresInSecs": 598
+  }
+}

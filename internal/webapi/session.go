@@ -32,7 +32,25 @@ type Session struct {
 	// paired one has no code to redeem. The server takes the code's own
 	// name when the form sends none.
 	PairingFor string `json:"pairingFor,omitempty"`
+	// Approval is where a paired browser that does not have the board
+	// stands (Authed is false for it): ApprovalPending while it waits for
+	// a device already at the board to let it in — Person, Device and
+	// DeviceID then name it, and ExpiresInSecs is how long the request
+	// has left — or ApprovalRejected / ApprovalExpired once that wait
+	// ended without it, so the pairing form can say why it is back.
+	Approval      string `json:"approval,omitempty"`
+	ExpiresInSecs int    `json:"expiresInSecs,omitempty"`
 }
+
+// The approval states a Session (and a 403's Error) can name (DESIGN
+// §20.3). A device paired while another already has the board, with a
+// code other than the one printed when the server started, waits to be
+// let in from a paired page.
+const (
+	ApprovalPending  = "pending"
+	ApprovalRejected = "rejected"
+	ApprovalExpired  = "expired"
+)
 
 // PairRequest is POST /api/pair's body: the six-digit code printed in the
 // server's terminal, and the name of the person pairing. Devices paired
@@ -44,11 +62,44 @@ type PairRequest struct {
 }
 
 // PairResponse is POST /api/pair's success body. The device token travels
-// only in the Set-Cookie header, never in JSON.
+// only in the Set-Cookie header, never in JSON. Pending says the device
+// is paired but waits to be let in from a device already at the board,
+// for ExpiresInSecs at most.
 type PairResponse struct {
-	Person   string `json:"person"`
-	Device   string `json:"device"`
-	DeviceID string `json:"deviceId"`
+	Person        string `json:"person"`
+	Device        string `json:"device"`
+	DeviceID      string `json:"deviceId"`
+	Pending       bool   `json:"pending,omitempty"`
+	ExpiresInSecs int    `json:"expiresInSecs,omitempty"`
+}
+
+// PendingDevice is one device waiting to be let in, as a page already at
+// the board shows it to the person who decides: who it says it is, what
+// browser, from where, with which code, and when.
+type PendingDevice struct {
+	ID     string `json:"id"`
+	Person string `json:"person"`
+	// Device is the label read off UserAgent ("iPhone · Safari").
+	Device    string `json:"device"`
+	UserAgent string `json:"userAgent,omitempty"`
+	// Source is the address the pairing came from.
+	Source string `json:"source,omitempty"`
+	// Code is who minted the code it used ("cli", "browser"), and Via
+	// says the same as a phrase ("via the local CLI (`gummi web pair`)").
+	Code string `json:"code"`
+	Via  string `json:"via"`
+	// Origin is the host and port it paired on.
+	Origin        string    `json:"origin,omitempty"`
+	RequestedAt   time.Time `json:"requestedAt"`
+	ExpiresInSecs int       `json:"expiresInSecs"`
+}
+
+// PendingDevices is GET /api/devices/pending: every device waiting to be
+// let in, oldest first. POST /api/devices/{id}/approve and
+// POST /api/devices/{id}/reject (no body) answer one; either is refused
+// 409 once the request is no longer waiting.
+type PendingDevices struct {
+	Devices []PendingDevice `json:"devices"`
 }
 
 // AdminPairRequest is POST /api/admin/pair's optional body: the person the

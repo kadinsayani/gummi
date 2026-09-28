@@ -20,8 +20,9 @@ func (s *Server) sessionRoutes() {
 	s.public("POST /api/pair", s.handlePair)
 	s.public("POST /api/pair/request", s.handlePairRequest)
 	s.public("POST "+adminPath, s.handleAdminPair)
-	s.api("POST /api/unpair", s.handleUnpair)
-	s.api("GET /api/events", s.handleEvents)
+	s.waiting("POST /api/unpair", s.handleUnpair)
+	s.waiting("GET /api/events", s.handleEvents)
+	s.approvalRoutes()
 }
 
 // handleSession is GET /api/session. It answers without a cookie: it is
@@ -30,14 +31,33 @@ func (s *Server) sessionRoutes() {
 // A browser that is not paired is told only what the pairing form needs —
 // that it is not paired, and whether a code is live. What the board is,
 // where it runs and who a code was printed for are for a paired device.
+// One paired but still waiting to be let in is told that, as whom, and
+// for how long; one turned away (or whose wait lapsed) is told that too.
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	who, authed, renew := s.identify(r)
 	if !authed {
-		writeJSON(w, http.StatusOK, unpairedSession{PairingLive: s.opt.Pairing.Live()})
+		un := unpairedSession{PairingLive: s.opt.Pairing.Live()}
+		switch who.Status {
+		case StatusRejected:
+			un.Approval = webapi.ApprovalRejected
+		case StatusExpired:
+			un.Approval = webapi.ApprovalExpired
+		}
+		writeJSON(w, http.StatusOK, un)
 		return
 	}
 	if renew != "" {
 		s.setDeviceCookie(w, r, renew)
+	}
+	if who.Pending {
+		writeJSON(w, http.StatusOK, webapi.Session{
+			Approval:      webapi.ApprovalPending,
+			ExpiresInSecs: s.pendingLeft(who.DeviceID),
+			Person:        who.Person,
+			Device:        who.Device,
+			DeviceID:      who.DeviceID,
+		})
+		return
 	}
 	writeJSON(w, http.StatusOK, webapi.Session{
 		Authed:     true,
@@ -54,8 +74,9 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 // unpairedSession is webapi.Session as a browser that is not paired gets
 // it: the same field names, and nothing else.
 type unpairedSession struct {
-	Authed      bool `json:"authed"`
-	PairingLive bool `json:"pairingLive"`
+	Authed      bool   `json:"authed"`
+	PairingLive bool   `json:"pairingLive"`
+	Approval    string `json:"approval,omitempty"`
 }
 
 // maxPersonName bounds the name given when pairing: it is shown beside
@@ -118,6 +139,14 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// So is room to wait: a pairing that would have to wait while too
+	// many already do is refused before its code is spent.
+	if s.opt.Pairing.LiveOrigin() != OriginTerminal {
+		if err := s.opt.Devices.Room(); err != nil {
+			writeError(w, http.StatusTooManyRequests, err.Error())
+			return
+		}
+	}
 	src := sourceKey(clientIP(r))
 	redeemed, err := s.opt.Pairing.RedeemFrom(src, strings.TrimSpace(body.Code))
 	if err != nil {
@@ -155,23 +184,39 @@ func (s *Server) handlePair(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "say who you are: pairing needs a name")
 		return
 	}
-	token, dev, err := s.opt.Devices.PairAt(person, deviceName(r.UserAgent()), requestOrigin(r), redeemed.Origin)
-	if err != nil {
+	token, dev, err := s.opt.Devices.Request(person, deviceName(r.UserAgent()), Arrival{
+		Origin:    requestOrigin(r),
+		Via:       redeemed.Origin,
+		Source:    clientIP(r),
+		UserAgent: r.UserAgent(),
+	})
+	switch {
+	case errors.Is(err, ErrTooManyPending):
+		writeError(w, http.StatusTooManyRequests, err.Error())
+		return
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	s.setDeviceCookie(w, r, token)
+	if dev.Status == StatusPending {
+		s.announceRequest(dev)
+		writeJSON(w, http.StatusOK, webapi.PairResponse{
+			Person: dev.Person, Device: dev.Name, DeviceID: dev.ID,
+			Pending: true, ExpiresInSecs: s.pendingLeft(dev.ID),
+		})
+		return
+	}
 	s.announcePairing(dev, redeemed.Origin, clientIP(r))
 	writeJSON(w, http.StatusOK, webapi.PairResponse{Person: dev.Person, Device: dev.Name, DeviceID: dev.ID})
 }
 
 // announcePairing tells everyone already on the board that a device was
-// added: a line in the terminal, a notice on every open page, and a
-// notification on every device subscribed to them. A pairing nobody asked
-// for — a code guessed, or minted by something else running as the
-// operator (an agent can run `gummi web pair` as well as a person can,
-// DESIGN §20.5) — is then at least not a silent one, and `gummi web
-// unpair` undoes it.
+// added with the board at once — the first device, or one paired with the
+// code printed at start: a line in the terminal, a notice on every open
+// page, and a notification on every device subscribed to them. Any other
+// pairing waits to be let in and is announced as a request instead
+// (announceRequest).
 func (s *Server) announcePairing(dev Device, origin CodeOrigin, from string) {
 	line := "new device paired: " + dev.Person + " on " + dev.Name + " " + origin.Via()
 	s.opt.Log("web: paired %s on %s (%s) from %s %s", dev.Person, dev.Name, dev.ID, from, origin.Via())
@@ -195,7 +240,11 @@ func (s *Server) handlePairRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusConflict, "this board is served without pairing")
 		return
 	}
-	if _, authed := s.who(r); authed {
+	if who, authed := s.who(r); authed {
+		if who.Pending {
+			writeError(w, http.StatusConflict, "this browser is paired and waiting to be let in from a paired device")
+			return
+		}
 		writeError(w, http.StatusConflict, "this browser is already paired")
 		return
 	}
@@ -240,6 +289,14 @@ func (s *Server) handleUnpair(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if who.Pending {
+		// a request withdrawn: its banner goes from every page at once
+		s.hub.publish(webapi.Change{Kind: webapi.ChangePairing, ID: who.DeviceID})
+		s.setDeviceCookie(w, r, "")
+		s.opt.Log("web: %s on %s (%s) withdrew its request to be let in", who.Person, who.Device, who.DeviceID)
+		writeJSON(w, http.StatusOK, webapi.OK{OK: true})
+		return
+	}
 	if s.opt.Push != nil {
 		if err := s.opt.Push.Store.Remove(who.DeviceID); err != nil {
 			s.opt.Log("web: dropping %s's notifications: %v", who.DeviceID, err)
@@ -267,6 +324,12 @@ func (s *Server) handleAdminPair(w http.ResponseWriter, r *http.Request) {
 	got := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if subtle.ConstantTimeCompare([]byte(got), []byte(s.opt.AdminToken)) != 1 {
 		writeError(w, http.StatusUnauthorized, "bad admin token")
+		return
+	}
+	// Every code minted here is a notice on every open page, and whatever
+	// runs as the operator can mint them: metered like a browser asking.
+	if !s.mints.allow("admin") {
+		writeError(w, http.StatusTooManyRequests, "a code was just minted; wait a little before asking for another")
 		return
 	}
 	var body webapi.AdminPairRequest

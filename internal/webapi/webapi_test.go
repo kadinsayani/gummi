@@ -94,6 +94,24 @@ func TestChangeShapes(t *testing.T) {
 	}))
 }
 
+// Pairing and letting a device in: what a waiting browser is told about
+// itself, and what a page at the board is shown to decide on.
+func TestPairingShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, map[string]any{
+		"sessionAtTheBoard": Session{Authed: true, Person: "Simon", Device: "Mac · Firefox", DeviceID: "a1b2c3d4", Version: "v1", Repo: "gummi", Host: "box"},
+		"sessionWaiting":    Session{Approval: ApprovalPending, ExpiresInSecs: 598, Person: "Ana", Device: "iPhone · Safari", DeviceID: "e5f6a7b8"},
+		"pairWaiting":       PairResponse{Person: "Ana", Device: "iPhone · Safari", DeviceID: "e5f6a7b8", Pending: true, ExpiresInSecs: 600},
+		"pending": PendingDevices{Devices: []PendingDevice{{
+			ID: "e5f6a7b8", Person: "Ana", Device: "iPhone · Safari",
+			UserAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1",
+			Source:    "100.64.0.9", Code: "cli", Via: "via the local CLI (`gummi web pair`)",
+			Origin: "gummi.tail1234.ts.net", RequestedAt: at, ExpiresInSecs: 540,
+		}}},
+		"refusedWaiting": Error{Error: "waiting for approval on a paired device", Approval: ApprovalPending},
+		"change":         Change{Kind: ChangePairing, ID: "e5f6a7b8"},
+	}))
+}
+
 func TestChangeKey(t *testing.T) {
 	for _, tc := range []struct {
 		c    Change
@@ -104,6 +122,7 @@ func TestChangeKey(t *testing.T) {
 		{Change{Kind: ChangeLive, ID: "FD-1"}, "live:FD-1"},
 		{Change{Kind: ChangeViewers}, "viewers"},
 		{Change{Kind: ChangeToast, Text: "x"}, ""},
+		{Change{Kind: ChangePairing, ID: "e5f6"}, "pairing:e5f6"},
 	} {
 		if got := tc.c.Key(); got != tc.want {
 			t.Errorf("%+v.Key() = %q, want %q", tc.c, got, tc.want)
