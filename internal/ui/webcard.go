@@ -293,6 +293,12 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 		Adopted:  r.F.Adopted(),
 		OneLiner: r.F.OneLiner,
 	}}
+	if r.F.Kind == domain.KindResearch {
+		// a research card runs in a detached scratch tree and never gets
+		// a branch: naming one (and a base it would land "onto") is the
+		// head asserting a checkout that does not exist
+		st.card.Branch, st.card.Base, st.card.Scratch = "", "", true
+	}
 	if od := m.webOpenDecision(r); od != nil {
 		dec := od.api
 		st.card.Decision, st.rev = &dec, od.rev

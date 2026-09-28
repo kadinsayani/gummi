@@ -9,6 +9,10 @@ type Card struct {
 	Branch  string `json:"branch,omitempty"`
 	Base    string `json:"base,omitempty"`
 	Adopted bool   `json:"adopted,omitempty"`
+	// Scratch marks a card that works in a throwaway scratch tree and
+	// never gets a branch (a research card): Branch and Base are empty,
+	// because there is nothing to land and nowhere to land it.
+	Scratch bool `json:"scratch,omitempty"`
 	// OneLiner is the card's short summary.
 	OneLiner string `json:"oneLiner,omitempty"`
 	// Decision is the one open decision the page pins, ranked the way the
