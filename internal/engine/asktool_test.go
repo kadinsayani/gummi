@@ -1281,6 +1281,9 @@ func TestDispatchClientToolAskUserAndPrecedence(t *testing.T) {
 	if !isResolver {
 		t.Fatal("callFake session should be a resolver for the precedence test")
 	}
+	// the kickoff turn ends first, or its idle reads as a turn that ended
+	// with the ask below still open (see TestDispatchClientToolContextCancel)
+	waitFor(t, e, EventIdle)
 	type dcall struct {
 		out string
 		err error
