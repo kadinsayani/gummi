@@ -239,9 +239,13 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		m.emitRowChanges(msg)
 	case openDecisionsMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
+	case sentBackMsg:
+		m.emitChanges(msg.notice)
+	case landConflictMsg:
+		m.emitChanges(msg.notice)
 	case noticeMsg:
 		if msg.text != "" {
-			m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.id), Text: msg.text, Err: msg.isErr})
+			m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.id), Text: msg.webText(), Err: msg.isErr})
 		}
 	case prPullDoneMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeToast, ID: string(msg.f.ID), Text: msg.notice.text, Err: msg.notice.isErr})

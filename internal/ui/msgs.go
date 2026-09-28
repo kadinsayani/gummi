@@ -217,6 +217,19 @@ type noticeMsg struct {
 	// line came from; nothing downstream has to guess from m.tab, which by
 	// then may have moved.
 	restoreBoard string
+	// web is the notice as the web face shows it, when text names a
+	// terminal key the page has no such key for ("x resolves one"): the
+	// same sentence with the act named instead. Empty means text reads the
+	// same on both faces (webText).
+	web string
+}
+
+// webText is the notice in the words the web face shows.
+func (n noticeMsg) webText() string {
+	if n.web != "" {
+		return n.web
+	}
+	return n.text
 }
 
 // boardOpenedMsg carries the result of engine.OpenBoard — boardthread.go's
@@ -665,10 +678,21 @@ type autopilotContinueMsg struct {
 // edge allow it — gets autopilotGateBlockedMsg instead, so Update parks
 // the card rather than just flashing an error nobody is watching for.
 func blockedMsg(actor string, id domain.FeatureID, text string) tea.Msg {
+	return blockedMsgWeb(actor, id, text, "")
+}
+
+// blockedMsgWeb is blockedMsg for a refusal whose terminal wording names
+// keys: web is the same sentence with the act named instead. Autopilot's
+// park is written to the card's record, which both faces read, so it
+// takes the key-free words.
+func blockedMsgWeb(actor string, id domain.FeatureID, text, web string) tea.Msg {
 	if actor == state.ActorAutopilot {
+		if web != "" {
+			text = web
+		}
 		return autopilotGateBlockedMsg{id: id, text: text}
 	}
-	return noticeMsg{text: text, isErr: true}
+	return noticeMsg{text: text, isErr: true, web: web}
 }
 
 // advanceStageAs is advanceStage's actor-parameterized form: it runs the
@@ -734,11 +758,15 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 		if res.Feature.Kind == domain.KindBug {
 			surface = "report"
 		}
-		text := fmt.Sprintf("%s: %d open comment%s %s approval — x resolves one, R sends them back to the agent (in the %s view)", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers), surface)
-		return blockedMsg(actor, id, text)
+		head := fmt.Sprintf("%s: %d open comment%s %s approval", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
+		return blockedMsgWeb(actor, id,
+			head+" — x resolves one, R sends them back to the agent (in the "+surface+" view)",
+			head+" — resolve each one in the "+surface+", or send them back to the agent")
 	case engine.StatusBlockedDiff:
-		text := fmt.Sprintf("%s: %d open diff comment%s %s approval — x resolves one, R sends them back to the agent", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
-		return blockedMsg(actor, id, text)
+		head := fmt.Sprintf("%s: %d open diff comment%s %s approval", id, res.Blockers, plural(res.Blockers), blockVerb(res.Blockers))
+		return blockedMsgWeb(actor, id,
+			head+" — x resolves one, R sends them back to the agent",
+			head+" — resolve each one on the diff, or send them back to the agent")
 	case engine.StatusBlockedOmission:
 		return blockedMsg(actor, id, res.Reason)
 	case engine.StatusBlockedUndrafted:

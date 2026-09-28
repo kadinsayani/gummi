@@ -106,7 +106,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		// end the card here and let the PR carry it — because a reader who
 		// opened a PR is usually done with gummi, not stuck.
 		if !f.PullRequest.Empty() {
-			return mergeReadyMsg{f: f, err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or press h to close the card and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
+			return mergeReadyMsg{f: f, err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or hand the card off to close it and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
 				f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f), f.ID)}
 		}
 		// A stacked card's branch contains the commits of every card

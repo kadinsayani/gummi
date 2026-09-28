@@ -137,7 +137,7 @@ func (m *Shell) webWorkflowDecision(r featureRow, d *threadDecision) *webOpenDec
 		}
 		od.index[oid] = i
 		ids = append(ids, oid)
-		opt := webapi.Option{ID: oid, Label: a.label, Detail: a.detail, Danger: a.danger}
+		opt := webapi.Option{ID: oid, Label: a.label, Detail: a.webDetail(), Danger: a.danger}
 		if i == consumer {
 			opt.Words = true
 			opt.Relabel = a.label + " with your words"

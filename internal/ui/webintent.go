@@ -245,13 +245,13 @@ func (t *webIntent) noticed(m *Shell, before noticeMsg) {
 	if n == before || n.text == "" {
 		return
 	}
-	t.out.notices = append(t.out.notices, n.text)
+	t.out.notices = append(t.out.notices, n.webText())
 	if n.restore != "" {
 		t.out.restore = n.restore
 		return
 	}
 	if n.isErr {
-		t.out.refused = n.text
+		t.out.refused = n.webText()
 	}
 }
 

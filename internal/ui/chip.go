@@ -257,9 +257,9 @@ func chipDetails(r featureRow, p *reentryReading) []string {
 			for _, st := range out.Path {
 				names = append(names, string(st))
 			}
-			d = append(d, "Your code stays on the branch. The card walks back through "+strings.Join(names, " then ")+", and each stage runs again.")
+			d = append(d, keeps(f)+". The card walks back through "+strings.Join(names, " then ")+", and each stage runs again.")
 		} else {
-			d = append(d, "Your code stays on the branch; "+string(out.Target)+" runs again from there.")
+			d = append(d, keeps(f)+"; "+string(out.Target)+" runs again from there.")
 		}
 		// THE AUTOPILOT LINE. Without it the chip lies by omission on
 		// exactly the cards a reader trusts least: on autopilot the
@@ -301,6 +301,15 @@ func chipDetails(r featureRow, p *reentryReading) []string {
 		}
 	}
 	return d
+}
+
+// keeps says what a rewind leaves in place: a research card has no
+// branch and no code, only its document.
+func keeps(f domain.Feature) string {
+	if f.Kind == domain.KindResearch {
+		return "The research document keeps what it has"
+	}
+	return "Your code stays on the branch"
 }
 
 // spendStage names the stage a chip's act will run now, "" when it runs
@@ -361,7 +370,8 @@ func (m *Shell) chipKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		if p.goOnEnter {
 			return m.takeReading(r), true
 		}
-		m.notice = noticeMsg{text: string(r.F.ID) + ": that spends credits — press y to go, or esc to keep the line here"}
+		m.notice = noticeMsg{text: string(r.F.ID) + ": that spends credits — press y to go, or esc to keep the line here",
+			web: string(r.F.ID) + ": that spends credits — go, or keep the line here"}
 		return nil, true
 	case "y":
 		return m.takeReading(r), true

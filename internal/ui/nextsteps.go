@@ -43,6 +43,31 @@ type nextAction struct {
 	// run and must not be classified — there is nothing to send back
 	// before a stage has produced anything.
 	sendBack bool
+	// web is detail as the web face shows it, for a row whose detail
+	// names terminal keys ("x resolves one"): the same sentence with the
+	// act named instead. Empty means detail reads the same on both faces
+	// (webDetail). Set through keyed, never by hand.
+	web string
+}
+
+// webDetail is the option detail in the words the web face shows.
+func (a nextAction) webDetail() string {
+	if a.web != "" {
+		return a.web
+	}
+	return a.detail
+}
+
+// keyed ends a row's detail with a clause that names terminal keys, and
+// gives the web face the same sentence ending in webClause instead — the
+// page has no such keys, and a detail telling someone to press one is a
+// dead end there.
+func keyed(a nextAction, keys, webClause string) nextAction {
+	base := a.detail
+	a.detail = base + keys
+	a.why = a.detail
+	a.web = base + webClause
+	return a
 }
 
 func nextStep(id, key, label, detail string) nextAction {
@@ -552,15 +577,19 @@ func blockedGate(in nextInput) *nextAction {
 		// beneath, the gate stayed shut, and the only key the row named was
 		// the one that would send it round again. The diff row has said
 		// "x resolves" all along; this is the row where it is load-bearing.
-		a := nextStep("spec", "s", "resolve open comments",
+		a := keyed(nextStep("spec", "s", "resolve open comments",
 			itoa(in.openSpecQs)+" open in the "+artifactNoun(in.kind)+" "+blockVerb(in.openSpecQs)+
-				" the gate"+otherBlockersNote(in, "spec")+" — x resolves one, R sends them back to the agent")
+				" the gate"+otherBlockersNote(in, "spec")),
+			" — x resolves one, R sends them back to the agent",
+			" — resolve each one in the "+artifactNoun(in.kind)+", or send them back to the agent")
 		return &a
 	}
 	if in.openDiffComments > 0 {
-		a := nextStep("diff", "d", "resolve diff comments",
+		a := keyed(nextStep("diff", "d", "resolve diff comments",
 			itoa(in.openDiffComments)+" open "+blockVerb(in.openDiffComments)+
-				" the gate"+otherBlockersNote(in, "diff")+" — x resolves one, R sends them back to the agent")
+				" the gate"+otherBlockersNote(in, "diff")),
+			" — x resolves one, R sends them back to the agent",
+			" — resolve each one on the diff, or send them back to the agent")
 		return &a
 	}
 	if len(in.undrafted) > 0 {
@@ -569,9 +598,11 @@ func blockedGate(in nextInput) *nextAction {
 		if len(in.undrafted) == 1 {
 			subject, object, be, label = "it", "it", "is", "draft the missing section"
 		}
-		a := nextStep("run", "enter", label,
+		a := keyed(nextStep("run", "enter", label,
 			blank+" "+be+" required in the "+artifactNoun(in.kind)+" and still blank — the gate stays shut until "+
-				subject+" "+be+" drafted"+otherBlockersNote(in, "undrafted")+"; enter runs the stage to draft "+object)
+				subject+" "+be+" drafted"+otherBlockersNote(in, "undrafted")),
+			"; enter runs the stage to draft "+object,
+			"; this runs the stage to draft "+object)
 		return &a
 	}
 	return nil
@@ -944,11 +975,17 @@ func stageActions(in nextInput) []nextAction {
 		// next.
 		approve := nextStep("advance", "g", "approve",
 			"moves the card into implement — start the implementer there to begin")
-		if in.kind == domain.KindGoal {
+		switch in.kind {
+		case domain.KindGoal:
 			// a goal has no implementer to start: approving hands the plan
 			// to its lead, which starts the cards on its own
 			approve = nextStep("advance", "g", "approve",
 				"moves the goal into implement — its lead starts the cards and keeps within the budget")
+		case domain.KindResearch:
+			// research's implement stage is the investigation (DESIGN
+			// §13.2): nothing is implemented, and nobody is an implementer
+			approve = nextStep("advance", "g", "approve",
+				"moves the card into implement — start the investigation there to begin")
 		}
 		// The critique said no, and crossing here overrules it rather
 		// than agreeing with it — so the row says so, and the architect
@@ -1067,7 +1104,11 @@ func stageActions(in nextInput) []nextAction {
 			if in.verifyBounces > 0 {
 				why = "no active run — start (or restart) the stage"
 			}
-			return append([]nextAction{nextStep("run", "enter", "run "+string(in.stage), why)}, stopOrResume(in)...)
+			label := "run " + string(in.stage)
+			if in.kind == domain.KindResearch {
+				label = "run the investigation"
+			}
+			return append([]nextAction{nextStep("run", "enter", label, why)}, stopOrResume(in)...)
 		}
 		if b := blockedGate(in); b != nil {
 			// blockedGate's undrafted-sections row also wears id "run" /
@@ -1371,11 +1412,11 @@ func stopHere(in nextInput) []nextAction {
 	case "", engine.StatePaused, engine.StateInteractive:
 		return nil
 	}
-	why := "park it — nothing runs until you come back"
 	if in.sess == engine.StateRunning || in.sess == engine.StateQueued {
-		why = "free the slot — enter re-runs the stage later"
+		return []nextAction{keyed(nextStep("pause", "p", "stop here", "free the slot"),
+			" — enter re-runs the stage later", " — run the stage again later")}
 	}
-	return []nextAction{nextStep("pause", "p", "stop here", why)}
+	return []nextAction{nextStep("pause", "p", "stop here", "park it — nothing runs until you come back")}
 }
 
 // stopOrResume is stopHere's answer for every session state except a
