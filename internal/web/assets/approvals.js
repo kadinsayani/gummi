@@ -7,7 +7,7 @@
 // when — until somebody answers it or it lapses. The answer reaches every
 // page, and the waiting one, over the event stream ("pairing").
 
-import { $, h, clear } from './dom.js?v=__ASSET_V__'
+import { $, h, clear, clock } from './dom.js?v=__ASSET_V__'
 import { get, post } from './api.js?v=__ASSET_V__'
 import { onEvent } from './events.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
@@ -47,11 +47,6 @@ function inMinutes (secs) {
   if (secs < 60) return 'under a minute'
   const m = Math.ceil(secs / 60)
   return m === 1 ? '1 minute' : `${m} minutes`
-}
-
-function clock (iso) {
-  const t = new Date(iso)
-  return isNaN(t) ? '' : t.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 function render () {
