@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -14,21 +15,17 @@ import (
 //
 // A card parked on an ask_user question keeps the question (the durable
 // decision_open row) but not the process. On restore, openAskFor re-arms
-// the ask with no CallID, so AnswerAs falls through to the convention
-// path — deliverTurn — which refuses a session whose agent died:
-//
-//	if s.agent() == nil { return "<id> is queued, not yet running" }
-//
-// By then AnswerAs has already taken the pending ask and recorded the
-// answer. Every other failing branch calls trySetPendingAsk before
-// returning; this one is a bare tail call, so the question is consumed,
-// the answer goes nowhere, and the card is left with nothing open to
-// answer and no agent to answer it — the user's answer vanishes.
+// the ask with no CallID, so the answer rides a turn — and no backend is
+// behind the session to take one. The answer used to be taken, recorded
+// and then refused ("queued, not yet running"), which consumed the
+// question; later it was refused with the question put back, which on a
+// face with no attach step (the web) left it unanswerable. The answer now
+// brings the backend up itself and lands, as the driver's resume does.
 func TestAnswerRestoredAskWithNoAgentMustNotSwallowIt(t *testing.T) {
 	ctx := context.Background()
 	f := feature(1, "Greeting prefix", domain.StagePlan)
 
-	e := newEngine(t, agent.NewFake("ack"))
+	e := newEngine(t, agent.NewFake(""))
 	s, err := e.Attach(ctx, f)
 	if err != nil {
 		t.Fatal(err)
@@ -45,14 +42,19 @@ func TestAnswerRestoredAskWithNoAgentMustNotSwallowIt(t *testing.T) {
 	s.agent().Close()
 	s.clearAgent()
 
-	err = e.Answer(ctx, f.ID, "CLI flag")
-	if err == nil {
-		t.Fatal("Answer succeeded with no agent to deliver to; want a loud failure")
+	if err := e.Answer(ctx, f.ID, "CLI flag"); err != nil {
+		t.Fatalf("the answer was refused: %v", err)
 	}
-	t.Logf("Answer returned: %v", err)
-
-	if s.Snapshot().PendingAsk == nil {
-		t.Errorf("pending ask not restored after a failed delivery (err=%v): "+
-			"the question was consumed and the answer delivered nowhere", err)
+	waitFor(t, e, EventIdle)
+	now := e.Get(f.ID)
+	if now == s {
+		t.Fatal("the answer went to the session with no backend behind it")
+	}
+	snap := now.Snapshot()
+	if snap.PendingAsk != nil {
+		t.Errorf("the question is still open after its answer landed: %+v", snap.PendingAsk)
+	}
+	if last := snap.Transcript[len(snap.Transcript)-1]; !strings.Contains(last.Content, "The answer is: CLI flag") {
+		t.Errorf("the answer did not reach the new backend as a turn: %+v", last)
 	}
 }

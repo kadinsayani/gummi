@@ -30,6 +30,11 @@ artifact):
                    2): it says so and ends its turn with the question still
                    open, which is what a backend whose MCP client bounds a
                    tool call does to a question nobody answered in time.
+    [ask-dies]     as [ask], but the agent process dies behind its question
+                   (GUMMI_E2E_ASK_TIMEOUT seconds after asking, exit 3): the
+                   backend crashed, was killed or lost its connection while
+                   the person was still reading. A process started later
+                   for the same card answers normally.
     [slow]         every stage streams its reply in small text deltas with a
                    pause between them (GUMMI_E2E_SLOW_SECONDS, default 6s
                    per stage in total), so a test can watch a live card. An
@@ -347,10 +352,11 @@ def plan_feature(turn, answer=None):
         ("Considered approaches", considered),
     ])
     gives_up = "[ask-gives-up]" in ctx["keywords"]
-    if ("[ask]" in ctx["keywords"] or gives_up) and answer is None:
+    dies = "[ask-dies]" in ctx["keywords"]
+    if ("[ask]" in ctx["keywords"] or gives_up or dies) and answer is None:
         turn.say("Two ways to do this are written up under Considered approaches. "
                  "I need you to pick one.")
-        answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up else None, args={
+        answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None, args={
             "question": "Where should %s's helper live?" % ctx["card"],
             "options": [
                 {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
@@ -559,7 +565,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[slow]", "[research]")
+KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[slow]", "[research]")
 
 
 def detect(frame):
@@ -654,6 +660,10 @@ def main():
             except Interrupted:
                 emit({"type": "message", "text": "(stopped)"})
             except TimedOut:
+                if "[ask-dies]" in ctx["keywords"]:
+                    print("web-e2e-agent: dying behind an open question", file=sys.stderr)
+                    sys.stderr.flush()
+                    os._exit(3)
                 emit({"type": "message", "text": "The ask timed out. That question is live in "
                                                  "your pane now; take your time answering it."})
             first = False

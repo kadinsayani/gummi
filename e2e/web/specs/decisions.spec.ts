@@ -329,6 +329,62 @@ test.describe('a question the agent stopped waiting on', () => {
   });
 });
 
+// A question outlives more than its call: the backend behind it can die
+// while the person reads, or the host can restart under it. Either way the
+// question stays on the page, and answering it is what brings the card
+// back — a backend is started for the answer, which reaches the architect
+// as a turn. Both used to refuse every answer (the web has no attach step)
+// while writing each try to the log, so the question vanished at the next
+// restart and the spec recorded choices nobody had delivered.
+test.describe('a question whose backend went away', () => {
+  async function ask(api: any, title: string): Promise<string> {
+    const c = (await api('POST', '/api/cards', { kind: 'feature', title })).json;
+    let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+    card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+    await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
+    return c.id;
+  }
+
+  test('a backend that died behind it is replaced by the answer', async ({ pairedPage: page, server, api }, info) => {
+    const id = await ask(api, '[ask-dies] Add a fragile helper');
+    await open(page, server, id);
+    await expect(page.getByTestId('decision-question')).toContainText('Where should');
+    // the process dies while the reader is looking at the question
+    await expect(page.getByTestId('rail-row-' + id)).toContainText('failed', { timeout: 15_000 });
+    expect((await api('GET', `/api/cards/${id}`)).json.decision?.kind).toBe('ask');
+    await shot(page, info, 'ask-backend-died');
+
+    await answerOption(page, isPhone(info), '1');
+    // the answer opens the new backend's session, a running one: its turns
+    // are drawn under the settled items, so this reads the whole thread
+    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    await expect(page.getByTestId('thread')).toContainText('Extend the existing file');
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
+    const spec = JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json);
+    expect(spec).toContain('Decided with the user: Extend the existing file');
+    expect(spec).not.toContain('A new file (recommended)');
+  });
+
+  test('a restart keeps it, and its answer carries the card on', async ({ pairedPage: page, server, api }, info) => {
+    const id = await ask(api, '[ask] Add a durable helper');
+    await server.restart();
+    await open(page, server, id);
+    // the options died with the process that asked; the words are left
+    await expect(page.getByTestId('decision-question')).toContainText('Where should');
+    await expect(page.getByTestId('decision-option-chat')).toBeVisible();
+    await shot(page, info, 'ask-restored');
+    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    await page.getByTestId('decision-option-chat').click();
+    await page.getByTestId('decision-option-chat').click();
+    await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
+    const spec = JSON.stringify((await api('GET', `/api/cards/${id}/spec`)).json);
+    expect(spec).toContain('Decided with the user: Put it beside Greet, in greet.go');
+  });
+});
+
 test.describe('a verified card', () => {
   let id: string;
   test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });

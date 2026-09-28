@@ -1159,14 +1159,45 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	if s == nil {
 		return fmt.Errorf("no session for %s", id)
 	}
-	ask := s.takePendingAsk()
-	if ask == nil {
+	open := s.Snapshot().PendingAsk
+	if open == nil {
 		return fmt.Errorf("%s has no open question", id)
 	}
 	answer = strings.TrimSpace(answer)
 	if answer == "" {
-		s.trySetPendingAsk(ask) // keep it open; don't clobber a newer ask
 		return fmt.Errorf("empty answer")
+	}
+	// Where the answer goes is settled before anything is recorded: an
+	// answer written to the transcript, the card's log and the spec that
+	// then reaches nobody is an answer the record says was given. The log
+	// closes the decision on it, so the question the person is still
+	// looking at is gone after the next restart, and the spec carries a
+	// choice the agent never heard.
+	byCall := open.CallID != "" && s.callLive(open.CallID)
+	if open.CallID != "" && !byCall && s.takesTurns() {
+		// the turn that asked is still running, but its client stopped
+		// waiting on the call: the turn's own end cuts the question loose
+		// (askOutlivedItsCall), and from then on it rides a turn
+		return fmt.Errorf("answer for %s not delivered: the agent stopped waiting on the question "+
+			"and is finishing its turn — answer again when it has", id)
+	}
+	// a run whose backend is gone is run again, carrying the answer; a
+	// conversation is attached to again, and the answer is its next turn
+	rerun := false
+	if !byCall && !s.takesTurns() {
+		if s.Interactive {
+			ns, err := e.reattachForAnswer(ctx, s)
+			if err != nil {
+				return err
+			}
+			s = ns
+		} else {
+			rerun = true
+		}
+	}
+	ask := s.takePendingAsk()
+	if ask == nil {
+		return fmt.Errorf("%s has no open question", id)
 	}
 
 	// record the exchange so the transcript and any restore read cleanly.
@@ -1178,9 +1209,8 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	s.appendUserAs(answer, by)
 	// best-effort card-event log capture, actor included, so the decision
 	// receipt can tell an autopilot-taken answer from a typed one; recorded
-	// unconditionally, before delivery is attempted, the same way the
-	// transcript line above is — the exchange happened regardless of
-	// whether the blocked tool call ultimately resolves.
+	// before delivery, the same way the transcript line above is, once the
+	// route above has found something that can take the answer.
 	e.appendAskEvent(s, ask, answer, by)
 	// best-effort spec capture; a bad anchor never blocks the answer
 	if note := e.captureAnswer(s, ask, answer, by); note != "" {
@@ -1197,7 +1227,7 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// first, so the bridge's blocked call resumes exactly like a native
 	// one. The turn carries the answer text; the transcript above already
 	// recorded it, so delivery must not append it a second time.
-	if ask.CallID != "" {
+	if byCall {
 		// Only treat the bridge's blocked call as resolved when it is
 		// actually live. A buffered send alone proves nothing: the backend
 		// behind the call may be gone, leaving the answer in a buffer
@@ -1247,6 +1277,17 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// artifact and re-derive the repo from scratch. reentryTurn restates
 	// the exchange the answer belongs to; the transcript still shows the
 	// person's own words.
+	if rerun {
+		// the run that asked is over; the stage runs again, and its
+		// kickoff carries the exchange to a session that did not ask
+		carried := *ask
+		carried.CallID, carried.Outlived = "", false
+		if err := e.run(s.Feature, reentryTurn(&carried, answer), s.flavor()); err != nil {
+			s.trySetPendingAsk(ask)
+			return err
+		}
+		return nil
+	}
 	e.retakeSlotAfterAnswer(s)
 	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer)); err != nil {
 		defer e.yieldSlotForAsk(s) // the question is open again: so is the lane
@@ -1263,6 +1304,39 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 		return err
 	}
 	return nil
+}
+
+// reattachForAnswer brings a backend up behind a conversation's question
+// whose answer has to ride a turn and whose session can take none: one
+// restored after a restart, one stopped under its question, or one whose
+// backend died or failed its turn while the question was up. It is the
+// attach the headless driver does before `resume --answer` and the TUI
+// does on enter; the web face has no such step, and every answer given
+// there was refused ("queued, not yet running", "no longer waiting")
+// while the question stayed up asking for one. (A run in the same state
+// is run again instead — see AnswerAs — so it carries on to its gate.)
+//
+// The question travels: Attach carries the pending ask, the transcript
+// and the backend's conversation id over to the new session. It is
+// carried as a question the new session did not ask — cut from any call
+// the old one made, and not outlived, whose guidance tells the session
+// that asked to carry on from where it left off — because a new backend
+// session did not ask it, whatever conversation it resumes.
+func (e *Engine) reattachForAnswer(ctx context.Context, s *Session) (*Session, error) {
+	// a stopped or dead backend still hangs off the session, and Attach
+	// would reuse it; stop is idempotent and closes it for good
+	s.stop()
+	s.clearAgent()
+	ns, err := e.Attach(ctx, s.Feature)
+	if err != nil {
+		return nil, err
+	}
+	if ask := ns.takePendingAsk(); ask != nil {
+		carried := *ask
+		carried.CallID, carried.Outlived = "", false
+		ns.setPendingAsk(&carried)
+	}
+	return ns, nil
 }
 
 // reentryTurn renders the turn that carries a restored ask's answer into a

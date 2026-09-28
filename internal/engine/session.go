@@ -1016,6 +1016,30 @@ func (s *Session) outlivePendingAsk() (waiter chan string, ok bool) {
 	return waiter, true
 }
 
+// takesTurns reports whether a turn sent to this session reaches a
+// backend that can act on it: Live, and its last turn did not end in an
+// error, which on most backends means the process behind it is gone.
+func (s *Session) takesTurns() bool {
+	return s.Live() && s.errValue() == nil
+}
+
+// callLive reports whether the tool call behind callID is still waiting
+// on its result: a bridge call parked on its waiter, or a native call on
+// a backend that is still taking turns. A bridge call whose client gave
+// up has deregistered as waiting; a call with neither is gone.
+func (s *Session) callLive(callID string) bool {
+	s.mu.Lock()
+	_, bridged := s.resolvers[callID]
+	waiting := s.resolverWait[callID]
+	a := s.agentSess
+	s.mu.Unlock()
+	if bridged {
+		return waiting
+	}
+	_, native := a.(agent.ToolResolver)
+	return native && s.takesTurns()
+}
+
 // takePendingAsk clears and returns the open ask (nil if none), so the
 // answer path resolves exactly one call.
 func (s *Session) takePendingAsk() *Ask {
