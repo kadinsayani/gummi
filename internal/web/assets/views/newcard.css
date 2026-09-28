@@ -1,0 +1,27 @@
+/* views/newcard.css — the new-card form: kind, brief and report on the
+   left, how it runs on the right; one column on a phone. */
+.nc{display:flex;flex-direction:column;gap:14px;min-height:0}
+.nc-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:20px}
+.nc-main,.nc-side{display:flex;flex-direction:column;gap:12px;min-width:0}
+.nc-side{padding-left:20px;border-left:1px solid var(--line)}
+.nc-kindrow{display:flex;flex-direction:column;gap:6px}
+.nc-kinds{display:flex;flex-wrap:wrap;gap:4px;padding:3px;border-radius:9px;background:var(--sunk);align-self:flex-start;max-width:100%}
+.nc-kind{height:28px;padding:0 12px;border-radius:7px;font-size:13px;color:var(--fg2)}
+.nc-kind:hover{color:var(--fg)}
+.nc-kind.on{background:var(--panel);color:var(--fg);box-shadow:0 1px 2px rgba(0,0,0,.08);font-weight:500}
+.nc-about{margin:0;font-size:12.5px;color:var(--fg3)}
+.nc-row{display:flex;gap:12px}
+.nc-row.two > .field{flex:1;min-width:0}
+.nc-row > .field{min-width:160px}
+.nc textarea{min-height:110px}
+/* the buttons stay in reach while the form scrolls under them */
+.nc-foot{display:flex;align-items:center;gap:8px;padding:12px 0 4px;border-top:1px solid var(--line);flex-wrap:wrap;position:sticky;bottom:-14px;background:var(--panel);z-index:1}
+.nc-foot .aerr{flex:1 1 100%;order:-1}
+.nc-keys{margin-right:auto;font-size:12px;color:var(--fg3);display:flex;gap:4px;align-items:center}
+@media (max-width:760px){
+  .nc-grid{grid-template-columns:minmax(0,1fr)}
+  .nc-side{padding-left:0;border-left:0;border-top:1px solid var(--line);padding-top:12px}
+  .nc-keys{display:none}
+  .nc-foot .btn{flex:1;justify-content:center}
+  .nc-row{flex-direction:column}
+}

@@ -1,0 +1,86 @@
+/* views/stacks.css — the stacks view: each stack a chain, base first. */
+
+.sk{--tc:var(--fg3)}
+.sk .t-ok{--tc:var(--ok)} .sk .t-err{--tc:var(--err)} .sk .t-warn{--tc:var(--warn)}
+.sk .t-run{--tc:var(--accent)} .sk .t-mute{--tc:var(--fg3)}
+.sk .grow{flex:1;min-width:0}
+.sk .sk-err{color:var(--err);font-size:12.5px}
+.sk .sk-sub{color:var(--fg3);font-size:12px}
+.sk-bar{display:flex;align-items:center;gap:10px}
+.sk-count{color:var(--fg3);font-size:12.5px;margin-right:auto}
+.sk-lede{margin:0;font-size:12.5px;color:var(--fg3)}
+.sk-list{display:flex;flex-direction:column;gap:12px}
+
+.sk-form,.sk-inline{display:flex;flex-direction:column;gap:10px;padding:12px;border:1px solid var(--line2);border-radius:10px;background:var(--sunk)}
+.sk-form .field input,.sk-form .field select,.sk-inline .field input,.sk-inline .field select{background:var(--panel)}
+.sk-form-row{display:flex;flex-wrap:wrap;gap:10px}
+.sk-form-row .field{min-width:180px}
+.sk-form-foot,.sk-inline-foot{display:flex;justify-content:flex-end;gap:8px}
+.sk-inline{flex-direction:row;flex-wrap:wrap;align-items:flex-end;padding:10px 12px}
+.sk-inline .field{min-width:150px}
+.sk-confirm{align-items:center;font-size:13px;color:var(--fg);border-color:color-mix(in srgb,var(--err) 40%,var(--line2))}
+
+.sk-box{border:1px solid var(--line);border-radius:12px;background:var(--panel);display:flex;flex-direction:column;gap:10px;padding:12px 14px 14px}
+.sk-box.focus{border-color:color-mix(in srgb,var(--accent) 55%,var(--line));box-shadow:0 0 0 3px var(--accent-soft)}
+.sk-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.sk-title{display:flex;align-items:baseline;gap:8px;min-width:0;flex:1 1 240px;overflow:hidden}
+.sk-title b{font-size:14.5px;font-weight:600;color:var(--fg);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sk-id{font-family:var(--mono);font-size:11.5px;color:var(--fg3);white-space:nowrap}
+.sk-meta{font-size:12px;color:var(--fg3);white-space:nowrap}
+.sk-actions{display:flex;flex-wrap:wrap;gap:6px}
+.sk-actions .btn.busy{opacity:.6}
+.sk-slot:empty{display:none}
+
+/* the chain: a rail on the left joins each card to the one it forks from */
+.sk-chain{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;position:relative}
+.sk-chain > li{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:start;position:relative;padding:6px 0}
+.sk-chain > li::before{content:"";position:absolute;left:12px;top:0;bottom:0;width:2px;background:var(--line2)}
+.sk-chain > li:first-child::before{top:50%}
+.sk-chain > li:last-child::before{bottom:calc(100% - 18px)}
+.sk-chain > li:only-child::before{display:none}
+.sk-node{position:relative;z-index:1;width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:600 11px var(--mono);color:color-mix(in srgb,var(--sc,var(--fg3)) var(--t-keep),#000);background:var(--panel);border:2px solid color-mix(in srgb,var(--sc,var(--fg3)) 60%,var(--line))}
+.sk-base{grid-template-columns:26px minmax(0,1fr)!important;align-items:center!important;font-size:12.5px;color:var(--fg3);padding:2px 0 4px!important}
+.sk-base .sk-node{width:14px;height:14px;margin-left:6px;border:2px solid var(--fg4);background:var(--sunk)}
+.sk-base .mono{color:var(--fg2)}
+.sk-member.landed .sk-node{background:color-mix(in srgb,var(--ok) 15%,var(--panel));border-color:var(--ok);color:var(--ok)}
+.sk-member[data-stale] .sk-node{border-style:dashed;border-color:var(--warn)}
+.sk-body{display:flex;flex-direction:column;gap:3px;min-width:0;padding-top:2px}
+.sk-open{display:flex;align-items:baseline;gap:8px;text-align:left;min-width:0;border-radius:6px}
+.sk-open:hover .sk-t{color:var(--accent)}
+.sk-glyph{font-size:12px;color:color-mix(in srgb,var(--sc,var(--fg3)) var(--t-keep),#000)}
+.sk-t{font-size:13.5px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.sk-line{display:flex;flex-wrap:wrap;align-items:center;gap:3px 10px;font-size:11.5px;color:var(--fg3)}
+.sk-branch{font-size:11.5px;color:var(--fg2);overflow-wrap:anywhere}
+.sk-stage{color:color-mix(in srgb,var(--sc,var(--fg3)) var(--t-keep),#000)}
+.sk-blocker{color:var(--fg3)}
+.sk-blocker::before{content:"⤓ ";color:var(--fg4)}
+.sk-mark{font-size:10.5px;font-weight:600;padding:0 6px;height:17px;display:inline-flex;align-items:center;border-radius:4px;color:color-mix(in srgb,var(--tc) var(--t-keep),#000);background:color-mix(in srgb,var(--tc) 13%,transparent);white-space:nowrap}
+.sk-ctl{display:flex;gap:0;align-items:center;opacity:.55;transition:opacity .12s}
+.sk-member:hover .sk-ctl,.sk-ctl:focus-within{opacity:1}
+.sk-ctl .iconbtn{font-size:14px;min-width:26px;height:26px;padding:0 6px}
+.sk-ctl .iconbtn:disabled{opacity:.3;cursor:default}
+.sk-ctl .sk-rm:hover{color:var(--err)}
+@media (hover:none){.sk-ctl{opacity:1}}
+
+/* the restack's answer */
+.sk-result{border:1px solid var(--line);border-radius:10px;background:var(--sunk);padding:8px 12px 10px;display:flex;flex-direction:column;gap:6px;font-size:12.5px;color:var(--fg2)}
+.sk-result-head{display:flex;align-items:center;justify-content:space-between}
+.sk-result-head b{font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3)}
+.sk-result-head .iconbtn{height:22px;min-width:22px}
+.sk-note b{color:color-mix(in srgb,var(--tc) var(--t-keep),#000);font-weight:600}
+.sk-note.t-mute{color:var(--fg3)}
+.sk-files{margin:4px 0 0;padding-left:18px;font-size:12px}
+.sk-push{display:flex;flex-direction:column;gap:6px}
+.sk-cmdrow{display:flex;align-items:center;gap:8px;min-width:0}
+.sk-cmd{flex:1;min-width:0;font:12px/1.4 var(--mono);color:var(--fg);background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 9px;overflow-x:auto;white-space:nowrap;user-select:all}
+.sk-copy{height:26px;padding:0 10px;flex-shrink:0}
+.sk-copyall{align-self:flex-start;font-size:12px}
+
+@media (max-width:760px){
+  .sk-box{padding:10px 10px 12px}
+  .sk-title{flex-basis:100%}
+  .sk-chain > li{grid-template-columns:26px minmax(0,1fr);gap:8px}
+  .sk-ctl{grid-column:2;opacity:1;margin-top:-2px}
+  .sk-inline{flex-direction:column;align-items:stretch}
+  .sk-t{white-space:normal}
+}

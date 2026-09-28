@@ -1,0 +1,222 @@
+// composer.js — the line under the thread, and the sentence under it that
+// says what enter will do. The server classifies every line exactly as the
+// TUI would (POST …/composer, asked as the person types, debounced) and the
+// page shows what it said. With a decision pinned, a line the server reads
+// as an answer goes with the decision: enter answers it, and the sentence
+// is the highlighted option (relabelled once words are typed; typing moves
+// the highlight to the answer that takes words). Any other line — a
+// command, a line for the menu — is sent as a line.
+//
+// A sent line can come back: "busy" (the agent is mid-turn) puts it back in
+// the field with a note, "menu" opens the card's actions, "newcard" opens
+// the new-card form seeded with it.
+
+import { $, clear } from './dom.js?v=__ASSET_V__'
+import { post, cardPath } from './api.js?v=__ASSET_V__'
+import { on, set, state } from './store.js?v=__ASSET_V__'
+import { toast } from './toast.js?v=__ASSET_V__'
+import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick } from './decision.js?v=__ASSET_V__'
+import { openActions } from './head.js?v=__ASSET_V__'
+import { openView } from './views.js?v=__ASSET_V__'
+
+let classify = true // POST …/composer is answered by this server
+let said = null // { id, text, says, route } for the open card
+let timer = 0
+let sending = false
+let ctxRef = {}
+let noteText = ''
+
+export function initComposer (ctx) {
+  ctxRef = ctx
+  const input = $('#composer-input')
+  input.addEventListener('input', () => {
+    autosize()
+    set({ draft: input.value })
+    const d = openDecision()
+    if (d && input.value.trim()) {
+      const w = wordsOption()
+      if (w >= 0 && !d.options[state.hi]?.words) highlight(w, 'aim')
+    }
+    if (noteText) setNote('')
+    ask()
+    renderSays()
+  })
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); submit(); return }
+    if (e.key === 'Escape') { input.blur(); return }
+    const d = openDecision()
+    if (d && !input.value) {
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        const n = d.options.length
+        highlight((state.hi + (e.key === 'ArrowDown' ? 1 : -1) + n) % n)
+      } else if (/^[1-9]$/.test(e.key) && +e.key <= d.options.length) {
+        e.preventDefault()
+        highlight(+e.key - 1)
+      } else if (e.key === ' ' && d.multi && !d.options[state.hi]?.chat) {
+        e.preventDefault()
+        togglePick(d.options[state.hi].id)
+      }
+    }
+  })
+  $('#send').addEventListener('click', submit)
+  on(['sel'], () => { clearComposer(); said = null; setNote('') })
+  on(['card', 'hi', 'conn', 'picked'], renderSays)
+  ctx.clearComposer = clearComposer
+  ctx.restoreComposer = restore
+  // a line enter would otherwise have given to an answer that takes no
+  // words goes as a line (decision.js answer)
+  ctx.submitLine = () => submit({ asLine: true })
+  renderSays()
+}
+
+export function clearComposer () {
+  const input = $('#composer-input')
+  input.value = ''
+  set({ draft: '' })
+  autosize()
+  renderSays()
+}
+
+function restore (text) {
+  const input = $('#composer-input')
+  input.value = text
+  set({ draft: text })
+  autosize()
+  renderSays()
+}
+
+function autosize () {
+  const i = $('#composer-input')
+  i.style.setProperty('height', 'auto')
+  i.style.setProperty('height', Math.min(i.scrollHeight, 160) + 'px')
+}
+
+// setNote shows a line under the composer about the last send (a line
+// handed back, a refusal). It clears once the person types again.
+function setNote (text, tone = 'warn') {
+  noteText = text
+  const el = $('#composer-note')
+  if (!el) return
+  clear(el)
+  el.hidden = !text
+  el.className = `cnote ${tone}`
+  if (text) el.append(text)
+}
+
+// ask has the server classify the line, debounced.
+function ask () {
+  clearTimeout(timer)
+  if (!classify || !state.sel) return
+  const id = state.sel
+  const text = state.draft
+  if (!text.trim()) return
+  timer = setTimeout(() => classifyNow(id, text).then(renderSays), 180)
+}
+
+async function classifyNow (id, text) {
+  if (said && said.id === id && said.text === text) return said
+  try {
+    const c = await post(cardPath(id, 'composer'), { text })
+    if (state.sel === id && state.draft === text) said = { id, text, ...c }
+    return { id, text, ...c }
+  } catch (err) {
+    if (err.notBuilt) classify = false
+    return null
+  }
+}
+
+// current is what the server said about the line in the field, if it has.
+function current () {
+  if (!state.draft.trim()) return state.card?.composer || null
+  return said && said.id === state.sel && said.text === state.draft ? said : null
+}
+
+function renderSays () {
+  const says = $('#enter-says')
+  const btn = $('#send')
+  const box = $('#composer')
+  const offline = state.conn !== 'live'
+  const d = openDecision()
+  const c = current()
+  box.classList.remove('blocked')
+  box.dataset.route = c?.route || ''
+  btn.disabled = offline || sending || !state.card
+  if (offline) {
+    says.textContent = 'answers and messages wait until the board reconnects'
+    return
+  }
+  // with a decision pinned, a line that answers goes with it
+  if (d && (!state.draft.trim() || !c || c.route === 'answer')) {
+    says.textContent = enterSays(d)
+    btn.textContent = 'Answer'
+    return
+  }
+  btn.textContent = 'Send'
+  let line = c?.says || ''
+  if (!line) line = state.draft.trim() ? 'sends your message' : 'type a message or a command'
+  says.textContent = line
+  if (c?.route === 'blocked') { box.classList.add('blocked'); btn.disabled = true }
+}
+
+async function submit ({ asLine = false } = {}) {
+  const d = openDecision()
+  const text = state.draft.trim()
+  if (d && !text) { answer(); return }
+  if (!text || sending || !state.sel) return
+  if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
+  const id = state.sel
+  if (d && !asLine) {
+    // enter was pressed before the line was classified: ask now
+    const c = current() || await classifyNow(id, state.draft)
+    if (!c) {
+      // never guess: a guess here would give the pinned decision's
+      // highlighted answer — a stop, a landing — for a line meant as words
+      setNote('Could not tell what enter would do with that line — it is still here; try again.', 'err')
+      return
+    }
+    if (c.route === 'answer') { answer(); return }
+  }
+  sending = true
+  renderSays()
+  try {
+    // sent against the stop the page shows: a line meant for it is not
+    // routed at another the card has moved to since (409 "moved")
+    const body = { text }
+    if (d?.against?.token) body.against = d.against.token
+    const r = await post(cardPath(id, 'send'), body)
+    if (r?.route === 'menu') {
+      // the line names something in the card's menu: open it there
+      if (r.card && state.sel === id) set({ card: r.card })
+      openActions(text)
+      return
+    }
+    clearComposer()
+    setNote('')
+    if (r?.card && state.sel === id) set({ card: r.card })
+    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the freeform agent', goalnote: 'Noted on the goal', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
+    if (where) toast(where)
+    ctxRef.refresh?.(id)
+  } catch (err) {
+    const e = err.data || {}
+    if (err.status === 409 && e.error === 'busy') {
+      restore(e.text || text)
+      setNote('The agent is mid-turn — your line is back here. Send it again when this turn ends.')
+    } else if (err.status === 409 && e.error === 'newcard') {
+      setNote('That reads as separate work — it is in the new-card form.', 'info')
+      openView('newcard', { text: e.text || text })
+    } else if (err.status === 409 && e.error === 'moved') {
+      setNote(`${id} moved since you read it — your line is still here. Read it again, then send it if it still holds.`)
+      ctxRef.refresh?.(id)
+    } else if (err.status === 409 && (e.error === 'needs' || e.error === 'confirm')) {
+      setNote(sentence(e.text) || err.message, 'info')
+    } else if (err.notBuilt && err.status !== 404) {
+      toast('Sending from the web is not available yet')
+    } else {
+      setNote(sentence(err.message), 'err')
+    }
+  } finally {
+    sending = false
+    renderSays()
+  }
+}

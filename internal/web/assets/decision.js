@@ -1,0 +1,415 @@
+// decision.js — the card's pinned decision: its question, the revision it
+// was raised against, and numbered answers (options are the server's,
+// regenerated on every read; the page never invents one). Answering sends
+// the decision's ref, the option id (several, comma-separated, for a
+// question that takes more than one), any words, and the against token.
+//
+// The server can refuse an answer with a 409 that says why, and each gets
+// its own treatment rather than a bare error:
+//
+//   answered  someone else got there first: say who, and what they said
+//   moved     the card moved under the page: say so, and show it as it is
+//   confirm   the flow stops at a question the TUI would ask (y/n): ask it
+//             here, and send the same answer again with confirm
+//   needs     the answer needs words it did not carry: say what, and put
+//             the reader in the composer
+//   newcard   the words read as separate work: open the new-card form
+//   busy      the agent is mid-turn: the words go back in the composer
+//
+// Also here: the "also needs you" chip shown after an answer, and the
+// phone's docked decision bar.
+
+import { $, h, clear, decisionWord, decisionColor, needsColor, isMobile, plural } from './dom.js?v=__ASSET_V__'
+import { post, cardPath } from './api.js?v=__ASSET_V__'
+import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
+import { toast } from './toast.js?v=__ASSET_V__'
+import { openView, openModal } from './views.js?v=__ASSET_V__'
+
+let ctx = {}
+let answering = false
+
+export function initDecision (c) {
+  ctx = c
+  on(['card', 'hi', 'conn', 'diffPending', 'sel', 'picked', 'decNote', 'decConfirm'], renderDecision)
+  on(['showNext', 'board', 'sel'], renderNext)
+  on(['card', 'hi', 'conn', 'view', 'mdecOpen', 'sel', 'diffPending', 'picked', 'decNote', 'decConfirm'], renderMdec)
+  // a note is about the card it was said on
+  on(['sel'], () => set({ decNote: null, decConfirm: null, picked: [], hiUser: false }))
+  // a different decision (or none) drops what was picked for the last one,
+  // and the highlight goes back to its first answer as the TUI's cursor
+  // does: a row chosen for one question is never enter's answer to the next
+  let ref = null
+  let refCard = null
+  on(['card'], () => {
+    const r = openDecision()?.ref || null
+    if (r !== ref) {
+      // a decision that changed under an answer the person had chosen is
+      // said, not silently swapped: what they chose was for the old one
+      const chose = state.hiUser && ref !== null && refCard === state.sel && !answering
+      ref = r
+      refCard = state.sel
+      set({ picked: [], decConfirm: null, hi: 0, hiUser: false })
+      if (chose) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
+    }
+  })
+  window.addEventListener('resize', renderMdec)
+}
+
+export function openDecision () { return state.card?.decision || null }
+
+// highlight moves the highlight. by is 'user' for a person's own choice
+// (a click, an arrow, a digit) and anything else for the page's aim (the
+// row that takes the words being typed); only a person's own choice arms
+// a click to answer.
+export function highlight (i, by = 'user') {
+  const d = openDecision()
+  if (!d || i < 0 || i >= d.options.length) return
+  set({ hi: i, hiUser: by === 'user' || (state.hiUser && state.hi === i) })
+}
+
+// wordsOption is the first answer that takes a note, or -1.
+export function wordsOption () {
+  const d = openDecision()
+  return d ? d.options.findIndex(o => o.words) : -1
+}
+
+// note shows a line above the decision (or in its place, once the decision
+// has gone): what happened to the last answer.
+export function note (text, { tone = 'info', testid = 'decision-note' } = {}) {
+  set({ decNote: text ? { text, tone, testid } : null })
+}
+
+// pickable: a multi-pick question's own options (never its chat row).
+function pickable (d, o) { return d.multi && !o.chat }
+
+function optionButtons (d, compact) {
+  const offline = state.conn !== 'live'
+  const pending = state.diffPending || 0
+  const picked = state.picked || []
+  return h('div', { class: 'opts', role: 'group', 'aria-label': d.multi ? 'Answers — pick any' : 'Answers' }, d.options.map((o, i) => h('button', {
+    class: ['opt', i === state.hi && 'hi', o.chat && 'chat', o.danger && 'danger', pickable(d, o) && 'pick', picked.includes(o.id) && 'picked'],
+    type: 'button',
+    data: { i: String(i) },
+    testid: `${compact ? 'mdec' : 'decision'}-option-${o.id}`,
+    disabled: offline || answering,
+    'aria-pressed': String(pickable(d, o) ? picked.includes(o.id) : i === state.hi),
+    title: o.detail || o.label,
+    onclick: () => onOption(i, compact)
+  },
+  h('span', { class: 'k', 'aria-hidden': 'true' }, pickable(d, o) ? (picked.includes(o.id) ? '✓' : String(i + 1)) : String(i + 1)),
+  h('span', { class: 'l' }, o.label),
+  h('span', { class: 'd' }, o.carriesComments && pending
+    ? h('span', { class: 'carry', testid: 'decision-carry' }, `+ ${plural(pending, 'diff comment')}`)
+    : (o.detail || (o.words ? 'type below' : ''))))))
+}
+
+// SURFACES are answers that only open something: the page has each of
+// them itself, so pressing one opens it here instead of asking the board
+// to open the terminal's.
+const SURFACES = {
+  spec: () => ctx.setTab('spec'),
+  diff: () => ctx.setTab('diff'),
+  goalpage: () => openView('goal', { id: state.sel })
+}
+
+function onOption (i, compact) {
+  const d = openDecision()
+  const o = d.options[i]
+  if (SURFACES[o.id]) {
+    set({ hi: i })
+    if (isMobile() && o.id !== 'goalpage') set({ view: 'panel' })
+    SURFACES[o.id]()
+    return
+  }
+  if (pickable(d, o)) {
+    togglePick(o.id)
+    set({ hi: i, hiUser: true })
+    return
+  }
+  // a press on an answer the person has already chosen gives it; the
+  // first press only chooses it — including the answer highlighted by
+  // default, which nobody chose. One that takes words is given bare (the
+  // server asks for the words if it needs them), except the chat row,
+  // which is nothing without them.
+  if (state.hi === i && state.hiUser) { answer({ picked: true }); return }
+  set({ hi: i, hiUser: true })
+  if (o.words) {
+    if (isMobile()) set({ view: 'thread' })
+    $('#composer-input').focus()
+  } else {
+    note(`${compact ? 'Tap' : 'Press'} “${o.label}” again${compact ? '' : ', or enter,'} to answer.`, { testid: 'decision-arm' })
+  }
+}
+
+export function togglePick (id) {
+  const picked = (state.picked || []).slice()
+  const at = picked.indexOf(id)
+  if (at >= 0) picked.splice(at, 1)
+  else picked.push(id)
+  set({ picked })
+}
+
+function noteEl (compact) {
+  const n = state.decNote
+  if (!n) return null
+  return h('div', { class: ['dnote', n.tone], testid: compact ? 'mdec-note' : n.testid, role: n.tone === 'err' ? 'alert' : 'status' },
+    h('span', null, n.text),
+    h('button', { class: 'link', type: 'button', 'aria-label': 'Dismiss', onclick: () => set({ decNote: null }) }, 'dismiss'))
+}
+
+function confirmEl () {
+  const c = state.decConfirm
+  if (!c) return null
+  return h('div', { class: 'dconfirm', testid: 'decision-confirm', role: 'alertdialog', 'aria-label': 'Confirm' },
+    h('div', { class: 'cq', testid: 'decision-confirm-question' }, c.question),
+    h('div', { class: 'cb' },
+      h('button', { class: 'btn', type: 'button', testid: 'decision-confirm-no', onclick: () => set({ decConfirm: null }) }, 'Cancel'),
+      h('button', { class: ['btn', 'pri', c.danger && 'danger'], type: 'button', testid: 'decision-confirm-yes', disabled: answering, onclick: () => { const go = c.go; set({ decConfirm: null }); go() } }, c.yes || 'Yes, go ahead')))
+}
+
+let shownHi = -1
+function renderDecision () {
+  const box = $('#decision')
+  // the answers scroll inside a capped decision: keep where the list was,
+  // and bring the highlighted answer into view when it moves
+  const was = box.querySelector('.decision > .opts')?.scrollTop || 0
+  clear(box)
+  box.append(noteEl(false) || '')
+  const d = openDecision()
+  if (!d) return
+  const stage = state.card.stage
+  const offline = state.conn !== 'live'
+  const jump = d.anchor === 'diff' ? ['diff', 'see the diff'] : d.anchor === 'spec' ? ['spec', 'read the spec'] : null
+  box.append(h('section', {
+    class: ['decision', offline && 'paused', answering && 'sending'],
+    style: { '--dc': decisionColor(d, stage) },
+    'aria-label': 'Open decision',
+    'aria-busy': answering ? 'true' : null,
+    testid: 'decision',
+    data: { kind: d.kind, ref: d.ref }
+  },
+  h('header', null, decisionWord(d, stage),
+    h('span', { class: 'more' },
+      state.card.decisionsMore ? h('span', { testid: 'decision-more' }, `${state.card.decisionsMore} more after this`) : null,
+      jump ? h('button', { class: 'link', type: 'button', testid: 'decision-jump', onclick: () => ctx.setTab(jump[0]) }, jump[1]) : null)),
+  h('div', { class: 'q', testid: 'decision-question' }, d.question),
+  h('div', { class: 'against', testid: 'decision-against' }, offline
+    ? 'Reconnecting. Answers wait until the board is back.'
+    : ['You are answering against ', h('span', { class: 'mono' }, d.against?.label || d.against?.token || 'the card as shown'),
+        d.multi ? ' · pick any, then enter' : '']),
+  optionButtons(d, false),
+  confirmEl()))
+  const opts = box.querySelector('.decision > .opts')
+  if (opts) opts.scrollTop = was
+  if (state.hi !== shownHi) {
+    shownHi = state.hi
+    opts?.querySelector('.opt.hi')?.scrollIntoView({ block: 'nearest' })
+  }
+}
+
+function renderNext () {
+  const box = $('#nextup')
+  clear(box)
+  const nx = state.showNext && row(state.showNext)
+  if (!nx || nx.status !== 'needs' || nx.id === state.sel) return
+  box.append(h('button', {
+    class: 'nextup', type: 'button', testid: 'nextup',
+    style: { '--dc': needsColor(nx.needs, nx.stage) },
+    onclick: () => ctx.select(nx.id)
+  }, h('span', { class: 'dotc' }), h('span', null, h('b', null, nx.id), ` also needs you · ${nx.needs?.question || nx.title}`),
+  h('span', { class: 'go' }, 'Open ', h('kbd', null, 'n'))))
+}
+
+function renderMdec () {
+  const box = $('#mdec')
+  const d = openDecision()
+  const show = isMobile() && (!!d || !!state.decNote) && state.view !== 'thread'
+  box.hidden = !show
+  clear(box)
+  if (!show) return
+  if (!d) { box.append(noteEl(true)); return }
+  box.style.setProperty('--dc', decisionColor(d, state.card.stage))
+  box.classList.toggle('open', state.mdecOpen)
+  box.append(h('button', { class: 'sum', type: 'button', testid: 'mdec-toggle', 'aria-expanded': String(state.mdecOpen), onclick: () => set({ mdecOpen: !state.mdecOpen }) },
+    h('span', { class: 'k' }, decisionWord(d, state.card.stage)),
+    h('span', { class: 'q' }, d.question),
+    h('span', { class: 'chev', 'aria-hidden': 'true' }, '▴')))
+  if (state.mdecOpen || state.decNote || state.decConfirm) {
+    box.append(noteEl(true) || '')
+    if (state.mdecOpen) box.append(optionButtons(d, true))
+    box.append(confirmEl() || '')
+  }
+}
+
+// chosen is what enter would answer: the picked options of a multi-pick
+// question, else the highlighted one.
+function chosen (d) {
+  const o = d.options[state.hi] || d.options[0]
+  const picked = (state.picked || []).filter(id => d.options.some(x => x.id === id && !x.chat))
+  if (d.multi && picked.length && !(o.chat && state.draft.trim())) {
+    const labels = d.options.filter(x => picked.includes(x.id)).map(x => x.label)
+    return { id: d.options.filter(x => picked.includes(x.id)).map(x => x.id).join(','), label: labels.join(', '), words: false }
+  }
+  return o
+}
+
+// enterSays is what the composer's enter line reads with a decision pinned.
+export function enterSays (d) {
+  const o = chosen(d)
+  const text = state.draft.trim()
+  if (text && !o.words) {
+    const w = wordsOption()
+    if (w >= 0) return d.options[w].relabel || d.options[w].label
+  }
+  return text && o.words ? (o.relabel || o.label) : o.label
+}
+
+// answer sends the chosen option, with the composer's words when the
+// option takes them. Typed words are never dropped: with a line in the
+// composer, enter gives it to the answer that takes words (DESIGN §6.3,
+// enter sends the line), and when none does the line goes as a line —
+// only a person's own press on an answer (picked) gives that answer and
+// leaves the line where it is.
+export async function answer ({ picked = false } = {}) {
+  const d = openDecision()
+  if (!d || answering) return
+  if (state.conn !== 'live') { toast('Answers wait until the board reconnects'); return }
+  let o = chosen(d)
+  const text = state.draft.trim()
+  if (text && !o.words && !picked && !(d.multi && state.picked?.length)) {
+    const w = wordsOption()
+    if (w < 0) { ctx.submitLine?.(); return }
+    o = d.options[w]
+  }
+  if (SURFACES[o.id] && !text) {
+    if (isMobile() && o.id !== 'goalpage') set({ view: 'panel' })
+    SURFACES[o.id]()
+    return
+  }
+  if (o.chat && !text) {
+    if (isMobile()) set({ view: 'thread' })
+    $('#composer-input').focus()
+    note('Type your answer in the composer, then press enter.', { testid: 'decision-needs' })
+    return
+  }
+  const label = text && o.words ? (o.relabel || o.label) : o.label
+  return send(state.sel, {
+    ref: d.ref,
+    option: o.id,
+    words: o.words && text ? text : undefined,
+    against: d.against?.token || ''
+  }, label, !!(o.words && text), o.danger)
+}
+
+async function send (id, body, label, tookWords, danger) {
+  answering = true
+  set({ decNote: null, decConfirm: null })
+  try {
+    const card = await post(cardPath(id, 'answer'), body)
+    if (tookWords) ctx.clearComposer()
+    const next = rows().find(r => r.status === 'needs' && r.id !== id)
+    if (state.sel === id) set({ card: card && card.id ? card : state.card, hi: 0, picked: [], mdecOpen: false, showNext: next ? next.id : null })
+    toast(`Answered: ${label}`)
+    ctx.refresh(id)
+  } catch (err) {
+    refused(id, err, body, label, tookWords, danger)
+  } finally {
+    answering = false
+    renderDecision()
+    renderMdec()
+  }
+}
+
+function refused (id, err, body, label, tookWords, danger) {
+  if (err.notBuilt && err.status !== 404) { toast('Answering from the web is not available yet'); return }
+  if (err.status !== 409) {
+    note(err.message, { tone: 'err', testid: 'decision-error' })
+    return
+  }
+  const e = err.data || {}
+  switch (e.error) {
+    case 'answered':
+      note(`Answered by ${e.by || 'someone else'}${e.receipt ? ` — ${e.by && e.receipt.startsWith(e.by + ' ') ? e.receipt.slice(e.by.length + 1) : e.receipt}` : ''}. Here is the card as it stands now.`, { tone: 'warn', testid: 'decision-answered' })
+      ctx.refresh(id)
+      return
+    case 'moved':
+      note(`${id} moved since you read it${e.text ? ` (${e.text.replace(/^the card moved since you read it\s*[—-]\s*/, '')})` : ''}. Read it again, then answer if it still holds.`, { tone: 'warn', testid: 'decision-moved' })
+      ctx.refresh(id)
+      return
+    case 'confirm':
+      set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: label, danger, go: () => send(id, { ...body, confirm: true }, label, tookWords, danger) } })
+      return
+    case 'needs':
+      if (e.needs === 'decision') {
+        // which decision to reverse is picked on the goal's page, which
+        // lists them with the lead's reasons
+        note(sentence(e.text) || 'Pick the decision on the goal’s page.', { testid: 'decision-needs' })
+        openView('goal', { id })
+        return
+      }
+      if (e.needs === 'message' && e.draft !== undefined && e.draft !== null) {
+        // a landing stopped to have its message read: show it, editable
+        const d = openDecision()
+        const o = d?.options.find(x => x.id === body.option)
+        if (d && o) { openLanding(id, d, o, e.draft, sentence(e.text)); return }
+      }
+      if (e.needs === 'message') {
+        const w = wordsOption()
+        if (w >= 0) set({ hi: w })
+        if (isMobile()) set({ view: 'thread' })
+        $('#composer-input').focus()
+      }
+      note(sentence(e.text) || 'This answer needs more from you.', { tone: 'info', testid: 'decision-needs' })
+      return
+    case 'newcard':
+      note('That reads as separate work — start it as its own card.', { testid: 'decision-newcard' })
+      openView('newcard', { text: e.text })
+      return
+    case 'busy':
+      if (e.text) ctx.restoreComposer?.(e.text)
+      note('The agent is mid-turn. Your words are back in the composer; send them when this turn ends.', { tone: 'warn', testid: 'decision-busy' })
+      return
+  }
+  note(err.message, { tone: 'err', testid: 'decision-error' })
+  ctx.refresh(id)
+}
+
+// sentence capitalises the server's lower-case line for a page.
+export function sentence (s) {
+  s = String(s || '').trim()
+  return s ? s[0].toUpperCase() + s.slice(1) : ''
+}
+
+// openLanding shows the landing message a landing answer carries — the
+// draft the board wrote, editable — and lands only on its own button, as
+// the TUI's landing dialog does: a branch never lands on a message nobody
+// read.
+function openLanding (id, d, o, draft, question = '') {
+  const input = h('textarea', { class: 'lmsg', rows: '8', testid: 'landing-message', 'aria-label': 'Landing message' })
+  input.value = draft || ''
+  const err = h('p', { class: 'aerr', testid: 'landing-error', role: 'alert', hidden: true })
+  const m = openModal({
+    title: `${sentence(o.label)} · ${id}`,
+    testid: 'landing-dialog',
+    body: [h('p', { class: 'aq', testid: 'landing-question' }, question || 'Read the landing message, then land.'), input, err],
+    actions: [
+      { label: 'Cancel', testid: 'landing-cancel' },
+      {
+        label: sentence(o.label),
+        primary: true,
+        danger: true,
+        testid: 'landing-confirm',
+        onClick: async () => {
+          const words = input.value.trim()
+          if (!words) { clear(err).append('Write the landing message first.'); err.hidden = false; input.focus(); return false }
+          await send(id, { ref: d.ref, option: o.id, words, against: d.against?.token || '' }, o.label, false, true)
+          return true
+        }
+      }
+    ]
+  })
+  input.focus()
+  input.setSelectionRange(0, 0)
+  input.scrollTop = 0
+  return m
+}

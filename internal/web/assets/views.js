@@ -1,0 +1,232 @@
+// views.js — the page's overlays, and a registry other surfaces plug into.
+//
+//   registerView(name, { title, wide, css, mount(body, ctx), unmount() })
+//     adds a surface (new card, goal, stacks, ingest, bugs, doctor, board
+//     agent, fleet) that the rail foot, the palette and the keys can open by
+//     name. mount may return a cleanup function. ctx carries what a view
+//     needs from the page: { params, close, api, select, toast, state,
+//     onStore, onEvent, openModal }.
+//   openView(name, params)   opens one; an unregistered name says so quietly.
+//   openModal({...})         a dialog with a title, a body and buttons.
+//   openMenu(anchor, items)  a small popup menu under or over a button.
+
+import { h, icon } from './dom.js?v=__ASSET_V__'
+import { pushLayer } from './back.js?v=__ASSET_V__'
+
+const views = new Map()
+let ctxFactory = () => ({})
+let current = null // { scrim, close }
+
+export const VIEW_LABELS = {
+  newcard: 'New card',
+  agent: 'Board agent',
+  fleet: 'Fleet stats',
+  goals: 'Goals',
+  goal: 'Goal',
+  stacks: 'Stacks',
+  ingest: 'Import spec',
+  bugs: 'Import bugs',
+  doctor: 'Doctor'
+}
+
+export function registerView (name, def) { views.set(name, def) }
+
+// A view may name its own stylesheet (a path under assets/, e.g.
+// 'views/goal.css'); it is linked once, the first time the view opens, so
+// surfaces keep their styles beside their code instead of in app.css.
+const linked = new Set()
+function linkCSS (href) {
+  if (!href || linked.has(href)) return
+  linked.add(href)
+  document.head.append(h('link', { rel: 'stylesheet', href: `/assets/${href}?v=__ASSET_V__` }))
+}
+export function hasView (name) { return views.has(name) }
+export function setViewContext (fn) { ctxFactory = fn }
+export function overlayOpen () { return !!current }
+
+export function openView (name, params = {}) {
+  const def = views.get(name)
+  const title = def?.title || VIEW_LABELS[name] || name
+  if (!def) {
+    return openModal({
+      title,
+      testid: `view-${name}`,
+      body: h('div', { class: 'empty', testid: 'not-available' },
+        h('b', null, `${title} is not available yet`),
+        'This board’s web face does not offer it yet. The terminal board has it.')
+    })
+  }
+  linkCSS(def.css)
+  const body = h('div', { class: 'mbody', testid: `view-${name}-body` })
+  let cleanup = null
+  const m = openModal({
+    title,
+    wide: def.wide !== false,
+    testid: `view-${name}`,
+    bodyEl: body,
+    onClose: () => { try { cleanup?.(); def.unmount?.() } catch (err) { console.error(err) } }
+  })
+  const ctx = { ...ctxFactory(), params, close: m.close }
+  try {
+    const r = def.mount(body, ctx)
+    if (typeof r === 'function') cleanup = r
+    else if (r && typeof r.then === 'function') r.then(fn => { if (typeof fn === 'function') cleanup = fn }).catch(err => console.error(err))
+  } catch (err) {
+    console.error(err)
+    body.append(h('div', { class: 'empty err' }, h('b', null, `${title} did not open`), String(err.message || err)))
+  }
+  return m
+}
+
+// openerFor is where focus goes back to when an overlay closes: whatever
+// had it when the overlay opened. An overlay a shortcut opened with nothing
+// focused has no such element — focus would fall to <body>, the top of the
+// page for a keyboard — so it goes back to returnTo (a selector or an
+// element: the control that opens the overlay) when that is on screen.
+function openerFor (returnTo) {
+  const a = document.activeElement
+  if (a && a !== document.body) return a
+  const el = typeof returnTo === 'string' ? document.querySelector(returnTo) : returnTo
+  return el?.getClientRects().length ? el : null
+}
+
+// openModal shows one dialog over the page. body is a Node (or bodyEl a
+// ready container); actions are [{label, primary, danger, testid, onClick}].
+// An action whose onClick returns false keeps the dialog open.
+export function openModal ({ title, body, bodyEl, actions = [], wide = false, testid = 'modal', onClose, role = 'dialog', returnTo }) {
+  closeOverlay()
+  const opener = openerFor(returnTo)
+  const mbody = bodyEl || h('div', { class: 'mbody' }, body)
+  let layerDone = null
+  const close = () => {
+    if (!current || current.scrim !== scrim) return
+    current = null
+    scrim.remove()
+    layerDone?.()
+    try { onClose?.() } catch (err) { console.error(err) }
+    if (opener && opener.focus && document.contains(opener)) opener.focus()
+  }
+  const foot = actions.length
+    ? h('div', { class: 'mfoot' }, actions.map(a => h('button', {
+      class: ['btn', a.primary && 'pri', a.danger && 'danger'],
+      testid: a.testid,
+      type: 'button',
+      onclick: async () => {
+        const keep = await a.onClick?.()
+        if (keep !== false) close()
+      }
+    }, a.label)))
+    : null
+  const box = h('section', { class: ['modal', wide && 'wide'], role, 'aria-modal': 'true', 'aria-label': title, testid, tabindex: '-1' },
+    // a div, not a header: inside a dialog a <header> is read as the
+    // page's banner, and the page already has one (.top)
+    h('div', { class: 'mhead' },
+      h('h2', null, title),
+      h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Close', title: 'Close (esc)', testid: 'modal-close', onclick: () => close() }, icon('close'))),
+    mbody, foot)
+  const scrim = h('div', { class: 'scrim', testid: 'scrim' }, box)
+  scrim.addEventListener('mousedown', (e) => { if (e.target === scrim) close() })
+  scrim.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } })
+  document.body.append(scrim)
+  current = { scrim, close }
+  layerDone = pushLayer(close)
+  const first = box.querySelector('input,textarea,select,[autofocus]') || box
+  first.focus()
+  return { el: box, body: mbody, close }
+}
+
+// openOverlay shows a bare panel (the palette, the keys sheet) in a scrim.
+export function openOverlay (panel, { onClose, returnTo } = {}) {
+  closeOverlay()
+  const opener = openerFor(returnTo)
+  const scrim = h('div', { class: 'scrim', testid: 'scrim' }, panel)
+  let layerDone = null
+  const close = () => {
+    if (!current || current.scrim !== scrim) return
+    current = null
+    scrim.remove()
+    layerDone?.()
+    onClose?.()
+    if (opener && opener.focus && document.contains(opener)) opener.focus()
+  }
+  scrim.addEventListener('mousedown', (e) => { if (e.target === scrim) close() })
+  scrim.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } })
+  document.body.append(scrim)
+  current = { scrim, close }
+  layerDone = pushLayer(close)
+  return { close }
+}
+
+export function closeOverlay () { current?.close() }
+
+// openMenu drops a menu from anchor's container. items are
+// [{label, onClick, danger, key, testid}] or 'sep'.
+let menuOpen = null
+export function openMenu (anchor, items, { up = false, testid = 'menu' } = {}) {
+  closeMenu()
+  const menu = h('div', { class: ['menu', up ? 'up' : 'down'], role: 'menu', testid },
+    items.map(it => it === 'sep'
+      ? h('div', { class: 'sep', role: 'separator' })
+      : h('button', {
+        role: 'menuitem',
+        type: 'button',
+        class: it.danger && 'danger',
+        testid: it.testid,
+        title: it.hint || null,
+        // focus goes back to the menu's button first, so a dialog the item
+        // opens returns there when it closes rather than to <body> — the
+        // item that had focus is gone with the menu
+        onclick: () => { closeMenu(); if (document.contains(anchor)) anchor.focus(); it.onClick?.() }
+      }, it.icon ? icon(it.icon) : null, it.label, it.key ? h('kbd', { class: 'kh' }, it.key) : null)))
+  // on the body, placed against the anchor: the surface that drew the
+  // anchor may redraw (the card head does on every change) without taking
+  // an open menu with it, and a long menu scrolls inside the window
+  document.body.append(menu)
+  place(menu, anchor, up)
+  anchor.setAttribute('aria-expanded', 'true')
+  const outside = (e) => { if (!menu.contains(e.target) && e.target !== anchor && !anchor.contains(e.target)) closeMenu() }
+  const keys = (e) => {
+    const btns = [...menu.querySelectorAll('button')]
+    const i = btns.indexOf(document.activeElement)
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeMenu(); anchor.focus() }
+    if (e.key === 'ArrowDown') { e.preventDefault(); btns[(i + 1) % btns.length]?.focus() }
+    if (e.key === 'ArrowUp') { e.preventDefault(); btns[(i - 1 + btns.length) % btns.length]?.focus() }
+  }
+  setTimeout(() => { if (menuOpen?.menu === menu) document.addEventListener('mousedown', outside) }, 0)
+  // a menu placed against its anchor is wrong after a real resize (a
+  // rotation, a wider window) — but only its own resize: a listener left
+  // behind by a menu the back button closed would close the next one
+  const resized = () => { if (menuOpen?.menu === menu) closeMenu() }
+  window.addEventListener('resize', resized)
+  menu.addEventListener('keydown', keys)
+  menuOpen = { menu, anchor, outside, resized, done: pushLayer(() => closeMenu()) }
+  menu.querySelector('button')?.focus()
+  return menu
+}
+
+function place (menu, anchor, up) {
+  const r = anchor.getBoundingClientRect()
+  const host = anchor.parentElement?.getBoundingClientRect() || r
+  const vw = document.documentElement.clientWidth
+  const vh = window.innerHeight
+  if (up) {
+    menu.style.setProperty('left', Math.max(8, host.left + 8) + 'px')
+    menu.style.setProperty('bottom', Math.max(8, vh - r.top + 4) + 'px')
+    menu.style.setProperty('max-height', Math.max(120, r.top - 12) + 'px')
+  } else {
+    menu.style.setProperty('right', Math.max(8, vw - r.right) + 'px')
+    menu.style.setProperty('top', (r.bottom + 4) + 'px')
+    menu.style.setProperty('max-height', Math.max(120, vh - r.bottom - 12) + 'px')
+  }
+}
+
+export function closeMenu () {
+  if (!menuOpen) return
+  document.removeEventListener('mousedown', menuOpen.outside)
+  window.removeEventListener('resize', menuOpen.resized)
+  menuOpen.anchor.setAttribute('aria-expanded', 'false')
+  menuOpen.menu.remove()
+  const done = menuOpen.done
+  menuOpen = null
+  done?.()
+}

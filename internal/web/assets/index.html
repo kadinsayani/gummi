@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<title>gummi</title>
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#EFEDF6" id="theme-color">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="gummi">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" type="image/svg+xml" href="/assets/icon.svg?v=__ASSET_V__">
+<link rel="apple-touch-icon" href="/assets/icon.svg?v=__ASSET_V__">
+<link rel="preload" href="/assets/fonts/Geist-Variable.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/app.css?v=__ASSET_V__">
+<script src="/assets/theme-boot.js?v=__ASSET_V__"></script>
+</head>
+<body>
+<div class="boot" id="boot" data-testid="boot"><span class="spinner"></span><span>Opening the board…</span></div>
+
+<!-- pairing: shown when this browser has no device cookie -->
+<main class="pairing" id="pair" data-testid="pair" hidden></main>
+
+<!-- the board -->
+<div class="app" id="app" data-view="thread" data-testid="app" hidden>
+  <a class="skip" href="#composer-input">Skip to the composer</a>
+  <header class="top" data-testid="topbar">
+    <button class="iconbtn hide-s" id="rail-toggle" data-testid="rail-toggle" title="Collapse or expand the card rail ([)" aria-label="Toggle card rail" aria-pressed="true"></button>
+    <div class="brand"><i aria-hidden="true"></i>gummi</div>
+    <div class="ws" data-testid="workspace">
+      <span class="sep">/</span><span id="ws-repo" data-testid="ws-repo"></span>
+      <span class="sep branch">·</span><span class="mono branch" id="ws-head" data-testid="ws-head"></span>
+    </div>
+    <div class="pills" role="group" aria-label="Board status">
+      <button class="pill" id="p-next" data-testid="pill-needs" title="Jump to the next card that needs you (n)"><span class="dot"></span><b id="p-needs">0</b> need you</button>
+      <span class="pill" id="p-running" data-testid="pill-running"><span class="spinner"></span><b id="p-run">0</b> running</span>
+      <span class="pill hide-m" data-testid="pill-today">today <b class="mono" id="p-today">0.0</b> cr</span>
+      <span class="pill hide-m" id="p-conn" data-testid="conn" data-state="connecting" role="status"><span class="spinner"></span><span id="p-conn-text">connecting</span></span>
+    </div>
+    <div class="presence hide-s" id="presence" data-testid="presence" aria-label="Viewing now"></div>
+    <button class="iconbtn hide-s" id="btn-palette" data-testid="btn-palette" title="Jump to a card (⌘K)" aria-label="Jump to a card"></button>
+    <button class="iconbtn hide-s" id="btn-keys" data-testid="btn-keys" title="Keyboard shortcuts (?)" aria-label="Keyboard shortcuts"><kbd>?</kbd></button>
+    <button class="iconbtn theme-btn" id="btn-theme" data-testid="btn-theme" title="Toggle theme" aria-label="Toggle theme"></button>
+  </header>
+
+  <div class="resume" id="resume" data-testid="resume-slot"></div>
+
+  <div class="main">
+    <nav class="rail" aria-label="Cards" data-testid="rail">
+      <div class="rail-head">
+        <label class="search"><span id="filter-icon"></span><input id="filter" data-testid="rail-filter" placeholder="Filter cards" aria-label="Filter cards" autocomplete="off"></label>
+        <div class="chips" id="kinds" role="group" aria-label="Card kinds" data-testid="rail-kinds"></div>
+      </div>
+      <div class="cards" id="cards" data-testid="rail-cards"></div>
+      <div class="rail-foot" id="rail-foot" data-testid="rail-foot"></div>
+    </nav>
+
+    <main class="center" aria-label="Conversation" data-testid="conversation">
+      <div class="head" id="head" data-testid="card-head"></div>
+      <div class="thread" id="thread" data-testid="thread" tabindex="-1">
+        <div class="thread-inner">
+          <div class="thread-items" id="thread-items" data-testid="thread-items" role="log" aria-live="polite" aria-relevant="additions" aria-label="Card thread"></div>
+          <div id="thread-live" data-testid="thread-live"></div>
+        </div>
+      </div>
+      <div class="dock" data-testid="dock"><div class="dock-inner">
+        <div id="decision" data-testid="decision-slot"></div>
+        <div id="nextup" data-testid="nextup-slot"></div>
+        <div class="composer" id="composer" data-testid="composer">
+          <label class="sr-only" for="composer-input">Message</label>
+          <textarea id="composer-input" data-testid="composer-input" rows="1" placeholder="Message the agent, or type a command"></textarea>
+          <div class="bar">
+            <span class="enter"><kbd>enter</kbd><b id="enter-says" data-testid="composer-says" aria-live="polite">sends your message</b></span>
+            <button class="send" id="send" data-testid="composer-send">Send</button>
+          </div>
+          <div class="cnote" id="composer-note" data-testid="composer-note" role="status" hidden></div>
+        </div>
+      </div></div>
+    </main>
+
+    <aside class="right" aria-label="Card documents" data-testid="panel">
+      <!-- the resizer is the panel's left edge, inside its landmark: a
+           control between the landmarks is one a screen reader's landmark
+           list never reaches -->
+      <div class="resizer" id="resizer" data-testid="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the document panel" tabindex="0"></div>
+      <div class="tabs" id="tabs" data-testid="panel-tabs"></div>
+      <div class="pane" id="pane" role="tabpanel" data-testid="panel-pane" tabindex="-1"></div>
+    </aside>
+  </div>
+
+  <div class="mdec" id="mdec" data-testid="mobile-decision" hidden></div>
+  <nav class="mnav" id="mnav" aria-label="Views" data-testid="mobile-nav"></nav>
+</div>
+
+<div class="toasts" id="toasts" data-testid="toasts" role="status" aria-live="polite"></div>
+
+<noscript><p class="boot">The gummi board needs JavaScript.</p></noscript>
+<script type="module" src="/assets/app.js?v=__ASSET_V__"></script>
+</body>
+</html>

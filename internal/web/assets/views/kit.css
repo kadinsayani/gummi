@@ -1,0 +1,49 @@
+/* views/kit.css — the pieces views/kit.js builds, shared by the tool
+   surfaces. Each surface's own sheet imports this one first. */
+
+/* a view body is a scrolling column: its parts keep their height */
+.vingest > *,.vbugs > *,.vdoctor > *,.vfleet > *{flex-shrink:0}
+.vrow{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-start}
+.vrow > .btn{align-self:flex-end}
+.vrow > .field{flex:1 1 160px;min-width:0}
+.vrow > .field.narrow{flex:0 1 110px}
+.field .hint{font-size:11.5px;color:var(--fg3)}
+.field select{height:36px;padding:0 8px}
+.field input{height:36px}
+.vseg{align-self:flex-start;display:inline-flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden;flex-shrink:0}
+.vseg button{height:26px;padding:0 11px;font-size:12.5px;color:var(--fg3);border-left:1px solid var(--line2)}
+.vseg button:first-child{border-left:0}
+.vseg button:hover{color:var(--fg)}
+.vseg button.on{background:var(--band);color:var(--fg);font-weight:500}
+.verr{border:1px solid color-mix(in srgb,var(--err) 40%,var(--line));background:color-mix(in srgb,var(--err) 6%,var(--panel));color:var(--fg);border-radius:8px;padding:8px 12px;font-size:13px;white-space:pre-wrap;overflow-wrap:anywhere}
+.vnote{font-size:12.5px;color:var(--fg3)}
+.vnote.warn{color:var(--warn)}
+.vhead{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:var(--fg3)}
+.vhead b{color:var(--fg);font-weight:600;font-size:13.5px}
+.vhead .src{font-family:var(--mono);font-size:12px;color:var(--fg3);overflow-wrap:anywhere}
+.vhead .grow{flex:1}
+.vconfirm{display:flex;align-items:center;gap:12px;flex-wrap:wrap;border:1px solid color-mix(in srgb,var(--accent) 35%,var(--line));background:var(--accent-soft);border-radius:10px;padding:10px 12px}
+.vconfirm.danger{border-color:color-mix(in srgb,var(--err) 40%,var(--line));background:color-mix(in srgb,var(--err) 6%,var(--panel))}
+.vconfirm .q{flex:1 1 240px;min-width:0;font-size:13px;color:var(--fg2)}
+.vconfirm .q b{color:var(--fg);font-weight:600}
+.vconfirm .d{margin-top:2px;font-size:12.5px;color:var(--fg3);overflow-wrap:anywhere}
+.vconfirm .d .loud{color:var(--err);font-weight:600}
+.vconfirm .acts{display:flex;gap:8px;margin-left:auto}
+.vcards{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.vcards li{display:flex;align-items:baseline;gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:13px}
+.vcards li:first-child{border-top:0}
+.vcards .link{font-family:var(--mono);font-size:12.5px}
+.vcards .t{flex:1;min-width:0;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vcards .st{font-size:11.5px;color:var(--fg3)}
+.vfoot{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;padding-top:4px}
+.vfoot .grow{flex:1}
+.vsteps{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:12.5px}
+.vsteps li{display:flex;gap:8px;align-items:baseline;color:var(--fg2)}
+.vsteps li::before{content:"·";color:var(--fg4);width:10px;flex-shrink:0;text-align:center}
+.vsteps li.note{color:var(--fg)}
+.vsteps li.note::before{content:"●";font-size:8px;color:var(--accent)}
+.vsteps li.tool{font-family:var(--mono);font-size:12px;color:var(--fg3)}
+.vbusy{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--fg2)}
+@media (max-width:760px){
+  .vconfirm .acts{margin-left:0;width:100%;justify-content:flex-end}
+}

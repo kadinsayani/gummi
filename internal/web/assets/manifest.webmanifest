@@ -1,0 +1,15 @@
+{
+  "name": "gummi board",
+  "short_name": "gummi",
+  "description": "The gummi board, served from your machine.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#16161d",
+  "theme_color": "#16161d",
+  "icons": [
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/assets/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}

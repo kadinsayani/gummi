@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="gummi">
+  <rect width="192" height="192" rx="44" fill="#16161d"/>
+  <!-- three cards on a board, the middle one in flight -->
+  <rect x="34" y="46" width="34" height="100" rx="8" fill="#2c2c38"/>
+  <rect x="79" y="46" width="34" height="100" rx="8" fill="#2c2c38"/>
+  <rect x="124" y="46" width="34" height="100" rx="8" fill="#2c2c38"/>
+  <rect x="40" y="54" width="22" height="14" rx="4" fill="#8a8a99"/>
+  <rect x="85" y="54" width="22" height="14" rx="4" fill="#7aa2f7"/>
+  <rect x="85" y="74" width="22" height="14" rx="4" fill="#7aa2f7" opacity=".55"/>
+  <rect x="130" y="54" width="22" height="14" rx="4" fill="#9ece6a"/>
+</svg>

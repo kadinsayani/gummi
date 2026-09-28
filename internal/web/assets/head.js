@@ -1,0 +1,98 @@
+// head.js — the open card's head: kind, id and title, its menu, the stage
+// strip (a past stage jumps to that stage in the thread), branch, waits,
+// and the spend bar against its envelope.
+
+import { $, h, icon, clear, append, kindTag, STAGES, cr } from './dom.js?v=__ASSET_V__'
+import { on, state, row } from './store.js?v=__ASSET_V__'
+import { openMenu, openView } from './views.js?v=__ASSET_V__'
+import { runAction } from './actions.js?v=__ASSET_V__'
+
+let ctx = {}
+
+export function initHead (c) {
+  ctx = c
+  on(['card', 'sel', 'board', 'cardErr', 'rightHidden', 'view'], render)
+}
+
+function render () {
+  const el = $('#head')
+  clear(el)
+  const c = state.card || row(state.sel)
+  if (!c) {
+    el.append(h('div', { class: 'head-row' }, h('h1', { testid: 'card-title' }, state.sel ? state.sel : 'No card open')))
+    return
+  }
+  const actions = state.card?.actions || []
+  const prominent = actions.find(a => /^(pause|resume)$/.test(a.id))
+  const menuBtn = actions.length
+    ? h('button', { class: 'iconbtn', id: 'card-actions', testid: 'card-actions', title: 'Card actions', 'aria-label': 'Card actions', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'))
+    : null
+  menuBtn?.addEventListener('click', () => openActions())
+  const panelOpen = !state.rightHidden
+  append(el, [
+    h('div', { class: 'head-row' },
+      h('span', { class: 'kind', testid: 'card-kind' }, kindTag(c)),
+      h('span', { class: 'cid', testid: 'card-id' }, c.id),
+      h('h1', { testid: 'card-title', title: c.title }, c.title),
+      h('div', { class: 'head-actions' },
+        prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
+        menuBtn,
+        h('button', { class: ['iconbtn', panelOpen && 'on'], testid: 'toggle-panel', title: 'Show or hide the document panel (])', 'aria-label': 'Toggle document panel', 'aria-pressed': String(panelOpen), type: 'button', onclick: ctx.togglePanel }, icon('panel')))),
+    h('div', { class: 'subline' },
+      stages(c),
+      c.branch ? h('span', { class: 'mono', testid: 'card-branch' }, c.branch) : null,
+      c.adopted ? h('span', null, 'adopted branch') : null,
+      c.base && c.branch ? h('span', null, 'onto ', h('span', { class: 'mono' }, c.base)) : null,
+      c.elsewhere ? h('span', null, 'driven by another gummi') : null,
+      c.waits?.length ? h('span', null, 'waits on ', c.waits.map((w, i) => [i ? ', ' : '', h('button', { class: 'link', type: 'button', onclick: () => ctx.select(w) }, w)])) : null,
+      c.kind === 'goal' ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: 'Open the goal page: its budget, done-when, cards and log', onclick: () => openView('goal', { id: c.id }) }, 'goal page') : null,
+      c.goal ? h('button', { class: 'link', type: 'button', testid: 'card-goal', title: c.goal.title ? `Open the goal: ${c.goal.title}` : 'Open the goal', onclick: () => openView('goal', { id: c.goal.id }) }, 'goal ', h('span', { class: 'mono' }, c.goal.id)) : null,
+      c.stack ? h('button', { class: ['badge stack', c.stack.stale && 'stale'], type: 'button', testid: 'card-stack', title: `Open the stack ${c.stack.name || c.stack.id}`, onclick: () => openView('stacks', { id: c.stack.id }) }, `stack ${c.stack.pos + 1} of ${c.stack.of}`) : null,
+      spend(c)),
+    state.cardErr && !state.card ? h('div', { class: 'subline badc', testid: 'card-error' }, state.cardErr.message) : null])
+}
+
+// openActions drops the card's menu from the head's "⋯". With a line (a
+// composer line the server routed to the menu, "/rebase"), the entries
+// that line names come first.
+export function openActions (line = '') {
+  const btn = document.getElementById('card-actions')
+  const actions = state.card?.actions || []
+  if (!btn || !actions.length) return
+  const word = String(line).trim().replace(/^\//, '').split(/\s+/)[0].toLowerCase()
+  const hit = (a) => word && (a.id.toLowerCase().startsWith(word) || a.label.toLowerCase().startsWith(word))
+  const list = word ? [...actions.filter(hit), ...actions.filter(a => !hit(a))] : actions
+  // no key hints: the letters are the terminal's, and most of them mean
+  // something else on this page
+  const items = list.map(a => ({
+    label: a.label, danger: a.danger, testid: `action-${a.id}`, hint: a.detail, onClick: () => runAction(state.card, a)
+  }))
+  openMenu(btn, items, { testid: 'card-actions-menu' })
+}
+
+function stages (c) {
+  if (c.stage === 'open') {
+    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ freeform · no stages, no gates'))
+  }
+  const idx = STAGES.indexOf(c.stage)
+  return h('span', { class: 'stages', testid: 'card-stages' }, STAGES.map((s, i) => [
+    h('button', {
+      class: [i < idx && 'past', i === idx && 'cur', `st-${s}`],
+      type: 'button',
+      data: { stage: s },
+      testid: `stage-${s}`,
+      'aria-current': i === idx ? 'step' : null,
+      title: i < idx && i > 0 ? `Show the ${s} stage in the thread` : null,
+      onclick: i < idx && i > 0 ? () => ctx.jumpToStage(s) : null
+    }, i < idx ? '✓ ' : '', s),
+    i < STAGES.length - 1 ? h('em', { 'aria-hidden': 'true' }, '›') : null
+  ]))
+}
+
+function spend (c) {
+  const env = c.envelope || 0
+  const pct = env ? Math.min(100, (c.spend / env) * 100) : 0
+  return h('span', { class: ['spend', env && c.spend > env && 'over'], testid: 'card-spend', title: env ? `${cr(c.spend)} of a ${env} credit envelope` : 'No envelope' },
+    h('span', { class: 'bar' }, h('i', { style: { '--pct': pct + '%' } })),
+    h('span', { class: 'mono' }, `${cr(c.spend)} / ${env || '∞'} cr`))
+}

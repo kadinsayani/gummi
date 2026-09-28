@@ -1,0 +1,107 @@
+@import url("kit.css?v=__ASSET_V__");
+/* views/fleet.css — Fleet stats. Marks carry colour (stage tokens, the
+   warning tone for waits, the accent for agent time); every word stays
+   in text tokens. Numbers in columns are tabular. */
+
+.modal .mbody.vfleet{position:relative;gap:14px}
+.vfleet .fbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.vfleet .fbar .span{font-size:12.5px;color:var(--fg3)}
+.vfleet .fbar .grow{flex:1}
+.vfleet .fout{display:flex;flex-direction:column;gap:18px;transition:opacity .15s}
+.vfleet .fout.stale{opacity:.6}
+
+/* headline */
+.ftiles{display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;gap:8px}
+.ftile{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 12px;display:flex;flex-direction:column;gap:2px;min-width:0}
+.ftile .k{font-size:12px;color:var(--fg3)}
+.ftile .v{font-size:22px;font-weight:600;letter-spacing:-.01em;color:var(--fg);line-height:1.2}
+.ftile.hero .v{font-size:30px}
+.ftile .v small{font-size:12.5px;font-weight:400;color:var(--fg3);letter-spacing:0}
+.ftile .s{font-size:12px;color:var(--fg3);font-variant-numeric:tabular-nums}
+.ftile .s.est{color:var(--warn)}
+
+/* sections */
+.fsec{display:flex;flex-direction:column;gap:8px;min-width:0}
+.fsec h3{margin:0;font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3);display:flex;gap:10px;align-items:baseline}
+.fsec h3 span{font-weight:400;text-transform:none;letter-spacing:0;color:var(--fg3);font-size:12px}
+.fsplit{display:grid;grid-template-columns:1fr 1fr;gap:24px}
+
+/* swatches and colour keys */
+.c-agent{--sc:var(--accent)} .c-you{--sc:var(--warn)} .c-idle{--sc:var(--line2)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--sc,var(--fg4));flex-shrink:0}
+.sw.hatch{background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--warn) 70%,transparent) 0 2px,color-mix(in srgb,var(--warn) 22%,transparent) 2px 5px)}
+.sw.run{background:linear-gradient(90deg,var(--fg3) 60%,transparent);box-shadow:inset 0 0 0 1px var(--fg3)}
+.keyrow{list-style:none;margin:0;padding:0;display:flex;flex-wrap:wrap;gap:6px 18px;font-size:12.5px;color:var(--fg2)}
+.keyrow li{display:inline-flex;align-items:center;gap:6px}
+.keyrow b{font-weight:600;color:var(--fg);font-variant-numeric:tabular-nums}
+.keyrow .p{color:var(--fg3);font-variant-numeric:tabular-nums}
+.keyrow .dia{width:8px;height:8px;background:var(--fg2);transform:rotate(45deg);display:inline-block}
+.keyrow .ck{font-style:normal;color:var(--ok);font-size:11px}
+
+/* the clock: one part-to-whole bar, 2px surface gaps between parts */
+.stack{display:flex;gap:2px;height:12px}
+.stack .part{width:var(--w);min-width:2px;background:var(--sc);border-radius:2px}
+.stack .part:first-child{border-radius:4px 2px 2px 4px}
+.stack .part:last-child{border-radius:2px 4px 4px 2px}
+.stack .part:only-child{border-radius:4px}
+.stack .part:hover{filter:brightness(1.12)}
+
+/* breakdown bars */
+.fbars{width:100%;border-collapse:collapse;font-size:12.5px}
+.fbars th{text-align:left;font-weight:400;color:var(--fg2);padding:4px 10px 4px 0;white-space:nowrap;max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.fbars th .sw{margin-right:7px;vertical-align:-1px}
+.fbars td{padding:4px 0}
+.fbars .bc{width:100%;padding-right:10px}
+.fbars .b{display:block;height:10px;width:var(--w);min-width:2px;background:var(--sc,var(--fg3));border-radius:0 4px 4px 0}
+.fbars .n{text-align:right;font-family:var(--mono);font-size:12px;color:var(--fg);font-variant-numeric:tabular-nums;padding-right:8px}
+.fbars .p{text-align:right;font-family:var(--mono);font-size:11.5px;color:var(--fg3);font-variant-numeric:tabular-nums;min-width:36px}
+.fbars tr:hover .b{filter:brightness(1.12)}
+
+/* the timeline: a label column and a track per lane, to scale */
+.tlwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--panel);-webkit-overflow-scrolling:touch}
+.tl{--lab:236px;position:relative;min-width:680px;padding:6px 0 0}
+.tl .grid{position:absolute;left:calc(var(--lab) + 12px);right:40px;top:0;bottom:24px;pointer-events:none}
+.tl .grid i{position:absolute;left:var(--x);top:0;bottom:0;border-left:1px solid var(--line)}
+.lane{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:12px;align-items:center;min-height:34px;padding:0 40px 0 0;position:relative}
+.lane:hover,.lane:focus-visible{background:color-mix(in srgb,var(--sunk) 70%,transparent)}
+.lane:focus-visible{outline-offset:-2px}
+.lane .lab{position:sticky;left:0;z-index:2;background:inherit;display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:8px;align-items:baseline;padding:4px 0 4px 12px;background:var(--panel);min-width:0}
+.lane:hover .lab,.lane:focus-visible .lab{background:var(--sunk)}
+.lane .lab .id{font-family:var(--mono);font-size:11.5px;color:var(--fg2);text-decoration:none;border-bottom:1px dotted var(--fg4)}
+.lane .lab .id:hover{color:var(--accent);border-color:var(--accent)}
+.lane .lab .t{font-size:12.5px;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lane .lab .c{font-family:var(--mono);font-size:11.5px;color:var(--fg3);font-variant-numeric:tabular-nums}
+.lane .lab .w,.lane .lab .r{grid-column:2 / 4;font-size:11px}
+.lane .lab .w{color:var(--warn)}
+.lane .lab .r{color:var(--fg3)}
+.track{position:relative;height:14px}
+.track > span{position:absolute;top:0;height:100%;left:var(--x)}
+.track .blk{width:var(--w);min-width:2px;background:var(--sc);border-radius:3px;box-shadow:0 0 0 1px var(--panel)}
+.track .blk.open{border-radius:3px 0 0 3px;background:linear-gradient(90deg,var(--sc) 70%,color-mix(in srgb,var(--sc) 35%,transparent))}
+.track .wait{width:var(--w);min-width:2px;top:3px;height:8px;border-radius:2px;background:repeating-linear-gradient(135deg,color-mix(in srgb,var(--warn) 70%,transparent) 0 2px,color-mix(in srgb,var(--warn) 22%,transparent) 2px 5px)}
+.track .gate{width:8px;height:8px;top:3px;margin-left:-4px;background:var(--fg2);transform:rotate(45deg);box-shadow:0 0 0 2px var(--panel);border-radius:1px}
+.track .land{width:14px;margin-left:-7px;top:-1px;height:16px;font-size:11px;line-height:16px;text-align:center;color:var(--ok);font-weight:700;text-shadow:0 0 2px var(--panel)}
+.track > span:hover{filter:brightness(1.12)}
+.axis{display:grid;grid-template-columns:var(--lab) minmax(0,1fr);gap:12px;height:24px;border-top:1px solid var(--line);margin-top:4px;padding-right:40px;position:relative}
+.axis .lab{position:sticky;left:0;background:var(--panel);z-index:2}
+.axis .ticks{position:relative}
+.axis .tk{position:absolute;left:var(--x);top:5px;transform:translateX(-50%);font-size:10.5px;color:var(--fg3);white-space:nowrap;font-variant-numeric:tabular-nums}
+.axis .now{position:absolute;right:-36px;top:5px;font-size:10.5px;color:var(--fg2);font-weight:600;font-variant-numeric:tabular-nums}
+
+/* the tooltip: value first, label after */
+.ftip{position:absolute;left:var(--tx,0);top:var(--ty,0);z-index:20;pointer-events:none;background:var(--fg);color:var(--bg);border-radius:7px;padding:6px 9px;font-size:12px;display:flex;flex-direction:column;gap:1px;box-shadow:var(--shadow);max-width:260px;white-space:nowrap}
+.ftip b{font-weight:600;font-variant-numeric:tabular-nums}
+.ftip span{opacity:.75}
+
+@media (max-width:900px){
+  .ftiles{grid-template-columns:1fr 1fr}
+  .ftile.hero{grid-column:1 / -1}
+  .fsplit{grid-template-columns:1fr;gap:18px}
+}
+@media (max-width:760px){
+  .tl{--lab:150px;min-width:620px}
+  .lane .lab .c{display:none}
+  .lane .lab{grid-template-columns:auto minmax(0,1fr)}
+  .lane .lab .w,.lane .lab .r{grid-column:1 / 3}
+}
+@media (prefers-reduced-motion:reduce){ .vfleet .fout{transition:none} }
