@@ -1941,6 +1941,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.refreshInboxFromDecisions(msg.decisions)
 			return m, nil
 		}
+		if msg.reseed {
+			m.seedInboxFromDecisions(msg.decisions)
+			return m, nil
+		}
 		m.seedInboxFromDecisions(msg.decisions)
 		m.reconstructInbox()
 		return m, nil
@@ -1962,8 +1966,12 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.boardInput.SetValue(msg.restoreBoard)
 			m.syncBoardCompletion()
 		}
+		var reseed tea.Cmd
 		if msg.clearInbox != "" {
 			m.inbox.remove(msg.clearInbox)
+			if msg.reseedInbox && m.store != nil {
+				reseed = m.reseedCardDecisions(msg.clearInbox)
+			}
 		}
 		m.notice = msg
 		// a reload is opt-in: only a notice emitted by a command that
@@ -1976,9 +1984,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// transition there — and the thread's history is not composed
 			// from rows, so reloading them alone leaves the page saying two
 			// different things about the same card.
-			return m, tea.Batch(m.loadRows, m.reloadOpenCardEvents(m.selectedID()))
+			return m, tea.Batch(m.loadRows, m.reloadOpenCardEvents(m.selectedID()), reseed)
 		}
-		return m, nil
+		return m, reseed
 
 	case copilotQuotaMsg:
 		m.copilot = msg.quota

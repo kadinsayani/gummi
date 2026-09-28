@@ -35,6 +35,11 @@ artifact):
                    backend crashed, was killed or lost its connection while
                    the person was still reading. A process started later
                    for the same card answers normally.
+    [ask-spends]   as [ask], but the agent goes on spending while its
+                   question is open (GUMMI_E2E_ASK_SPEND credits, default
+                   5000), the way a model that polls or sleeps in its shell
+                   waiting for the answer does: the card runs out of budget
+                   behind its question.
     [slow]         every stage streams its reply in small text deltas with a
                    pause between them (GUMMI_E2E_SLOW_SECONDS, default 6s
                    per stage in total), so a test can watch a live card. An
@@ -81,6 +86,7 @@ import time
 FAST = os.environ.get("GUMMI_E2E_FAST") == "1"
 SLOW_SECONDS = float(os.environ.get("GUMMI_E2E_SLOW_SECONDS") or "6")
 ASK_TIMEOUT = float(os.environ.get("GUMMI_E2E_ASK_TIMEOUT") or "2")
+ASK_SPEND = float(os.environ.get("GUMMI_E2E_ASK_SPEND") or "5000")
 LOG = os.environ.get("GUMMI_E2E_AGENT_LOG")
 CREDITS = 12  # per turn; small enough that no envelope in the suite runs dry
 
@@ -161,7 +167,7 @@ class TimedOut(Exception):
     pass
 
 
-def call_tool(name, args, timeout=None):
+def call_tool(name, args, timeout=None, spend=0):
     """Invoke a gummi client tool and block until gummi resolves it.
 
     ask_user resolves when the person answers; the other tools resolve at
@@ -171,6 +177,8 @@ def call_tool(name, args, timeout=None):
     """
     call_id = "%s-%d-%d" % (name, os.getpid(), int(time.time() * 1000))
     emit({"type": "ask", "id": call_id, "name": name, "ask": args})
+    if spend:
+        emit({"type": "usage", "credits": spend, "input": 1000, "output": 100})
     deadline = None if timeout is None else time.time() + timeout
     while True:
         try:
@@ -357,10 +365,12 @@ def plan_feature(turn, answer=None):
     ])
     gives_up = "[ask-gives-up]" in ctx["keywords"]
     dies = "[ask-dies]" in ctx["keywords"]
-    if ("[ask]" in ctx["keywords"] or gives_up or dies) and answer is None:
+    spends = "[ask-spends]" in ctx["keywords"]
+    if ("[ask]" in ctx["keywords"] or gives_up or dies or spends) and answer is None:
         turn.say("Two ways to do this are written up under Considered approaches. "
                  "I need you to pick one.")
-        answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None, args={
+        answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None,
+                           spend=ASK_SPEND if spends else 0, args={
             "question": "Where should %s's helper live?" % ctx["card"],
             "options": [
                 {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
@@ -577,7 +587,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[slow]", "[research]")
+KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[slow]", "[research]")
 
 
 def detect(frame):

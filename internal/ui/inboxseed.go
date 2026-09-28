@@ -19,6 +19,9 @@ type openDecisionsMsg struct {
 	// refresh marks a re-read after another process committed, as
 	// opposed to the startup read (refreshInboxFromDecisions).
 	refresh bool
+	// reseed marks one card's re-read after its item was cleared
+	// (reseedCardDecisions): it only ever seeds.
+	reseed bool
 }
 
 // fetchOpenDecisions runs Store.OpenDecisions once, at startup: a database
@@ -36,6 +39,22 @@ func (m *Shell) fetchOpenDecisions() tea.Msg {
 func (m *Shell) refetchOpenDecisions() tea.Msg {
 	open, err := m.store.OpenDecisions(context.Background())
 	return openDecisionsMsg{decisions: open, err: err, refresh: true}
+}
+
+// reseedCardDecisions reads one card's open decisions back after its
+// needs-you item was cleared on an answer (noticeMsg.reseedInbox). It
+// only seeds — add-if-absent, like the startup read — so a stop the card
+// still stands on comes back, and nothing a live event raised meanwhile
+// is overwritten.
+func (m *Shell) reseedCardDecisions(id domain.FeatureID) tea.Cmd {
+	store := m.store
+	return func() tea.Msg {
+		open, err := store.OpenDecisions(context.Background())
+		if err != nil {
+			return nil
+		}
+		return openDecisionsMsg{decisions: map[domain.FeatureID][]state.OpenDecision{id: open[id]}, reseed: true}
+	}
 }
 
 // refreshInboxFromDecisions brings the needs-you queue in line with the

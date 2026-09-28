@@ -201,6 +201,12 @@ type noticeMsg struct {
 	// gate-blocked returns leave it empty so the attention item survives
 	// until the thing is actually attended to.
 	clearInbox domain.FeatureID
+	// reseedInbox, with clearInbox, reads that card's open decisions back
+	// once the item is gone. An answer settles its own question and
+	// nothing else: a stop that stood behind the question — a budget
+	// stop raised while it was up — is still the card's, and the one item
+	// the queue keeps per card was the only place the board held it.
+	reseedInbox bool
 	// restore, when non-empty, is a composer line that was never
 	// delivered and belongs back in the input. A refused turn (the
 	// backend was still streaming the previous one) must not cost the

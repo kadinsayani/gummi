@@ -385,6 +385,38 @@ test.describe('a question whose backend went away', () => {
   });
 });
 
+// A model that polls or sleeps while it waits on its question goes on
+// spending, and the card can run out of budget behind the question. The
+// question comes first; answering it settles the question and leaves the
+// card on its budget stop, which the board used to forget until the next
+// restart (offering a plain run in its place). Topping up runs the stage
+// again, and that run opens with the answer.
+test('a question answered behind a budget stop reaches the run the top-up starts', async ({ pairedPage: page, server, api }, info) => {
+  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-spends] Add a thrifty helper' })).json;
+  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.needs?.kind).toBe('budget');
+  await open(page, server, c.id);
+  await expect(page.getByTestId('decision-question')).toContainText('Where should');
+  await shot(page, info, 'ask-over-budget');
+
+  await answerOption(page, isPhone(info), '1');
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('budget');
+  expect((await api('GET', `/api/cards/${c.id}`)).json.status).not.toBe('running');
+  if (!isPhone(info)) await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'budget');
+  await shot(page, info, 'budget-after-answer');
+
+  const stop = (await api('GET', `/api/cards/${c.id}`)).json.decision;
+  let r = await api('POST', `/api/cards/${c.id}/answer`, { ref: stop.ref, option: 'topup', against: stop.against.token });
+  if (r.status === 409 && r.json.confirm) {
+    r = await api('POST', `/api/cards/${c.id}/answer`, { ref: stop.ref, option: 'topup', against: stop.against.token, confirm: r.json.confirm });
+  }
+  expect(r.status).toBe(200);
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind, { timeout: 30_000 }).toBe('gate');
+  const spec = JSON.stringify((await api('GET', `/api/cards/${c.id}/spec`)).json);
+  expect(spec).toContain('Decided with the user: Extend the existing file');
+});
+
 // The board agent can start a card's stage, and a fresh stage session
 // holds no question. Told to run a card parked on a person's question, it
 // would have put the question out from under the person reading it; it
