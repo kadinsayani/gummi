@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
@@ -51,6 +52,10 @@ const (
 	// ViaAnswer is a line that answered an ask — the echo of the ask's
 	// own answer in the session transcript.
 	ViaAnswer = "answer"
+	// ViaConsult is a turn of the card's consult conversation: a question
+	// a person asked it (ItemYou) or its answer (ItemMessage). It is read
+	// only; it never steered the card.
+	ViaConsult = "consult"
 )
 
 // Item is one thing a thread draws.
@@ -232,6 +237,12 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			// event too would say one ending twice (the TUI's live block).
 			closedHere = ev.Kind == state.EventPark || ev.Kind == state.EventAutopilot
 		}
+		if ev.Kind == state.EventConsult {
+			// a consult turn goes where it was asked, whatever stage the
+			// card was in and whether or not any stage had started yet
+			emit(consultItem(ev))
+			continue
+		}
 		k, inSeg := segOf[i]
 		if !inSeg || closedHere {
 			continue
@@ -370,6 +381,21 @@ func eventItem(ev state.CardEvent, inStretch bool) (Item, bool) {
 	default:
 		return Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), T: ItemNote, At: ev.At, Stage: ev.Stage, Text: ev.Kind}, true
 	}
+}
+
+// consultItem is one consult turn: the person's question, or the consult
+// agent's answer.
+func consultItem(ev state.CardEvent) Item {
+	var p MessagePayload
+	_ = json.Unmarshal([]byte(ev.Payload), &p)
+	it := Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), At: ev.At, Stage: ev.Stage,
+		Text: Sanitize(p.Content), Via: ViaConsult}
+	if p.Author == string(engine.AuthorUser) {
+		it.T, it.Author, it.By = ItemYou, AuthorLabel(p.Author, ""), state.PersonName(p.By)
+		return it
+	}
+	it.T, it.Author = ItemMessage, string(agent.RoleConsult)
+	return it
 }
 
 func receiptItem(ev state.CardEvent, r Receipt) Item {

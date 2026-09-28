@@ -90,8 +90,8 @@ type Segment struct {
 
 // Segments reconstructs a card's session history from its event log, in
 // seq order: each stage_enter opens a segment, the matching stage_exit
-// (same stage, still open) closes it, and every other event belongs to
-// the open segment for its own stage. Nil input (events not loaded yet, or
+// (same stage, still open) closes it, and every other event but a consult
+// turn belongs to the open segment for its own stage. Nil input (events not loaded yet, or
 // none recorded) yields no segments — the caller degrades to omitting the
 // folded receipts and the live-stage fallback, exactly as required.
 //
@@ -129,6 +129,10 @@ func Segments(events []state.CardEvent) []Segment {
 			_ = json.Unmarshal([]byte(ev.Payload), &p)
 			last.Exited, last.Verdict, last.Credits, last.ExitAt = true, p.Verdict, p.Credits, ev.At
 			last.ExitIdx = i
+		case state.EventConsult:
+			// the consult conversation is no stage session's: it sits in
+			// the log where it was asked, in no segment (Items places it)
+			continue
 		default:
 			if len(segs) == 0 {
 				// nothing has started yet: the todo→first-stage crossing

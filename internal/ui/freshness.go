@@ -194,6 +194,14 @@ func (m *Shell) liveKey(r featureRow) string {
 			flag(ff.Busy())
 		}
 	}
+	if c := m.consultFor(id); c != nil {
+		// a consult answer lands in the log as it settles: the thread
+		// has a new turn to draw, and the live block one fewer
+		snap := c.Snapshot()
+		b = append(b, 'c')
+		flag(snap.Busy)
+		b = strconv.AppendInt(b, int64(len(snap.Transcript)), 10)
+	}
 	if s := m.sessionFor(id); s != nil {
 		b = append(b, '|')
 		b = append(b, s.State()...)

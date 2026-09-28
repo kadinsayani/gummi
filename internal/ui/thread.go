@@ -1625,7 +1625,11 @@ func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 	asking := m.consultSending[r.F.ID]
 	if c == nil {
 		if asking == "" {
-			return nil
+			// No session in this process — a restart, or a consult asked
+			// from another board — but the card's log keeps what was asked
+			// and answered (EventConsult), so the exchange is still drawn,
+			// in the same slot, from there.
+			return m.recordedConsultLines(s, r, w)
 		}
 		// A line on its way to a session that does not exist yet. It is
 		// drawn without the caption because there is no snapshot to write
@@ -1654,6 +1658,29 @@ func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" thinking…"))
 	}
 	return lines
+}
+
+// recordedConsultLines is the consult exchange as the card's log recorded
+// it, for a card with no consult session in this process: the same
+// caption and the same transcript rendering, over the recorded turns.
+func (m *Shell) recordedConsultLines(s *theme.Styles, r featureRow, w int) []string {
+	var tr []engine.Message
+	for _, ev := range r.Events {
+		if ev.Kind != state.EventConsult {
+			continue
+		}
+		var p threadfold.MessagePayload
+		if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.Content == "" {
+			continue
+		}
+		tr = append(tr, engine.Message{Author: engine.Author(p.Author), Content: p.Content, By: p.By, At: ev.At})
+	}
+	if len(tr) == 0 {
+		return nil
+	}
+	snap := engine.Snapshot{Role: agent.RoleConsult, Transcript: tr}
+	lines := []string{consultCaption(s, snap, w), ""}
+	return append(lines, transcriptLines(s, snap, w, m.threadOutputs)...)
 }
 
 // freeformBlock renders a freeform card's conversation — the whole of its

@@ -2,14 +2,17 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // consultPermission is the fixed tool-call policy every consult session
@@ -297,8 +300,9 @@ func (c *ConsultSession) ensureBackend(ctx context.Context) (*Session, error) {
 // its backend first if the last one idled out. It mirrors BoardSession's
 // own Send minus everything that doesn't apply here: no budget nudge (no
 // budget), no persist (no store row backs a consult session — its spend
-// still lands in the feature's own totals, via recordUsage, but the
-// session itself has nothing to write).
+// still lands in the feature's own totals, via recordUsage, and its turns
+// in the card's log, via recordConsult, but the session itself has
+// nothing to write).
 func (c *ConsultSession) Send(ctx context.Context, msg string) error {
 	sess, err := c.ensureBackend(ctx)
 	if err != nil {
@@ -309,6 +313,7 @@ func (c *ConsultSession) Send(ctx context.Context, msg string) error {
 		return errors.New("consult session has no live agent")
 	}
 	sess.appendUser(msg, actorOf(ctx))
+	c.engine.recordConsult(c.id, AuthorUser, msg, actorOf(ctx))
 	sess.setBusy(true)
 	c.armIdleTimer()
 	c.engine.send(Event{Feature: c.id, Kind: EventUpdated})
@@ -318,6 +323,33 @@ func (c *ConsultSession) Send(ctx context.Context, msg string) error {
 		return err
 	}
 	return nil
+}
+
+// recordConsult writes one consult turn to the card's log (state.
+// EventConsult): the question a person asked, or the answer the consult
+// agent gave. The consult session itself still has no store row — it is
+// a read-only side conversation — but what was asked and answered is part
+// of the card's history: without this it was drawn only from the live
+// session, below everything else on the page however early it was asked,
+// and was gone after a restart. The turns seeded from a stage session are
+// never recorded here; they are that stage's, and its own log has them.
+func (e *Engine) recordConsult(id domain.FeatureID, author Author, content, by string) {
+	if !e.cfg.Persist || e.cfg.Store == nil || strings.TrimSpace(content) == "" {
+		return
+	}
+	fields := map[string]string{"author": string(author), "content": content}
+	if by != "" {
+		fields["by"] = by
+	}
+	payload, err := json.Marshal(fields)
+	if err != nil {
+		return
+	}
+	ev := state.CardEvent{Feature: id, Kind: state.EventConsult, At: e.now(), Payload: string(payload)}
+	if f, err := e.cfg.Store.GetFeature(context.Background(), id); err == nil {
+		ev.Stage = f.Stage
+	}
+	_ = e.cfg.Store.AppendEvent(context.Background(), ev)
 }
 
 // Snapshot returns a render-safe copy of the consult session's current
@@ -442,6 +474,11 @@ func (e *Engine) handleConsult(c *ConsultSession, sess *Session, ev agent.Event)
 		sess.appendDelta(ev.Text)
 	case agent.EventMessage:
 		sess.finishAssistant(ev.Text)
+		// the message as the transcript settled it: a completion may carry
+		// no text of its own and only close what the deltas streamed
+		if tr := sess.Snapshot().Transcript; len(tr) > 0 && tr[len(tr)-1].Author == AuthorAssistant {
+			e.recordConsult(c.id, AuthorAssistant, tr[len(tr)-1].Content, "")
+		}
 	case agent.EventToolCall:
 		sess.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
 	case agent.EventToolResult:

@@ -61,6 +61,12 @@ const (
 	// EventPark marks a card being parked (taken out of the autonomous
 	// loop pending human attention).
 	EventPark = "park"
+	// EventConsult is one turn of the card's consult conversation — a
+	// person's question or the consult agent's answer — with the same
+	// payload shape as EventMessage. It is its own kind because it is not
+	// a turn of any stage session: it belongs to no stage's segment and
+	// never reads as a person taking the card back.
+	EventConsult = "consult"
 	// EventDecisionOpen marks a card blocking on a human: a design gate,
 	// an ask_user, a failed verify, a rebase conflict, an exhausted
 	// envelope, or an idle card with nothing running. Its answer is the

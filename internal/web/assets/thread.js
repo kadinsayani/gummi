@@ -196,10 +196,13 @@ function message (it) {
   }
   if (it.author === 'you') return you(it)
   const role = it.author || it.role || ROLE[it.stage] || 'agent'
-  return h('div', { class: ['msg', it.stage && `st-${it.stage}`] },
+  // a consult answer sits where it was asked, and says it steered nothing
+  const consult = it.via === 'consult'
+  return h('div', { class: ['msg', it.stage && `st-${it.stage}`], testid: consult ? 'thread-consult' : null },
     h('div', { class: 'av agent', 'aria-hidden': 'true' }, avatarFor(role)),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, role),
+        consult ? h('span', { class: 'via' }, 'read-only') : null,
         it.flavor && it.flavor !== 'work' ? h('span', { class: 'via' }, it.flavor) : null,
         it.model ? h('span', { class: 'mono' }, it.model) : null,
         h('span', { class: 'mono' }, clock(it.time))),
@@ -212,7 +215,7 @@ function message (it) {
 // in another's mouth on a board several people share.
 function you (it) {
   const who = it.by || 'you'
-  return h('div', { class: 'msg' },
+  return h('div', { class: 'msg', testid: it.via === 'consult' ? 'thread-consult' : null },
     h('div', { class: 'av you', 'aria-hidden': 'true' }, it.by ? initials(it.by) : 'you'),
     h('div', null,
       h('div', { class: 'who' }, h('b', null, who), h('span', { class: 'mono' }, clock(it.time)), it.via ? h('span', { class: 'via' }, it.via) : null),

@@ -104,7 +104,20 @@ func (m *Shell) webConsult(r featureRow) *webapi.Conversation {
 	if len(snap.Transcript) == 0 && asking == "" {
 		return nil
 	}
-	return webConversation(snap, asking, "thinking")
+	conv := webConversation(snap, asking, "thinking")
+	if m.store != nil {
+		// Every question and answer is in the card's log (EventConsult),
+		// and the thread draws them from there, where they were asked; the
+		// live block keeps only what the log does not hold yet — the
+		// answer being written, the call in flight, the line on its way.
+		// Drawn from the snapshot too, a consult asked at todo sat below
+		// every later stage, and was gone after a restart.
+		conv.Turns = nil
+		if !conv.Busy && conv.Streaming == "" && conv.Sending == "" && conv.Err == "" {
+			return nil
+		}
+	}
+	return conv
 }
 
 // webFreeform is a freeform card's conversation (freeformBlock).

@@ -148,6 +148,18 @@ func (d *WebDocs) Thread(ctx context.Context, after int64) (webapi.Thread, error
 				break
 			}
 		}
+		// A consult turn is no turn of the stage session: the live block
+		// does not draw it, so it is never held back for the session to
+		// hand over.
+		kept := held[:0:0]
+		for _, it := range held {
+			if it.Via == threadfold.ViaConsult {
+				items = append(items, it)
+				continue
+			}
+			kept = append(kept, it)
+		}
+		held = kept
 	}
 	var last int64
 	for _, it := range items {
