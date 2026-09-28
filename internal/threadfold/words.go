@@ -65,6 +65,9 @@ func AskAnswerer(p state.AskPayload) string {
 	if p.Actor == state.ActorAutopilot {
 		return "autopilot"
 	}
+	if name := state.PersonName(AskedBy(p)); name != "" {
+		return name
+	}
 	return "you"
 }
 
@@ -84,6 +87,9 @@ func AskLine(p state.AskPayload) string {
 // GateCrosser is who a gate crossing names as its crosser on the thread:
 // "you" for a crossing by hand, otherwise the actor's own name.
 func GateCrosser(p state.GatePayload) string {
+	if name := state.PersonName(p.Actor); name != "" {
+		return name
+	}
 	if p.Actor != "" && p.Actor != state.ActorUser {
 		return p.Actor
 	}
@@ -183,7 +189,7 @@ func DecisionLine(ev state.CardEvent, inStretch bool) string {
 	switch ev.Kind {
 	case state.EventGate:
 		var p state.GatePayload
-		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || humanGateActors[p.Actor] {
+		if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil || HumanGateActor(p.Actor) {
 			return ""
 		}
 		who := p.Actor

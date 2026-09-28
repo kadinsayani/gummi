@@ -76,13 +76,16 @@ const (
 // future loop names itself — so enumerating those is how a reader
 // silently starts miscounting the day one is added. The human set is
 // bounded by how a person can actually reach a gate, and that is the
-// smaller, more stable thing to name.
-var humanGateActors = map[string]bool{"user": true, "caller": true}
+// smaller, more stable thing to name. A person the web face names
+// ("user:Simon", state.PersonActor) is the TUI's "user" with a name on it.
+var humanGateActors = map[string]bool{"caller": true}
 
 // HumanGateActor reports whether a gate crossing's actor is a person
 // crossing it themselves (see humanGateActors for why the set is named
 // this way round).
-func HumanGateActor(actor string) bool { return humanGateActors[actor] }
+func HumanGateActor(actor string) bool {
+	return humanGateActors[actor] || state.IsPersonActor(actor)
+}
 
 // GateCrossing is one design gate autopilot crossed on its own.
 type GateCrossing struct {
@@ -216,7 +219,7 @@ func Stretches(events []state.CardEvent) []Stretch {
 			if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
 				continue
 			}
-			if humanGateActors[p.Actor] {
+			if HumanGateActor(p.Actor) {
 				closeWith(i, ev.At, StretchTakenBack, "")
 				continue
 			}
@@ -241,7 +244,7 @@ func Stretches(events []state.CardEvent) []Stretch {
 			if err := json.Unmarshal([]byte(ev.Payload), &p); err != nil {
 				continue
 			}
-			if AskedBy(p) == state.ActorUser {
+			if state.IsPersonActor(AskedBy(p)) {
 				closeWith(i, ev.At, StretchTakenBack, "")
 				continue
 			}

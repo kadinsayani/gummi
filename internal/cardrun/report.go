@@ -577,7 +577,7 @@ func judgment(evs []state.CardEvent, rnds map[domain.RoundKind]int) Judgment {
 
 func count(a *Answered, actor string) {
 	a.Total++
-	if humanActors[actor] {
+	if humanActors[actor] || state.IsPersonActor(actor) {
 		a.ByYou++
 		return
 	}

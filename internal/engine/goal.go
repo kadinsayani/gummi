@@ -194,7 +194,7 @@ func needsOwnerFrom(log []state.GoalEntry) GoalNeedsOwner {
 		case state.GoalNote, state.GoalReversed:
 			out = GoalNeedsOwner{}
 		case state.GoalRework:
-			if en.By == "user" {
+			if state.IsPersonActor(en.By) {
 				out = GoalNeedsOwner{}
 			}
 		}
