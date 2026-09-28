@@ -450,6 +450,49 @@ func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool
 	return autopilotSettled(f.ID, m.advanceStageAs(f.ID, state.ActorAutopilot)), true
 }
 
+// resumeDependencyParked revisits every gate parked on an unmet
+// dependency once a board reload shows that dependency done. It runs on
+// every rowsMsg, which is what a landing — here, from the web page, or
+// from another process — ends in.
+//
+// The park named a blocker that no longer exists, so its words go first:
+// the inbox item and the open decision row are re-worded to say the
+// dependency landed. A card on autopilot then gets the crossing it was
+// refused, through the same advance floor as any crossing: autopilot was
+// handed this gate and only the dependency stood in the way, so waiting
+// for a person here would make "hand it to autopilot" mean "until
+// something it depends on is late". A card someone has since taken back
+// only gets the words.
+//
+// The park is found by its words (unmetDependencyClause) rather than
+// held in a map, so a park a previous process made — seeded back from
+// its decision row — is revisited the same way.
+func (m *Shell) resumeDependencyParked() tea.Cmd {
+	var cmds []tea.Cmd
+	for _, it := range m.inbox.list() {
+		if it.Kind != attnGate || !strings.Contains(it.Text, unmetDependencyClause) {
+			continue
+		}
+		r, ok := m.rowByID(it.Feature)
+		if !ok || r.DepBlocked || r.watchOnly() {
+			continue
+		}
+		text := string(r.F.Stage) + " is no longer waiting on a dependency — review & approve"
+		it.Text = text
+		m.inbox.put(it)
+		m.rewordGateDecision(r.F.ID, text)
+		if !autopilotAnswers(m.autopilotModeFor(r.F.ID), decisionGate) || m.sessionWorking(r.F.ID) {
+			continue
+		}
+		if _, ok := autopilotForward(r.F); !ok {
+			continue
+		}
+		m.markAutopilotAnswering(r.F.ID)
+		cmds = append(cmds, autopilotSettled(r.F.ID, m.advanceStageAs(r.F.ID, state.ActorAutopilot)))
+	}
+	return tea.Batch(cmds...)
+}
+
 // autopilotSettledMsg wraps whatever an autopilot-dispatched command
 // returned, so the answering mark is dropped before the message is
 // handled.

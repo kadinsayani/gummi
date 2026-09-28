@@ -633,6 +633,11 @@ type autopilotGateBlockedMsg struct {
 	text string
 }
 
+// unmetDependencyClause is the words a gate blocked on a dependency parks
+// with. resumeDependencyParked (autopilot.go) finds such a park by them
+// once the dependency is done, so the phrase is written in one place.
+const unmetDependencyClause = "blocked by unmet dependency"
+
 // autopilotContinueMsg follows a crossing autopilot made itself onto an
 // autonomous stage. The card now sits at a stage with nothing running,
 // which is decisionIdle — the last kind in §10.17's table, and the one
@@ -744,7 +749,7 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 		for _, d := range res.BlockingDeps {
 			names = append(names, d.String())
 		}
-		text := fmt.Sprintf("%s: blocked by unmet dependency %s — land it before this card can start coding", id, strings.Join(names, ", "))
+		text := fmt.Sprintf("%s: %s %s — land it before this card can start coding", id, unmetDependencyClause, strings.Join(names, ", "))
 		return blockedMsg(actor, id, text)
 	case engine.StatusBlockedDocument:
 		// the deterministic citation/coverage floor (internal/verifydoc)
@@ -770,7 +775,13 @@ func (m *Shell) advanceOutcome(id domain.FeatureID, actor string, res engine.Adv
 	discover := res.EnteredWorktree
 	est := res.From == domain.StagePlan && m.envelope == 0
 	continueTo := domain.Stage("")
-	if actor == state.ActorAutopilot && autonomousStage(res.To) {
+	// A person's crossing on a card they handed to autopilot continues the
+	// same way autopilot's own does: the card now sits at a stage with
+	// nothing running, which is the idle decision autopilot answers
+	// (§10.17). Stopping there made "approve" on an autopilot card leave it
+	// idle at implement, which is the one thing a hand-over promises it
+	// will not do.
+	if autonomousStage(res.To) && (actor == state.ActorAutopilot || autopilotAnswers(res.Feature.GateApproval, decisionIdle)) {
 		continueTo = res.To
 	}
 	if discover || est {
