@@ -458,6 +458,17 @@ func (m *Shell) threadRender(w, h int, measure bool) string {
 		blank()
 	}
 
+	// A freeform card's whole conversation. It is drawn in the same slot
+	// the consult exchange uses, and exactly one of the two ever returns
+	// anything: a freeform card has no consult session, and no other kind
+	// has a freeform one.
+	if fl := m.freeformBlock(s, r, inner); len(fl) > 0 {
+		for _, l := range fl {
+			add(l)
+		}
+		blank()
+	}
+
 	// The card's consult exchange, if any — appended after the live
 	// stage block, not interleaved with it: the two are logically
 	// separate conversations a line addresses one at a time (arming
@@ -895,7 +906,13 @@ func threadHeader(s *theme.Styles, m *Shell, r featureRow, inner int) []string {
 	if f.Profile != "" {
 		profile = headerGap + s.ProfileTag.Render("["+f.Profile+"]")
 	}
-	autopilot := headerGap + autopilotField(s, m, f)
+	// A freeform card has no gates, so there is nothing for a gate-approval
+	// mode to govern and nothing for the field to report. "autopilot: off"
+	// on such a card says a mode is holding work back when no mode applies.
+	autopilot := ""
+	if !f.IsFreeform() {
+		autopilot = headerGap + autopilotField(s, m, f)
+	}
 	budget := ""
 	if f.Budget.Envelope > 0 {
 		budget = headerGap + s.Faint.Render(budgetSummary(f, m.liveCardSpent(f.ID)))
@@ -1064,6 +1081,21 @@ func roundLabel(m *Shell, f domain.Feature) string {
 // exists to route around, but is safe here because the pill's own text
 // is always its first (and often only) content.
 func stageStrip(s *theme.Styles, f domain.Feature, width int) string {
+	// A freeform card is in no sequence (DESIGN §19), so there is no
+	// position to draw: the five stages faint with none of them lit would
+	// say the card is somewhere in the workflow, which is the one thing
+	// that is not true of it. Its branch goes here instead — the fact a
+	// reader of this row actually wants, since it is what they will check
+	// out, and the closest thing a freeform card has to "how far along".
+	if f.IsFreeform() {
+		pill := s.StagePill(f.Stage).Render("freeform")
+		if branch := f.BranchName(); branch != "" {
+			if full := pill + s.Faint.Render(" · "+branch); width <= 0 || ansi.StringWidth(full) <= width {
+				return full
+			}
+		}
+		return pill
+	}
 	seq := stageSequence()
 	cur := 0
 	for i, st := range seq {
@@ -1813,6 +1845,14 @@ func (m *Shell) liveStageBlock(s *theme.Styles, r featureRow, segs []stageSegmen
 // drawn: m.consultFor is a lookup only, so a card nobody has asked
 // anything renders nothing here at all.
 func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
+	// A freeform card's conversation is its freeform session, drawn by
+	// freeformBlock. It never has a consult session — the composer routes
+	// its lines to the session that can actually act on the card — and
+	// both blocks read the same in-flight marker, so without this the line
+	// on its way would be drawn twice.
+	if r.F.IsFreeform() {
+		return nil
+	}
 	c := m.consultFor(r.F.ID)
 	asking := m.consultSending[r.F.ID]
 	if c == nil {
@@ -1846,6 +1886,88 @@ func (m *Shell) consultBlock(s *theme.Styles, r featureRow, w int) []string {
 		lines = append(lines, "  "+s.Info.Render(m.spinner()+" thinking…"))
 	}
 	return lines
+}
+
+// freeformBlock renders a freeform card's conversation — the whole of its
+// thread, since such a card has no stages to fold into receipts and no
+// event log of crossings to draw. consultBlock's shape, for the same
+// reason: both are non-stage conversations that render from a session
+// snapshot rather than from the card's history.
+//
+// It never spawns a session by being drawn. Engine.Freeform is a lookup,
+// so a card whose page is merely open costs nothing, and the session is
+// started by an action instead — creating the card, typing a line, or
+// sending the diff's comments.
+func (m *Shell) freeformBlock(s *theme.Styles, r featureRow, w int) []string {
+	if !r.F.IsFreeform() {
+		return nil
+	}
+	// The engine check guards the LOOKUP, not the block: a detached board
+	// (no agent configured) still has to tell the reader what this card is
+	// and where its work is, which is the one thing they cannot work out
+	// from a page with nothing on it.
+	var ff *engine.FreeformSession
+	if m.engine != nil {
+		ff = m.engine.Freeform(r.F.ID)
+	}
+	sending := m.consultSending[r.F.ID]
+	if ff == nil {
+		if sending != "" {
+			// A line on its way to a session that does not exist yet, drawn
+			// so the composer is not seen to empty itself into nothing.
+			return m.askingLines(s, sending, w)
+		}
+		return m.freeformAbsentLines(s, r, w)
+	}
+	snap := ff.Snapshot()
+	if len(snap.Transcript) == 0 && sending == "" {
+		return m.freeformAbsentLines(s, r, w)
+	}
+	lines := transcriptLines(s, snap, w, m.threadOutputs)
+	if snap.Err != nil {
+		for _, l := range strings.Split(wrapError(snap.Err.Error(), max(w-2, 4)), "\n") {
+			lines = append(lines, "  "+s.Error.Render(l))
+		}
+	}
+	if sending != "" && !delivered(snap, sending) {
+		lines = append(lines, m.askingLines(s, sending, w)...)
+	}
+	if snap.Busy {
+		lines = append(lines, "  "+s.Info.Render(m.spinner()+" working…"))
+	}
+	return lines
+}
+
+// freeformAbsentLines is what a freeform card's thread says when no
+// conversation is on screen. There are two ways to get here and they need
+// different sentences, because one is a card nobody has started and the
+// other is one whose work is real and whose transcript simply did not
+// outlive the board that held it (a freeform session is not persisted —
+// see Engine.persist). Saying nothing in the second case is what would
+// read as "my card is gone".
+func (m *Shell) freeformAbsentLines(s *theme.Styles, r featureRow, w int) []string {
+	if r.F.Stage == domain.StageDone {
+		return nil // the closing block already says how it ended
+	}
+	// HasWorktree is the cheap, already-loaded signal for "this card has
+	// been worked on": a freeform card's tree is cut on its first turn, so
+	// a card without one has never had a session at all.
+	//
+	// Two short lines rather than one long one: the second is the reason,
+	// and a reason truncated at the window's edge is worse than no reason,
+	// which is what a single sentence became at 120 columns.
+	said := []string{"type below to start — it works in " + r.F.BranchName() + ", committing every turn"}
+	if r.HasWorktree {
+		said = []string{
+			"its work is on " + r.F.BranchName() + " — alt+d to read the diff",
+			"this conversation lives as long as the board does, so it starts fresh here",
+		}
+	}
+	out := make([]string, 0, len(said))
+	for _, l := range said {
+		out = append(out, "  "+s.Faint.Render(ansi.Truncate(l, max(w-2, 8), "…")))
+	}
+	return out
 }
 
 // delivered reports whether the consult session's transcript already

@@ -86,8 +86,16 @@ func oneID(verb string, args []string) (string, error) {
 // so the read commands and the gate floor can never disagree.
 func artifactPath(wt *worktree.Pool, ws state.Workspace, f *domain.Feature) string {
 	root := wt.Root()
+	home, ok := f.ArtifactFile(root)
+	if !ok {
+		// A card with no artifact has no candidates at all. The bare join
+		// this replaced named the workspace root, which exists — so the
+		// locate "found" a directory and the reader got "is a directory"
+		// instead of an answer (domain.Feature.ArtifactFile).
+		return ""
+	}
 	return spec.LocateArtifact(
-		filepath.Join(root, f.ArtifactPath()),
+		home,
 		filepath.Join(ws.DraftsDir(), spec.DraftFilename(f)),
 		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
 	)

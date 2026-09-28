@@ -277,6 +277,10 @@ func cardPlaceholderFor(c domain.CardType) string {
 		return "Describe the outcome you want. The first line is the title.\n\n" +
 			"  next, the architect agrees with you what done means and which\n" +
 			"  cards get there; then the goal runs them and comes back when ready"
+	case domain.KindFreeform:
+		return "Say what you want done. The first line is the title.\n\n" +
+			"  it starts working in this card's own branch straight away —\n" +
+			"  no plan, no gates: you read the diff and land it when it's right"
 	default: // domain.KindFeature
 		return head + "  ## Acceptance seeds the verification plan"
 	}
@@ -332,9 +336,7 @@ func (d *cardForm) stops() []int {
 		if len(d.baseCands) > 1 {
 			s = append(s, cardStopBase)
 		}
-		// Adopting needs a branch to adopt, and a research card has no
-		// branch of its own to put one on.
-		if len(d.baseCands) > 0 && d.ct.Kind != domain.KindResearch {
+		if d.asksAdopt() {
 			s = append(s, cardStopAdopt)
 		}
 		if d.asksStack() {
@@ -1301,7 +1303,7 @@ func (d *cardForm) optionRows(s *theme.Styles, width, maxLines int) []string {
 			choiceCells(s, d.focus == cardStopBase, d.baseChoices(), d.baseIdx(), "", false),
 			d.baseIdx(), width, maxLines)...)
 	}
-	if len(d.baseCands) > 0 && d.ct.Kind != domain.KindResearch {
+	if d.asksAdopt() {
 		rows = append(rows, foldedRow(s, optionLabel(s, d.focus == cardStopAdopt, "works on"), optionLabelW,
 			choiceCells(s, d.focus == cardStopAdopt, d.adoptChoices(), d.adoptIdx(), "", false),
 			d.adoptIdx(), width, maxLines)...)
@@ -1582,6 +1584,17 @@ func (d *cardForm) stackOn(onto domain.FeatureID, label string, into domain.Stac
 func (d *cardForm) setStackCands(c []stackCand) {
 	sortStackCands(c)
 	d.stackCands = c
+}
+
+// asksAdopt reports whether the "works on" row is offered. Adopting needs
+// a branch to adopt, and two kinds have no business with one: a research
+// card has no branch of its own to put one on, and a freeform card is
+// refused outright at the mint (cardmint.Mint) — an adopted card walks the
+// whole workflow (DESIGN §10 D22) and a freeform card walks none of it, so
+// offering the row here would be offering a refusal.
+func (d *cardForm) asksAdopt() bool {
+	return len(d.baseCands) > 0 &&
+		d.ct.Kind != domain.KindResearch && d.ct.Kind != domain.KindFreeform
 }
 
 // asksStack is whether the stack row is worth a tab stop: a research

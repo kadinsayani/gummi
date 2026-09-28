@@ -274,6 +274,25 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err := requireRepo(in.RequireRepo, in.Repo); err != nil {
 		return domain.Feature{}, err
 	}
+	// Two refusals a freeform card earns by being off the graph (DESIGN
+	// §19), both before a sequence number is spent.
+	//
+	// Adoption is the first, and it is a binding decision it would
+	// contradict: a card minted onto a branch gummi did not cut still
+	// walks the whole graph, "because the alternative is the first hole in
+	// the quality floor" (DESIGN §10 D22). A freeform card walks nothing,
+	// so adopting with one would be exactly that hole — take someone's
+	// branch, add to it, land it, with no stage having looked at any of it.
+	// A feature minted onto the branch is the way to rework it; a freeform
+	// card that turns out to be worth landing is promoted the same way.
+	if in.Kind == domain.KindFreeform && in.Adopt != "" {
+		return domain.Feature{}, fmt.Errorf("a freeform card cannot adopt %s: an adopted card walks the whole workflow (DESIGN §10 D22) and a freeform card has none — mint a feature onto that branch instead", in.Adopt)
+	}
+	// A goal's cards land on its branch one commit each and its lead
+	// reasons about their stages; a card with no stage is invisible to it.
+	if in.Kind == domain.KindFreeform && in.Goal != "" {
+		return domain.Feature{}, fmt.Errorf("goal %s cannot hold a freeform card: a goal conducts cards through the workflow, and a freeform card is not in it", in.Goal)
+	}
 	// The branch name a card gets no longer carries its id, so two cards
 	// whose titles slugify the same would want the same ref. Refuse here,
 	// before a sequence number is spent and before a card exists that
@@ -323,7 +342,9 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	now := time.Now()
 	f := domain.Feature{
 		ID: id, Num: num, Kind: in.Kind, Mode: mode, Title: title, OneLiner: oneLiner,
-		Slug: slug, Stage: workflow.Initial(),
+		// InitialFor, not Initial: a freeform card starts outside the
+		// graph, at domain.StageOpen, and never enters it.
+		Slug: slug, Stage: workflow.InitialFor(in.Kind),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
@@ -392,7 +413,8 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		if err := atomicfile.Write(artifact, []byte(content), 0o600); err != nil {
 			return domain.Feature{}, err
 		}
-	} else if seed != "" || in.Acceptance != "" || in.Adopt != "" || (in.Kind == domain.KindBug && in.Discussion != "") {
+	} else if in.Kind != domain.KindFreeform &&
+		(seed != "" || in.Acceptance != "" || in.Adopt != "" || (in.Kind == domain.KindBug && in.Discussion != "")) {
 		// seed the draft before persisting: the description's overflow fills
 		// the Problem section (a title-sized description seeds nothing
 		// there), and Acceptance fills the Verification plan (D10). Either
@@ -432,6 +454,10 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 			return domain.Feature{}, err
 		}
 	}
+	// A freeform card falls out of every branch above with no artifact at
+	// all, which is the point: its description is the opening turn of its
+	// session and its thread is the record (Kind.ArtifactNoun returns ""
+	// for it). Nothing to seed, nothing to promote, nothing to gate.
 	if err := store.CreateFeature(ctx, &f); err != nil {
 		return domain.Feature{}, err
 	}

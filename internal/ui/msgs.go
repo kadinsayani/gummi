@@ -546,7 +546,10 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 		now := m.now()
 		f := domain.Feature{
 			ID: newID, Num: num, Kind: src.Kind, Title: src.Title, OneLiner: src.OneLiner,
-			Slug: src.Slug, Stage: workflow.Initial(),
+			// InitialFor: a duplicated freeform card starts where a
+			// freeform card starts, which is outside the graph. Initial()
+			// would put it in todo, a stage Validate refuses for its kind.
+			Slug: src.Slug, Stage: workflow.InitialFor(src.Kind),
 			Profile: src.Profile, Budget: domain.Budget{Envelope: src.Budget.Envelope},
 			CreatedAt: now, UpdatedAt: now,
 		}
@@ -1042,6 +1045,15 @@ func idList(ids []domain.FeatureID) string {
 func (m *Shell) dropSession(id domain.FeatureID) {
 	if m.engine != nil {
 		m.engine.Drop(id)
+		// A freeform card's session holds its worktree and its card lock for
+		// as long as the conversation lives, so the moment the card ends —
+		// landed, handed off, deleted — is the moment to close it: Close
+		// commits whatever the last turn left, stops the backend and drops
+		// the lock. Leaving it open would keep a writer pointed at a branch
+		// that has just gone to main.
+		if ff := m.engine.Freeform(id); ff != nil {
+			_ = ff.Close()
+		}
 	}
 	if m.inbox != nil {
 		m.inbox.remove(id)
@@ -1054,8 +1066,15 @@ func (m *Shell) dropSession(id domain.FeatureID) {
 // is never committed. An item that never had a draft gets a fresh
 // template — the artifact always exists from approval on.
 func (m *Shell) migrateDraft(f *domain.Feature) error {
+	// A card with no artifact has nothing to promote, and the bare join
+	// would name the workspace root as the destination (domain.
+	// Feature.ArtifactFile has the whole story).
+	home, ok := f.ArtifactFile(m.wt.Root())
+	if !ok {
+		return nil
+	}
 	return spec.Promote(
-		filepath.Join(m.wt.Root(), f.ArtifactPath()),
+		home,
 		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)),
 		filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath()),
 		f,
@@ -1067,8 +1086,16 @@ func (m *Shell) migrateDraft(f *domain.Feature) error {
 // worktree copy of an item mid-flight from the committed-artifact era.
 // Empty when none exists yet.
 func (m *Shell) artifactFile(f *domain.Feature) string {
+	home, ok := f.ArtifactFile(m.wt.Root())
+	if !ok {
+		// No artifact, so no candidate: without this the bare join below
+		// named the workspace ROOT, which Stat happily confirms exists —
+		// and every reader of this function then had a directory where it
+		// expected a document.
+		return ""
+	}
 	for _, p := range []string{
-		filepath.Join(m.wt.Root(), f.ArtifactPath()),
+		home,
 		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)),
 		filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath()),
 	} {
@@ -1367,8 +1394,14 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 		return err
 	}
 	// the artifact and its draft are workspace files keyed to the
-	// record — they go with it (best effort: an orphan is only clutter)
-	_ = os.RemoveAll(filepath.Join(m.wt.Root(), f.ArtifactPath()))
+	// record — they go with it (best effort: an orphan is only clutter).
+	//
+	// Through ArtifactFile, never a bare join: a freeform card has no
+	// artifact, and joining its empty path onto the root made this line
+	// os.RemoveAll(workspace) — it deleted the repository.
+	if artifact, ok := f.ArtifactFile(m.wt.Root()); ok {
+		_ = os.RemoveAll(artifact)
+	}
 	_ = os.RemoveAll(filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)))
 	// the live-stream mirror is keyed to the record too; without this
 	// a deleted card's last session would linger as a watchable file

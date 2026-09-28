@@ -75,6 +75,7 @@ leaf services.
 | `planround` / `reviewround` | Single seam persisting the plan-critique / review→fix round counters across process boundaries, so the TUI and headless driver can't drift apart on rerun caps. |
 | `sandbox` | Resolves effective confinement (`enforce`/`warn`/`off`) from config, profile, and backend capabilities; shared by engine refusal and `doctor`. |
 | `verdict` | Shared stage-verdict grammar the TUI and headless driver both parse, per DESIGN §13. |
+| `engine/freeformsession.go` | The one session that is not a stage run and still writes: a freeform card's whole working life — its worktree, its per-card lock, its envelope, and a checkpoint commit at the end of every turn. Built from `consultsession.go`'s lifecycle and `boardsession.go`'s absences; read all three together. |
 | `mcp` | Backs the hidden `gummi __mcp` shim: bridges an agent backend's MCP stdio calls to either a live stage session's tools (`--feature`) or the process-lifetime workspace scope's board-level tools (`--workspace`) a hosted agent uses to drive the gummi it lives inside. |
 
 `cmd/gummi` holds `main.go` plus the board's supporting subcommands: `ingest`
@@ -163,10 +164,18 @@ still work — the board just stays static. Key env vars are tabled in
 
 ## Conventions & guardrails
 
-- **The workflow is invariant.** No implementation without an approved
-  design; no merge without a critique **and** verify. There are no routes
-  and no skips. Do not add configuration that softens this — it's a core
-  design decision, not an oversight.
+- **The workflow is invariant — for the cards that are in it.** No
+  implementation without an approved design; no merge without a critique
+  **and** verify. There are no routes and no skips, and no configuration
+  may soften this — it's a core design decision, not an oversight.
+  The one card outside it is a **freeform card** (`FF`, `KindFreeform`,
+  DESIGN §19): no stages, no gates, no critique, no verify. It is not a
+  route through the graph — it holds `StageOpen`, which has no edge in the
+  transition table either way — and it lands on a human's read of its diff
+  instead of on a verified branch. Both floors live in one predicate,
+  `domain.Feature.MayLand`; read it before touching any landing path. A
+  freeform card may not adopt a branch, belong to a goal, or be driven by
+  `run`/`resume`.
 - **The spec is the context carrier**, not chat transcripts. Keep token
   windows small: pass specs between stages, not conversation history.
 - **gummi's job ends at a verified branch.** It does not open PRs or
@@ -227,5 +236,9 @@ still work — the board just stays static. Key env vars are tabled in
   (attach + inspect), `internal/cardmint` for the mint-time half, and
   `adoptedHint` in `internal/engine/hints.go` for what the stages are told.
 - Agent/model wiring → `internal/agent` + `internal/engine/profiles.go`.
+- "why can this card land without verifying" / freeform cards →
+  `domain.Feature.MayLand` for the rule, `internal/engine/freeformsession.go`
+  for the session, `docs/DESIGN.md` §19 for why the second floor exists and
+  what it costs.
 - Anything architectural or a "why is it this way" question →
   `docs/DESIGN.md` (its **Decisions** list in §10 is binding).

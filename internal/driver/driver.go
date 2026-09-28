@@ -530,9 +530,14 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 		if f.Stage == domain.StageDone {
 			return d.fail(ctx, string(id), fmt.Errorf("%s is already done", id))
 		}
-		if f.Stage != domain.StageVerify || f.VerifiedAt.IsZero() {
+		// Two floors, one predicate: a card in the workflow lands on a
+		// verified branch; a freeform card lands on a human's read of its
+		// diff (domain.Feature.MayLand says which and why). The unresolved-
+		// annotation check further down is the freeform card's own floor,
+		// and it is the same one every landing crosses.
+		if err := f.MayLand(); err != nil {
 			return d.fail(ctx, string(id),
-				fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
+				fmt.Errorf("%s is %w; run `gummi verify %s` first if it lost its finalize", id, err, id))
 		}
 	}
 	// a card lands either via its linked PR or locally, never both: refuse
@@ -614,7 +619,16 @@ func (d *Driver) Merge(ctx context.Context, id domain.FeatureID, message string)
 	// A handed-off card is already at done; only a card arriving from
 	// verify has a transition to record.
 	if f.Stage != domain.StageDone {
-		if _, err := d.store.Transition(ctx, id, domain.StageDone, d.actor); err != nil {
+		// A freeform card's ending is not an edge in the graph — it holds
+		// StageOpen, which has none — so it closes through the store method
+		// that says so, and that refuses every other kind.
+		closed := d.store.Transition
+		if f.IsFreeform() {
+			closed = func(ctx context.Context, id domain.FeatureID, _ domain.Stage, actor string) (domain.Feature, error) {
+				return d.store.CloseFreeform(ctx, id, actor)
+			}
+		}
+		if _, err := closed(ctx, id, domain.StageDone, d.actor); err != nil {
 			return d.fail(ctx, string(id), fmt.Errorf("landed %s but moving it to done failed: %w", id, err))
 		}
 	}
@@ -748,11 +762,14 @@ func (d *Driver) HandOff(ctx context.Context, id domain.FeatureID) (Outcome, err
 		d.out.emit(handedOffEvent{Event: "handed off", ID: string(id), Branch: f.BranchName()})
 		return Outcome{Status: StatusVerified, ID: string(id)}, nil
 	}
-	// the verified-branch precondition, the same one Merge applies: this
-	// verb ends a card that finished, not one abandoned mid-flight.
-	if f.Stage != domain.StageVerify || f.VerifiedAt.IsZero() {
+	// the same precondition Merge applies, through the same predicate: a
+	// card in the workflow is handed off from a verified branch, and a
+	// freeform card is handed off whenever the person is done with it —
+	// which is what a freeform hand-off IS, the ending that keeps the
+	// branch and lands nothing.
+	if err := f.MayLand(); err != nil {
 		return d.fail(ctx, string(id),
-			fmt.Errorf("%s is not at a verified branch (stage %s); run `gummi verify %s` first if it lost its finalize", id, f.Stage, id))
+			fmt.Errorf("%s is %w; run `gummi verify %s` first if it lost its finalize", id, err, id))
 	}
 
 	res, err := d.eng.HandOff(ctx, id, d.actor)
@@ -923,6 +940,16 @@ func (d *Driver) drive(ctx context.Context, id domain.FeatureID) (Outcome, error
 		f, err := d.store.GetFeature(ctx, id)
 		if err != nil {
 			return d.fail(ctx, string(id), err)
+		}
+		// A freeform card is not drivable: it has no stage to run, no gate
+		// to cross and no verdict to parse (DESIGN §19) — it takes turns
+		// from a person in its thread. This must come before the terminal
+		// check below, which would otherwise report it done: StageOpen has
+		// no outgoing edge, and "terminal" and "finished" are the same
+		// answer only for cards that are in the graph.
+		if f.IsFreeform() {
+			return d.fail(ctx, string(id), fmt.Errorf(
+				"%s is a freeform card: it takes turns in its thread rather than running stages, so there is nothing here to drive — land it with `gummi merge %s` when its diff is what you want", id, id))
 		}
 		if f.Stage == domain.StageDone || workflow.Terminal(f.Stage) {
 			return d.done(ctx, f)

@@ -373,6 +373,12 @@ func whyItStopped(in nextInput) string {
 		// every surface that reports RUNNING OUT — which is where a reader meets
 		// it for the first time, six lines under a transcript line that says
 		// "budget reached" about the same event (round 3 §5.1).
+		if in.kind == domain.KindFreeform {
+			// No stage to name, and nothing to pick back up: its turns were
+			// committed as they happened, so what a reader needs is the one
+			// thing that would let the conversation carry on.
+			return "This card has spent its budget — its work is committed to its branch. Top it up and carry on, or land what is there."
+		}
 		return "The " + stage + " stage ran out of budget and stopped."
 	case in.sess == engine.StatePaused:
 		return "The " + stage + " run is paused."

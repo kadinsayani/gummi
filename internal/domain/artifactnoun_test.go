@@ -32,7 +32,7 @@ func TestArtifactNounNamesEveryKind(t *testing.T) {
 		t.Errorf("the empty kind names its artifact %q, want %q", got, "spec")
 	}
 
-	// every kind the type admits has a wording, so a fourth kind cannot
+	// every kind the type admits has a wording, so a further kind cannot
 	// be added without one and silently inherit "spec"
 	for _, k := range []Kind{KindFeature, KindBug, KindResearch, KindGoal} {
 		if !k.Valid() {
@@ -41,6 +41,19 @@ func TestArtifactNounNamesEveryKind(t *testing.T) {
 		if k.ArtifactNoun() == "" {
 			t.Errorf("kind %q has no artifact noun", k)
 		}
+	}
+
+	// KindFreeform is the one exception, and it is pinned here rather than
+	// left to be discovered: a freeform card has no design artifact at all
+	// (DESIGN §19) — its record is its thread — so the honest answer is
+	// the empty string, and a surface that would name a document must ask
+	// IsFreeform first instead of printing "spec" at a reader who has no
+	// spec to open.
+	if !KindFreeform.Valid() {
+		t.Fatal("precondition: freeform is not a valid kind")
+	}
+	if got := KindFreeform.ArtifactNoun(); got != "" {
+		t.Errorf("KindFreeform.ArtifactNoun() = %q, want \"\" — it carries no artifact", got)
 	}
 
 	// the three are distinct: a shared word would let one kind's document

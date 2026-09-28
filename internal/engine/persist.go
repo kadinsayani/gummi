@@ -38,6 +38,19 @@ func (e *Engine) persist(s *Session) {
 	if s.finalizedState() {
 		return
 	}
+	// Neither does a freeform card's session, which is not a stage run and
+	// must never be restored as one: Restore rebuilds e.live from these
+	// rows, and a freeform card appearing there would hand every surface
+	// that asks Engine.Get a stage-shaped session for a card that has no
+	// stage. It reaches here at all only because it shares the client-tool
+	// path with stage sessions (resolve_annotation persists after the
+	// write), so the exclusion belongs here, where the row is written,
+	// rather than in that tool. Its own absences are BoardSession's and
+	// ConsultSession's: no persisted row, and a transcript that lives as
+	// long as the board does.
+	if s.Feature.IsFreeform() {
+		return
+	}
 	snap := s.Snapshot()
 	rec := state.SessionSnapshot{
 		Feature:      snap.Feature.ID,

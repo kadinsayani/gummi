@@ -362,6 +362,23 @@ type Engine struct {
 	// value.
 	consultIdleTimeout time.Duration
 
+	// freeform holds every freeform card's session, keyed by feature — the
+	// same shape as consult, and for the same reason: OpenFreeform is
+	// idempotent per card for the engine's whole lifetime, so a card page
+	// reopened, or a diff surface sending its comments, reaches the one
+	// session that card has. Unlike consult these sessions WRITE: each
+	// holds its card's worktree, its per-card lock and its envelope (see
+	// freeformsession.go).
+	freeform map[domain.FeatureID]*FreeformSession
+	// freeformMu serializes OpenFreeform end to end — consultMu's job, for
+	// the identical check-then-act reason. Held only by OpenFreeform, and
+	// never while e.mu is also held.
+	freeformMu sync.Mutex
+	// freeformIdleTimeout bounds how long a freeform card's backend stays
+	// spawned with no turns sent — consultIdleTimeout's twin, a field for
+	// the same test reason.
+	freeformIdleTimeout time.Duration
+
 	// boardMu serializes OpenBoard end to end. e.mu cannot do that job:
 	// opening spawns a real backend process (and possibly binds an MCP
 	// endpoint), which is far too slow to hold the engine's main lock
@@ -498,9 +515,11 @@ func New(cfg Config) *Engine {
 		live:     map[domain.FeatureID]*Session{},
 		oneShots: map[domain.FeatureID]int{},
 		consult:  map[domain.FeatureID]*ConsultSession{},
+		freeform: map[domain.FeatureID]*FreeformSession{},
 		pool:     pool,
 	}
 	e.consultIdleTimeout = consultIdleTimeout
+	e.freeformIdleTimeout = freeformIdleTimeout
 	e.lanes[poolAttended].max = attendedMax
 	e.lanes[poolAutopilot].max = autopilotMax
 	e.envWarn = func(msg string) {
@@ -1944,6 +1963,17 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	if err != nil {
 		return "", "", err
 	}
+	// A freeform card's tree is the same total loss as a work stage's when
+	// it vanishes — its branch carries every turn it has taken — but its
+	// stage says nothing about whether it has ever had one, since it holds
+	// StageOpen from mint. Its fork point does: stamped when the branch was
+	// first cut, so a recorded one means there is a branch to recover from
+	// and an empty one means this is simply the first turn.
+	if !hadWT && f.IsFreeform() && f.ForkPoint != "" {
+		if rerr := e.recoverMissingWorktree(ctx, wt, &f); rerr != nil {
+			return "", "", fmt.Errorf("freeform card %s has no worktree and could not be recreated (%v); recreate .gummi/worktrees/%s from its branch manually", f.ID, rerr, f.ID)
+		}
+	}
 	if !hadWT && (f.Stage == domain.StageImplement || f.Stage == domain.StageVerify) {
 		// A work stage with no worktree is not a first run — it is a tree
 		// that went missing under a card already past its design gate.
@@ -1963,6 +1993,14 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	// divergence in.
 	if err := wt.AssertNoForkDrift(ctx, &f); err != nil {
 		return "", "", err
+	}
+	// A freeform card has no artifact to promote: there is no draft, no
+	// workspace home, and no document any stage was told to read (DESIGN
+	// §19). Everything above it still applies — it works in its own branch
+	// worktree, and a rewrite of main under it is refused the same way —
+	// because the worktree is the half of a card it keeps.
+	if f.IsFreeform() {
+		return workDir, "", nil
 	}
 	// Promotion now happens on the card's first stage run rather than at
 	// its approval gate: the worktree exists from here on, so there is no
@@ -2378,6 +2416,11 @@ func (e *Engine) Close() error {
 		consults = append(consults, c)
 	}
 	e.consult = map[domain.FeatureID]*ConsultSession{}
+	freeforms := make([]*FreeformSession, 0, len(e.freeform))
+	for _, ff := range e.freeform {
+		freeforms = append(freeforms, ff)
+	}
+	e.freeform = map[domain.FeatureID]*FreeformSession{}
 	for p := range e.lanes {
 		e.lanes[p].queue = nil
 	}
@@ -2391,6 +2434,22 @@ func (e *Engine) Close() error {
 	}
 	for _, c := range consults {
 		c.stopBackend()
+	}
+	// A freeform session's teardown commits what its last turn left, then
+	// drops the card lock it holds so another gummi process can drive the
+	// card once this board is gone.
+	//
+	// The checkpoint is not optional politeness. Every other card's work
+	// reaches its branch through a stage that ends; a freeform card's
+	// reaches it through the commit at the end of each turn, so a board
+	// that quits mid-turn — or between a write and an idle that never
+	// arrived — is the one moment its work could be stranded in a working
+	// tree. The pty drive found exactly that: an untracked file left behind
+	// by a turn the quit interrupted.
+	for _, ff := range freeforms {
+		ff.settle()
+		ff.stopBackend()
+		ff.releaseLock()
 	}
 	// Join the pump and kickoff goroutines so no git subprocess or persist
 	// write is still in flight against the workspace when Close returns.
@@ -2704,12 +2763,18 @@ func (e *Engine) settle(s *Session) error {
 // completion path (not the exhaustion gate, which never advances a
 // stage) must fail the run rather than let it read as a clean finish.
 func (e *Engine) checkpoint(s *Session) error {
-	if s.Interactive {
+	if s.Interactive && !s.Feature.IsFreeform() {
 		// A design chat runs in the card's own worktree now, so anything it
 		// writes survives to implement without a hand-off — but it is a
 		// conversation, not work, and checkpointing every turn of one would
 		// bury the branch's real history. The tree is no longer discarded,
 		// so nothing is lost by waiting.
+		//
+		// A freeform session is the exception, and not a grudging one: it
+		// is interactive AND it is the work — there is no later stage to
+		// hand a tree to, so this commit is the only thing between what the
+		// turn wrote and the branch. Its history IS turn-by-turn, and the
+		// landing squashes it like any other card's.
 		return nil
 	}
 	// Research stages are worktree-less by design (a research branch never
@@ -2735,6 +2800,12 @@ func (e *Engine) checkpoint(s *Session) error {
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
+	if s.Feature.IsFreeform() {
+		// "FF-012: open checkpoint" names the stage a freeform card is
+		// parked at rather than what happened, and every one of its commits
+		// would carry the same word. A turn is the unit here.
+		msg = fmt.Sprintf("%s: turn checkpoint", s.Feature.ID)
+	}
 	wt, err := e.mgr(ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("checkpoint commit failed: " + err.Error())

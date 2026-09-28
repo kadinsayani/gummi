@@ -1,8 +1,10 @@
 package domain
 
 import (
+	"errors"
 	"fmt"
 	"path"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -96,6 +98,20 @@ const (
 	// stage surveys and writes the document up. It is a third kind with
 	// a dedicated artifact home and no quick one-pass route.
 	KindResearch Kind = "research"
+	// KindFreeform is the one kind that is not in the workflow at all: a
+	// coding-agent conversation that happens to be a card (DESIGN §19).
+	// It gets everything structural — an id, a branch, a worktree, an
+	// envelope, a thread, the diff surface — and none of the graph: no
+	// stages, no gates, no critique, no verify. It holds StageOpen from
+	// mint until it closes, and what it may do instead of advancing is
+	// land (see MayLand), hand off, or be discarded.
+	//
+	// The trade that makes it legitimate rather than a hole in the
+	// quality floor is stated once, in MayLand: a card in the workflow
+	// lands on a verified branch, a freeform card lands on a human's
+	// read of its diff, and gummi records which floor each commit
+	// crossed.
+	KindFreeform Kind = "freeform"
 	// KindGoal is outcome-driven work: a card whose work is other cards.
 	// The design stage agrees the objective and what "done" means; the
 	// build stage is conducted rather than written — the goal's cards run
@@ -114,6 +130,8 @@ func (k Kind) prefix() string {
 		return "RS"
 	case KindGoal:
 		return "GL"
+	case KindFreeform:
+		return "FF"
 	}
 	return "FD" // KindFeature and the empty default
 }
@@ -152,6 +170,8 @@ func (k Kind) branchPrefix() string {
 		return "research"
 	case KindGoal:
 		return "goal"
+	case KindFreeform:
+		return "ff"
 	}
 	return "feat" // KindFeature and the empty default
 }
@@ -175,6 +195,14 @@ func (k Kind) ArtifactNoun() string {
 		return "bug report"
 	case KindResearch:
 		return "research document"
+	case KindFreeform:
+		// The one kind with no artifact: a freeform card's record is its
+		// thread, so there is no document for a surface to name or for a
+		// stage to be told to go and read. Empty is the answer, not an
+		// oversight — see TestArtifactNounNamesEveryKind, which pins the
+		// exception rather than letting a new kind silently inherit
+		// "spec".
+		return ""
 	case KindGoal:
 		return "goal doc"
 	}
@@ -184,16 +212,18 @@ func (k Kind) ArtifactNoun() string {
 // Valid reports whether k is a recognized kind (empty is not — callers
 // that accept a default normalize it before validating).
 func (k Kind) Valid() bool {
-	return k == KindFeature || k == KindBug || k == KindResearch || k == KindGoal
+	return k == KindFeature || k == KindBug || k == KindResearch ||
+		k == KindGoal || k == KindFreeform
 }
 
 // FeatureID is a work item's identifier, e.g. "FD-042" (feature),
-// "BG-007" (bug), "RS-003" (research), or "GL-004" (goal). IDs are minted from the
+// "BG-007" (bug), "RS-003" (research), "GL-004" (goal), or "FF-012"
+// (freeform). IDs are minted from the
 // monotonic counter in .gummi/seq — shared across kinds, so numbers
 // never collide — and zero-padded to three digits.
 type FeatureID string
 
-var featureIDRe = regexp.MustCompile(`^(FD|BG|RS|GL)-[0-9]{3,}$`)
+var featureIDRe = regexp.MustCompile(`^(FD|BG|RS|GL|FF)-[0-9]{3,}$`)
 
 // Kind reports the work kind an ID's prefix encodes.
 func (id FeatureID) Kind() Kind {
@@ -204,6 +234,8 @@ func (id FeatureID) Kind() Kind {
 		return KindResearch
 	case strings.HasPrefix(string(id), "GL-"):
 		return KindGoal
+	case strings.HasPrefix(string(id), "FF-"):
+		return KindFreeform
 	default:
 		return KindFeature
 	}
@@ -224,7 +256,7 @@ func NewFeatureID(n int) (FeatureID, error) { return NewID(KindFeature, n) }
 // research, or goal).
 func ParseFeatureID(s string) (FeatureID, error) {
 	if !featureIDRe.MatchString(s) {
-		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN, BG-NNN, RS-NNN, or GL-NNN)", s)
+		return "", fmt.Errorf("invalid work item ID %q (want FD-NNN, BG-NNN, RS-NNN, GL-NNN, or FF-NNN)", s)
 	}
 	return FeatureID(s), nil
 }
@@ -594,6 +626,8 @@ func (f *Feature) kind() Kind {
 		return KindResearch
 	case KindGoal:
 		return KindGoal
+	case KindFreeform:
+		return KindFreeform
 	default:
 		return KindFeature
 	}
@@ -601,6 +635,48 @@ func (f *Feature) kind() Kind {
 
 // IsGoal reports whether the card is a goal.
 func (f *Feature) IsGoal() bool { return f.kind() == KindGoal }
+
+// IsFreeform reports whether the card is a freeform card: one that is not
+// in the workflow at all (KindFreeform). It is the question every graph
+// reader asks before assuming a card has a stage to advance, and every
+// artifact reader asks before assuming there is a document.
+func (f *Feature) IsFreeform() bool { return f.kind() == KindFreeform }
+
+// ErrNotVerified is the refusal a card in the workflow gets when it is
+// asked to land before its branch is verified. It is a sentinel so a
+// caller can tell "this card has not earned a landing yet" from a git or
+// store failure, and so the two headless landing verbs and the TUI say
+// the same thing.
+var ErrNotVerified = errors.New("not at a verified branch")
+
+// MayLand reports whether this card may become a commit on main, and says
+// why not when it may not.
+//
+// There are two floors, because there are two kinds of card, and this is
+// the one place that says so:
+//
+//   - A card in the workflow lands on a VERIFIED branch — it walked the
+//     graph, its critique passed and its checks ran. That is DESIGN §10
+//     D3's quality floor, and nothing softens it.
+//   - A freeform card (KindFreeform) has no stage to be at and no verify
+//     to have passed: it lands on a human's read of its diff, which is
+//     the whole of what freeform means (DESIGN §19). Its own floor is
+//     the diff surface — unresolved annotations hold the landing, which
+//     is enforced by the same GateBlockers check every landing crosses,
+//     not here.
+//
+// A handed-off card is neither case: it already closed with a verified
+// stamp on it and landing it after all stays available, so callers check
+// HandedOff before asking.
+func (f *Feature) MayLand() error {
+	if f.IsFreeform() {
+		return nil
+	}
+	if f.Stage != StageVerify || f.VerifiedAt.IsZero() {
+		return fmt.Errorf("%w (stage %s)", ErrNotVerified, f.Stage)
+	}
+	return nil
+}
 
 // InGoal reports whether the card belongs to a goal.
 func (f *Feature) InGoal() bool { return f.GoalID != "" }
@@ -783,9 +859,33 @@ func (f *Feature) ArtifactPath() string {
 		return path.Join(".gummi", "research", string(f.ID)+"-"+f.Slug+".md")
 	case KindGoal:
 		return path.Join(".gummi", "goals", string(f.ID)+"-"+f.Slug+".md")
+	case KindFreeform:
+		// No artifact, so no path: a freeform card's record is its thread
+		// (ArtifactNoun says the same). Callers that would read or write
+		// one must ask IsFreeform first rather than joining this onto a
+		// root and landing on the directory itself.
+		return ""
 	default:
 		return f.SpecPath()
 	}
+}
+
+// ArtifactFile resolves the card's artifact under root, reporting false
+// when the card has none.
+//
+// EVERY caller that would read, write or REMOVE the artifact must go
+// through this rather than joining ArtifactPath onto a root itself. A
+// freeform card's ArtifactPath is empty (its record is its thread), and
+// filepath.Join(root, "") is root — so the bare join turns "this card has
+// no document" into "operate on the whole workspace". A pty drive of a
+// freeform card found it the expensive way: deleting one ran
+// os.RemoveAll over the repository.
+func (f *Feature) ArtifactFile(root string) (string, bool) {
+	p := f.ArtifactPath()
+	if p == "" {
+		return "", false
+	}
+	return filepath.Join(root, p), true
 }
 
 // Validate checks the invariants every stored feature must satisfy.
@@ -811,6 +911,18 @@ func (f *Feature) Validate() error {
 	}
 	if !f.Stage.Valid() {
 		return fmt.Errorf("feature %s: unknown stage %q", f.ID, f.Stage)
+	}
+	// StageOpen and KindFreeform imply each other, and storing one
+	// without the other is what a card half-way between the graph and
+	// outside it would look like. A freeform card holds StageOpen until
+	// it closes at StageDone; nothing else may hold StageOpen at all,
+	// because a workflow stage with no outgoing edge would park a card in
+	// the graph with nothing able to move it.
+	if f.kind() == KindFreeform && f.Stage != StageOpen && f.Stage != StageDone {
+		return fmt.Errorf("feature %s: a freeform card is at %s or %s, never %q", f.ID, StageOpen, StageDone, f.Stage)
+	}
+	if f.Stage == StageOpen && f.kind() != KindFreeform {
+		return fmt.Errorf("feature %s: stage %s is a freeform card's, not a %s's", f.ID, StageOpen, f.kind())
 	}
 	if f.Budget.Envelope < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)

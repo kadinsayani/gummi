@@ -83,6 +83,12 @@ func cardHasDiff(r featureRow) bool {
 	return r.F.Kind != domain.KindResearch && r.F.Stage != domain.StageTodo
 }
 
+// cardHasArtifact reports whether the card has a document for the
+// artifact tab to open. Every kind does but one: a freeform card's record
+// is its thread (DESIGN §19), so Kind.ArtifactNoun is empty for it and the
+// tab would render as a nameless label opening nothing.
+func cardHasArtifact(r featureRow) bool { return artifactNoun(r.F.Kind) != "" }
+
 // cardTabBar renders the bar. The active tab is titled, the others are
 // muted and wear their chord, so the row teaches the keys instead of
 // requiring them known — the same label-first, key-demoted shape the
@@ -93,7 +99,10 @@ func (m *Shell) cardTabBar(active cardTab, w int) string {
 		return ""
 	}
 	s := m.styles
-	tabs := []cardTab{cardTabThread, cardTabArtifact}
+	tabs := []cardTab{cardTabThread}
+	if cardHasArtifact(r) {
+		tabs = append(tabs, cardTabArtifact)
+	}
 	if cardHasDiff(r) {
 		tabs = append(tabs, cardTabDiff)
 	}
@@ -159,6 +168,13 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 		m.spec, m.diff, m.stats = nil, nil, nil
 		return nil, true
 	case cardTabArtifact:
+		if !cardHasArtifact(r) {
+			// the bar does not draw the tab for such a card, so the chord
+			// says why rather than mounting a view onto no document — the
+			// same contract the diff and stats chords keep below.
+			m.notice = noticeMsg{text: string(r.F.ID) + ": a freeform card has no document — its thread is the record"}
+			return nil, true
+		}
 		m.diff, m.stats = nil, nil
 		return m.openSpec(r.F), true
 	case cardTabDiff:

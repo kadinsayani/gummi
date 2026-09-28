@@ -74,13 +74,17 @@ type CardType struct {
 
 // CardTypes are the choices a creation surface offers, in the order they
 // are shown. Diagnosis sits beside research because that is where a
-// person deciding between the two will look for it.
+// person deciding between the two will look for it. Freeform sits last:
+// it is the one type that buys no workflow at all (§19), so it reads as
+// the exception it is rather than as one option among the kinds of work
+// gummi conducts.
 var CardTypes = []CardType{
 	{Kind: KindFeature},
 	{Kind: KindBug},
 	{Kind: KindResearch},
 	{Kind: KindResearch, Mode: ModeDiagnosis},
 	{Kind: KindGoal},
+	{Kind: KindFreeform},
 }
 
 // Name is the one word a surface shows for this type, and the one word

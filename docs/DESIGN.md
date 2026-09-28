@@ -1336,7 +1336,11 @@ have.
   local branch you own, and gummi says so rather than implying the work
   can travel back to a fork it cannot write to.
 - Not a process editor — one workflow, compiled in. If the workflow needs
-  changing, that's a gummi release, not a config file.
+  changing, that's a gummi release, not a config file. A **freeform card**
+  (§19) is not an exception to that: it does not configure the workflow
+  down, it sits outside it, and it pays for that by having no verified
+  branch to point at — which is why the two landing floors are stated in
+  one predicate rather than left implicit.
 - Not a second driver — a hosted agent acts on the running board through
   the board-level tool contract (§16); it never reaches gummi by invoking
   another `gummi` process.
@@ -1409,6 +1413,17 @@ Decided in the design interview (2026-07-03):
    duplication for two slots each graph half-ignored. The only movement
    that is not forward is the *rerun edges* (implement → plan, verify →
    implement). The quality floor is non-negotiable.
+
+   *Amended for freeform cards (§19).* There is still exactly one graph
+   and still nothing that skips a stage of it — but there is now one kind
+   of card that is **not in it**: a freeform card (`FF`) holds
+   `StageOpen`, which has no edge in the table in either direction, and
+   lands on a human's read of its diff rather than on a verified branch.
+   The floor did not soften for anything that walks the graph; a second
+   floor was named beside it, and both live in `Feature.MayLand`. What
+   this decision still forbids absolutely: a card in the workflow
+   reaching `done` without its critique and its verify, and any
+   configuration that would let one.
 4. **Critique before every gate**: each stage ends with a fresh-context
    pass that tries to refute what it produced, and a *changes* verdict
    re-runs that stage in place — capped (default 2–3 rounds, and bounded
@@ -3319,3 +3334,191 @@ checkout). The worktree path is still keyed by id
 (`.gummi/worktrees/FD-042`), which is what keeps two cards' checkouts
 apart regardless of their labels. Research cards are exempt from the whole
 question: they never cut a branch.
+
+## 19. Freeform cards — a coding agent that happens to be a card
+
+Every other kind is work gummi conducts through a workflow. A **freeform
+card** (`FF-NNN`, `KindFreeform`) is the one that is not conducted at all:
+you talk to an agent in the card's thread, it works in the card's worktree,
+and when its diff is what you want, it lands on main. There is no design
+stage, no gate, no critique pass, no verify, and no verdict.
+
+It exists because the ceremony a feature earns is not worth paying for
+every change a person wants made, and the alternative people actually
+reach for is a bare coding agent in a terminal — which gives up the id,
+the branch, the worktree boundary, the budget, the diff review surface and
+the board along with the ceremony. A freeform card gives up only the
+ceremony.
+
+### 19.1 The two landing floors
+
+This is the part that changes a promise, so it is stated plainly rather
+than buried in the mechanism. Decision 3 said the workflow is invariant
+and nothing lands without a critique and a verify. That remains true of
+**every card in the workflow**, and `domain.Feature.MayLand` is now the
+one place the whole rule lives:
+
+- A card in the workflow lands on a **verified branch** — it walked the
+  graph, its critique passed, its checks ran. Unchanged, and no
+  configuration softens it.
+- A freeform card lands on **a human's read of its diff**. That is the
+  whole of what freeform means.
+
+Lifting the precondition out of the two headless landing verbs into one
+predicate is deliberate: two floors are a fact about the product, and a
+fact like that belongs in one function with both clauses visible, not as a
+per-kind `if` copied into every surface that lands a branch.
+
+The freeform card's own floor is its **unresolved diff annotations**, and
+it is enforced by exactly the check every other landing crosses
+(`Engine.GateBlockers`). So the rule reads: *you land when you have
+nothing left to say.* That is not a gate — it is the reader's own comments
+holding their own card.
+
+### 19.2 Off the graph, not around it
+
+A freeform card holds `domain.StageOpen` from mint until it closes, and
+`StageOpen` has **no edge in the transition table**, in either direction.
+It is deliberately absent from `domain.Stages` (that list is the graph, in
+order) while `Stage.Valid` still admits it, because "may a card hold this"
+and "may a transition name this" are two different questions —
+`Stage.InGraph` answers the second.
+
+That single choice is the whole cost to the state machine, because every
+graph reader already does the right thing with an edgeless stage:
+`CanTransition` refuses every move, `Next` returns nothing (so there is no
+advance action and no next-stage chip), and `Terminal` reports true (so
+the headless driver reports it unresumable). `workflow.InitialFor` is the
+one kind-aware thing about it — where such a card *starts* — and the table
+itself stays kind-blind, which is what keeps a feature from ever reaching
+a stage with no gate.
+
+`Validate` makes the two halves imply each other: a freeform card is at
+`open` or `done`, and nothing else may be at `open` at all. A card in the
+workflow parked there could never be moved by anything.
+
+Its ending is therefore not a crossing. `Store.CloseFreeform` writes
+`done` without asking the workflow, and refuses every other kind — the
+refusal beside the bypass is what keeps a store method that can write
+"done" from becoming a way to land a feature without verifying it. The
+card's history still records the transition; no gate event is appended,
+because nothing gated it.
+
+### 19.3 The session
+
+`engine.FreeformSession` is assembled out of the two non-stage sessions
+that already existed: `ConsultSession`'s lifecycle (one per card,
+idempotent to open, a backend that idles out after 20 minutes and respawns
+carrying its own transcript) and `BoardSession`'s absences (no attention
+slot — the lanes ration contention between autonomous stages, and a
+human-paced conversation competes with nothing there — no gate, no
+verdict, no advance).
+
+What it has that neither of them does is that it **writes**:
+
+- the card's **worktree** as its cwd, ensured through the same `locate`
+  every stage goes through, so the branch is cut the same way and a
+  rewrite of main under it is refused the same way;
+- the card's **per-card lock**, held for the whole conversation rather
+  than one turn, because between two turns the tree holds uncommitted work
+  and the branch holds commits nothing has reviewed;
+- the card's **envelope** as a real cap, recomputed on every respawn. It
+  is the one floor a freeform card keeps, and running into it is a stop,
+  not an ending: raising the envelope respawns and the conversation
+  carries on;
+- a **checkpoint commit at the end of every turn** — before the busy flag
+  clears, the opposite order from a stage, because a freeform card holds
+  no attention slot and the first thing a person does when it stops is
+  read its diff.
+
+It has **no artifact**: `Kind.ArtifactNoun` and `ArtifactPath` are empty
+for it, nothing is seeded at mint, and the thread is the record. It is not
+persisted as a session row either, for the same reason `BoardSession` is
+not: it must never be restored as a stage run.
+
+Its tool surface is `resolve_annotation` and nothing else — the review
+loop needs it, there is no document for the spec tools to reach, and
+`ask_user` would be a worse channel than the reply the person is already
+about to type.
+
+### 19.4 The review loop
+
+A freeform card is the **simplest consumer** of the diff-review machinery
+that already exists, not a second copy of it: the annotation editor
+(`c`/`R`/`x`), content-anchored comments (`internal/diffannot`),
+`CompileDiffComments`, `resolve_annotation`, and `diffReviewHints` for a
+backend that was not alive when the comments were written.
+
+What collapses is the delivery routing. For a stage, comments have to pick
+between a running writer, a critique or rebase pass that must not receive
+them, a finished stage to re-run, and a queued one. A freeform card has
+one session and it is always the writer, so they go to it as the next turn
+— and the loop is **uncapped**, because the corrective-round cap exists to
+stop an *unattended* loop from spinning, and here the person is the loop.
+
+### 19.5 What a freeform card may not do
+
+- **Adopt a branch.** An adopted card walks the whole graph, "because the
+  alternative is the first hole in the quality floor" (decision 22). A
+  freeform card walks nothing, so adopting with one would be that hole.
+  Mint a feature onto the branch instead.
+- **Belong to a goal.** A goal's cards land on its branch one commit each
+  and its lead reasons about their stages; a card with no stage is
+  invisible to it.
+- **Be driven.** `run`/`resume` drive stages. The refusal is explicit
+  rather than inherited from `Terminal`, which would otherwise report a
+  card that is very much open as done.
+
+### 19.6 The board
+
+The TUI treats a freeform card as a card and withholds the workflow:
+
+- **Minting** is the `n` dialog's last kind row, or `/freeform` — and it
+  **starts on create**, whichever button was pressed. There is no gate for
+  autopilot to cross and no backlog to wait in, and the description is the
+  first turn (`FreeformSession.Kickoff`), so a card that sat waiting for
+  the reader to retype it would be waiting for nothing. Its page opens
+  with it.
+- **The masthead** names the card's branch where every other card's stage
+  strip goes. Five stages faint with none of them lit would say the card
+  is somewhere in the workflow, which is the one thing that is not true of
+  it; the branch is what a reader of that row will actually check out.
+  There is no autopilot field either — nothing for a gate-approval mode to
+  govern.
+- **The thread** is the conversation, drawn in the slot the consult
+  exchange uses (exactly one of the two ever renders). With no session on
+  screen it still says something: how to start it, or — after a restart —
+  where its work is and why the conversation is not here, since a freeform
+  session is not persisted.
+- **The tabs** are thread, diff and stats. There is no artifact tab,
+  because there is no artifact; the chord still answers, saying so.
+- **Every line typed is a turn** to the session that can act on the card.
+  There is no read-only consult fallback here — the composer's placeholder
+  names what this card has (a branch, a diff, a landing) instead of the
+  approve/send-back vocabulary it does not.
+- **The answers** are the two ends of its review loop and the ending that
+  keeps the branch: read the diff, land it, hand off. Everything
+  workflow-shaped is withheld from the inventory, the key list and the
+  help overlay together — `g`, `s`, `b`, `v`, `A` — so "not shown" and
+  "not available" cannot diverge.
+- **Landing closes it**, the same way a verified card's landing does, and
+  ending the card closes its session: the last turn is committed, the
+  backend stops and the card lock is dropped.
+
+### 19.7 Deferred
+
+A `gummi ff` CLI verb and `card_turn` for a hosted agent — a freeform card
+is an inside-path concept until then. The third ending, discard, which
+would delete the branch and worktree the way `clean` does for a landed
+card; today a freeform card's branch is cleaned up after it lands, or kept
+on purpose after a hand-off, exactly like any other card's. The PR
+landing route is withheld rather than wired: what "gummi follows the PR
+and waits" means for a card with no gate to wait at is a question nobody
+has answered.
+
+Two things worth building next for their own sake: recording **which
+floor a landing crossed**, so "how much of this week landed without
+checks" is a number on a screen rather than a feeling; and a
+**since-I-last-looked** toggle in the diff tab, since a freeform card
+checkpoint-commits every turn and by the fourth cycle most of the diff
+against base is already read.

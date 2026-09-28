@@ -61,8 +61,27 @@ var theGraph = graph{
 	},
 }
 
-// Initial returns the stage every new card starts in.
+// Initial returns the stage every new card in the graph starts in. Use
+// InitialFor when the kind is not known to be one of them.
 func Initial() domain.Stage { return theGraph.initial }
+
+// InitialFor returns the stage a newly minted card of this kind starts
+// in: the graph's own start for every kind that walks it, and
+// domain.StageOpen for a freeform card, which does not.
+//
+// This is the whole of what "a freeform card has no workflow" costs the
+// state machine. The transition table is untouched and stays kind-blind,
+// which is what keeps it honest: there is no edge into StageOpen and none
+// out of it, so no card in the graph can reach it and no freeform card
+// can slip into the graph. A kind-aware INITIAL stage is a far weaker
+// thing than a graph per kind (DESIGN §10 D3) — it names where a card
+// begins, not what it may do next.
+func InitialFor(kind domain.Kind) domain.Stage {
+	if kind == domain.KindFreeform {
+		return domain.StageOpen
+	}
+	return theGraph.initial
+}
 
 // CanTransition reports whether moving from→to is legal. The error
 // explains why not.

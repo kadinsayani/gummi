@@ -99,6 +99,29 @@ func (e *Engine) HandOff(ctx context.Context, id domain.FeatureID, actor string)
 		return AdvanceResult{}, err
 	}
 
+	// A freeform card has no gate to cross and no stage to advance — it
+	// holds StageOpen, which has no outgoing edge (DESIGN §19) — so its
+	// hand-off IS its ending and the store closes it directly. Waiving the
+	// landing still waives no floor: the one floor a freeform card has is
+	// its unresolved diff comments, and it is checked right here rather
+	// than inherited from Advance.
+	if f.IsFreeform() {
+		if _, diffOpen, _, berr := e.GateBlockers(ctx, id); berr != nil {
+			return AdvanceResult{}, berr
+		} else if diffOpen > 0 {
+			return AdvanceResult{Feature: f, From: f.Stage, Status: StatusBlockedDiff, Blockers: diffOpen}, nil
+		}
+		closed, cerr := e.cfg.Store.CloseFreeform(ctx, id, actor)
+		if cerr != nil {
+			return AdvanceResult{}, cerr
+		}
+		closed.HandedOffAt = now
+		return AdvanceResult{
+			Feature: closed, From: domain.StageOpen, To: domain.StageDone,
+			Status: StatusAdvanced,
+		}, nil
+	}
+
 	res, err := e.Advance(ctx, id, actor)
 	if err != nil {
 		return res, err

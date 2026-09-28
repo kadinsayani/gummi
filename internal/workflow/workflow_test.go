@@ -145,3 +145,45 @@ func TestInitialAndTerminal(t *testing.T) {
 		}
 	}
 }
+
+// TestAFreeformCardTakesNoTransition: domain.StageOpen is in no edge of
+// the table, in either direction, so the state machine can neither move a
+// freeform card nor let a card in the graph arrive at one. That — and not
+// a per-kind branch inside CanTransition — is the whole of "a freeform
+// card has no workflow" (DESIGN §19).
+func TestAFreeformCardTakesNoTransition(t *testing.T) {
+	for _, to := range append([]domain.Stage{domain.StageOpen}, domain.Stages...) {
+		if err := CanTransition(domain.StageOpen, to); err == nil {
+			t.Errorf("open → %s is legal; a freeform card must have no moves", to)
+		}
+	}
+	for _, from := range domain.Stages {
+		if err := CanTransition(from, domain.StageOpen); err == nil {
+			t.Errorf("%s → open is legal; nothing in the graph may arrive at a freeform card's stage", from)
+		}
+	}
+	if next := Next(domain.StageOpen); len(next) != 0 {
+		t.Errorf("Next(open) = %v, want nothing: no advance action, no next-stage chip", next)
+	}
+	if _, ok := RerunTarget(domain.StageOpen); ok {
+		t.Error("open has a rerun target; there is no stage to bounce back to")
+	}
+	// Terminal is true for it, which is what makes the headless driver
+	// report it unresumable rather than drivable.
+	if !Terminal(domain.StageOpen) {
+		t.Error("open is not terminal; the driver would try to advance it")
+	}
+}
+
+// TestInitialForPutsAFreeformCardOutsideTheGraph: the one kind-aware thing
+// about a freeform card's place in the state machine is where it starts.
+func TestInitialForPutsAFreeformCardOutsideTheGraph(t *testing.T) {
+	if got := InitialFor(domain.KindFreeform); got != domain.StageOpen {
+		t.Errorf("InitialFor(freeform) = %q, want %q", got, domain.StageOpen)
+	}
+	for _, k := range []domain.Kind{domain.KindFeature, domain.KindBug, domain.KindResearch, domain.KindGoal, domain.Kind("")} {
+		if got := InitialFor(k); got != Initial() {
+			t.Errorf("InitialFor(%q) = %q, want the graph's start %q", k, got, Initial())
+		}
+	}
+}

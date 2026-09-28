@@ -73,6 +73,14 @@ func (e *Engine) Reverify(ctx context.Context, id domain.FeatureID, actor string
 		return res
 	}
 
+	// A freeform card has no verify stage to be parked at and no
+	// verification plan to run (DESIGN §19), so the generic refusal below
+	// would point it at `resume`, which refuses it in turn — two commands
+	// each sending the reader to the other. Say the true thing once.
+	if f.IsFreeform() {
+		return unavailable(fmt.Sprintf(
+			"%s is a freeform card: it has no verify stage and no checks of its own — read its diff and land it when it is right", id)), nil
+	}
 	if f.Stage != domain.StageVerify {
 		return unavailable(fmt.Sprintf(
 			"re-attach only finalizes a feature parked at the verify stage; %s is at %q — resume it instead", id, f.Stage)), nil

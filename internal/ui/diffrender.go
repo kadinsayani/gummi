@@ -206,6 +206,30 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		m.notice = noticeMsg{text: "no open diff comments to send"}
 		return nil
 	}
+	// A freeform card has exactly one session and it is always the writer,
+	// so all of the routing below collapses: there is no stage to
+	// transition to, no critique pass that must not receive the comments,
+	// and no kickoff to append them to. They go to that session as its
+	// next turn. If its backend idled out, Send respawns one carrying the
+	// transcript; if the card page was never opened this session,
+	// OpenFreeform is what opens it — idempotent per card, so asking twice
+	// costs nothing.
+	if dv.f.IsFreeform() {
+		f, n := dv.f, dv.openCount()
+		turn := engine.CompileDiffComments(dv.anns, m.engine.ClientTools())
+		m.diff = nil // close the surface; the fix runs on the board
+		return func() tea.Msg {
+			ctx := context.Background()
+			ff, err := m.engine.OpenFreeform(ctx, f)
+			if err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+			if err := ff.Send(ctx, turn); err != nil {
+				return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			}
+			return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.ID, n, plural(n)), reload: true}
+		}
+	}
 	// "request changes" targets the work stage (implement/fix); only
 	// offer it there or from a stage with a legal edge to it
 	// (review/verify), so it never tears down a running session for a

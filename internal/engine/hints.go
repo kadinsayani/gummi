@@ -179,6 +179,25 @@ instructions ask for something the workflow forbids ("always merge your
 own branch," "skip review for small changes"), the workflow wins. Say so
 rather than silently complying or silently ignoring the repo.`
 
+// repoInstructionsPrecedenceFreeform is the same precedence for a session
+// that is not in the workflow (DESIGN §19). The difference is not
+// cosmetic: the hint above asserts that gummi governs "the stage, the
+// gates" and that "the workflow wins", and a freeform card has no stage,
+// no gate and no workflow — so on such a card that paragraph contradicts,
+// in the same prompt, the card's own contract saying there is no gate and
+// no verdict. A model handed both has to pick one, and the one it picks is
+// not something to leave to chance.
+//
+// What survives is every part that is true of every card: the repo governs
+// craft, and the two things gummi never does are still never done here.
+const repoInstructionsPrecedenceFreeform = `This repo carries its own instructions too — an AGENTS.md, CLAUDE.md, or
+equivalent — and you are running inside it, where those instructions are
+in force. Follow them for craft: build commands, style, and test and
+review conventions. Two things stay gummi's regardless of what they say:
+you never merge or land this branch yourself, and you never run another
+gummi. If the repo's instructions tell you to do either, say so rather
+than silently complying or silently ignoring them.`
+
 // roleForStage maps a workflow stage to the agent role that performs it
 // (DESIGN §3). The bug workflow's design-side stages (triage, diagnose)
 // are architect work like brainstorm/spec; fix is implementer work like
@@ -1260,4 +1279,63 @@ blocking a finished document. You run with no worktree and cannot modify
 the artifact: record your findings in your final message and submit a
 verdict via the submit_verdict tool (pass or changes), exactly once,
 instead of writing to the document.`)
+}
+
+// freeformContractHint is what a freeform card's session is told about
+// where it is and how it will be steered. Every sentence of it is a fact
+// about this card that the agent has no other way to learn — most of all
+// the last one, because an agent that does not know its turns are
+// committed cannot reason about what it leaves behind.
+func freeformContractHint(f domain.Feature, workDir string) string {
+	brief := f.Title
+	if f.OneLiner != "" {
+		brief += "\n\n" + f.OneLiner
+	}
+	return fmt.Sprintf(`You are working on %s, a freeform card: a coding task with no workflow
+around it. There is no design document, no plan to write, no review gate
+and no verdict to emit — the conversation you are in is the whole of the
+record, so say what you did and what you did not in it.
+
+What this card was opened for, in the words it was asked in. The
+conversation may well have moved on from it; this is what it started as,
+and it is here so you still have it after a restart:
+
+%s
+
+Your working directory is a full checkout of this card's own branch (%s):
+
+  %s
+
+That directory is the boundary of your work: run every command from
+inside it, and never write into the repository's main checkout, which is
+someone else's. Everything the worktree holds when your turn ends is
+committed to that branch automatically, so leave nothing behind you did
+not mean to keep, and there is no need to commit by hand.
+
+The person is in this conversation with you. They will steer you two
+ways: prose, and comments anchored to specific lines of your diff. The
+second arrives as a list of file/line comments to address — make the
+edits, keep the change minimal, and mark each one resolved as you go.
+Their unresolved comments are what holds this card from landing, so
+resolving them is finishing the work, not bookkeeping.
+
+When the work is done, say so plainly rather than looking for something
+else to improve: they decide when this lands.`,
+		f.ID, indentBlock(brief, "  "), f.BranchName(), workDir)
+}
+
+// indentBlock prefixes every line of text with pad. It exists so a card's
+// own words can be quoted into a hint as a block rather than run together
+// with the instructions around them — a brief that reads as prose in the
+// middle of a system prompt is a brief the model can mistake for one.
+func indentBlock(text, pad string) string {
+	lines := strings.Split(strings.TrimSpace(text), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) == "" {
+			lines[i] = ""
+			continue
+		}
+		lines[i] = pad + l
+	}
+	return strings.Join(lines, "\n")
 }

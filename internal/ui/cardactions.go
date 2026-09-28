@@ -222,6 +222,13 @@ var foreignBlockedKeys = map[string]bool{
 func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	work := domain.StageImplement
 	research := in.kind == domain.KindResearch
+	// A freeform card is not in the workflow (DESIGN §19), so every
+	// workflow-shaped row below is withheld from it: there is no stage to
+	// advance or send it back to, no artifact to open, no verification
+	// plan to run, and no gate for the gate-approval mode to govern. The
+	// same reason the research filter above withholds the branch verbs —
+	// "not shown" and "not available" must not diverge.
+	freeform := in.kind == domain.KindFreeform
 	doneStage := in.stage == domain.StageDone
 	// carries a branch: everything but a research card, once it has left
 	// the backlog. Under one worktree per card the tree exists from the
@@ -279,9 +286,17 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"pause", "p", pauseLabel, pauseWhy, false,
 			in.sess != "" && in.sess != engine.StateInteractive,
 		},
+		// The same key on a freeform card mid-turn, which none of the
+		// session fields above can see: its session is interactive and not
+		// in e.live, so in.sess is empty for it and the deps row below
+		// would otherwise be what p offers while a turn is running.
+		{
+			"pause", "p", "stop this turn", "stop it mid-turn — whatever it has written is committed", false,
+			in.freeformBusy,
+		},
 		{
 			"deps", "p", "dependencies", "open the dependency picker for this card", false,
-			in.sess == "" || in.sess == engine.StateInteractive,
+			(in.sess == "" || in.sess == engine.StateInteractive) && !in.freeformBusy,
 		},
 		{
 			// the label is the interface, so it takes the card's own noun
@@ -291,7 +306,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// "spec": that is what the Shell switches on, not what a
 			// reader sees.
 			"spec", "s", artifactNoun(in.kind), "read or comment on the " + artifactNoun(in.kind) + " (tab toggles commenting)", false,
-			true,
+			!freeform,
 		},
 		{
 			"diff", "d", "diff", "read or comment on the diff (tab toggles commenting)", false,
@@ -299,7 +314,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"advance", "g", advanceLabel, advanceWhy, false,
-			!doneStage || research,
+			(!doneStage || research) && !freeform,
 		},
 		{
 			// the label is "send back", not "bounce": the decision block
@@ -314,7 +329,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"verify", "v", "verify", "run verify checks", false,
-			research || needsWT,
+			(research || needsWT) && !freeform,
 		},
 		{
 			// the id and the dialog it opens (envelope.go) both keep the old
@@ -329,7 +344,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// of its stage or kind.
 		{
 			"gate", "", gateLabel, gateWhy, false,
-			true,
+			!freeform,
 		},
 		// no accelerator: `ask` is a word you type on the composer, the
 		// same way `park`'s own accelerator collision is avoided (see
@@ -340,8 +355,13 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// exactly the one thing that never needs a live session or a
 		// lock to do.
 		{
+			// Withheld from a freeform card, and it is the one withholding
+			// here that is not about the workflow: every line typed on such
+			// a card already reaches the session that can answer AND act,
+			// so a second, read-only channel beside it would be a worse
+			// version of what the composer already does.
 			"ask", "", "ask", "ask the card's agent a question — read-only, never steers", false,
-			true,
+			!freeform,
 		},
 		// the inbox is global, but it is also the recommended action for a
 		// card that stopped on budget — nextActions returns exactly one
@@ -375,8 +395,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// card. There is nothing to close before the work is finished —
 		// an unfinished card that nobody wants is a `D`, not an ending.
 		{
+			// Offered at verify, and on a freeform card at any time: the
+			// rule is "there is nothing to close before the work is
+			// finished", and on a freeform card only the person can say
+			// when that is — there is no verify to have passed.
 			"handoff", "h", "hand off", handOffHelp, false,
-			needsWT && r.HasWorktree && !r.Landed && in.stage == domain.StageVerify,
+			needsWT && r.HasWorktree && !r.Landed && (in.stage == domain.StageVerify || freeform),
 		},
 		{
 			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch()), false,
@@ -397,7 +421,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		// could otherwise merge locally (m already refuses once linked).
 		{
 			"prlink", "", "link PR…", "link this card to a GitHub pull request", false,
-			needsWT && r.HasWorktree && !r.Landed && r.F.PullRequest.Empty(),
+			needsWT && r.HasWorktree && !r.Landed && r.F.PullRequest.Empty() && !freeform,
 		},
 		// unlinking destroys one row (PullRequestRef), not any diff
 		// annotations already pulled from it — so it is not danger:true;

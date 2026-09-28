@@ -176,8 +176,24 @@ func statsLines(s *theme.Styles, r cardrun.Run, w int) []string {
 	}
 	add(" " + s.Muted.Render(clip(head)))
 	if len(r.Sessions) == 0 {
-		add("")
-		add(" " + s.Subtle.Render("nothing has run on this card yet"))
+		// A card with no passes usually has not run. A freeform card is the
+		// exception: nothing mirrors a stage enter for it because it enters
+		// none, and it can still have a real bill — the pty drive found this
+		// surface saying "nothing has run on this card yet" in front of a
+		// card that had spent nine thousand credits, which is the one answer
+		// it must not give.
+		//
+		// What is known without passes is the money (the rollup rows are
+		// filed per stage/role/model regardless) and the envelope. The
+		// clock, the rework split and the hands are all derived from passes,
+		// so they are left out rather than printed as zeroes.
+		if r.Money.Credits == 0 && r.Money.Estimated == 0 {
+			add("")
+			add(" " + s.Subtle.Render("nothing has run on this card yet"))
+			return out
+		}
+		out = append(out, statsMoneyLines(s, r, clip)...)
+		out = append(out, statsEnvelopeLines(s, r)...)
 		return out
 	}
 

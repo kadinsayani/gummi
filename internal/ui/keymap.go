@@ -420,6 +420,24 @@ func (m *Shell) boardBindings() []binding {
 		}
 		return filtered
 	}
+	if r, ok := m.selected(); ok && r.F.IsFreeform() {
+		// A freeform card is not in the workflow (DESIGN §19): there is no
+		// stage to advance, no artifact to open, no stage to send it back
+		// to, no verification plan to run, and no gates for autopilot to
+		// cross. Every one of those keys refuses on such a card, so the bar
+		// and the ? help overlay must not offer them — the same reasoning
+		// as the research filter below. What it keeps is the diff, the
+		// branch verbs, and its two endings.
+		filtered := bs[:0:0]
+		for _, b := range bs {
+			switch b.key {
+			case "g", "s", "b", "v", "A":
+				continue
+			}
+			filtered = append(filtered, b)
+		}
+		bs = filtered
+	}
 	if r, ok := m.selected(); ok && r.F.Kind == domain.KindResearch {
 		// research cards carry no branch and never get a worktree: every
 		// key below refuses with a notice (shell.go), so surfacing them

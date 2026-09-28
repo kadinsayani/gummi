@@ -115,6 +115,11 @@ func (m *Shell) globalCommands() []command {
 		{id: "n", name: "new", label: "New card", key: "n", available: attached},
 		{id: "B", name: "bug", label: "New bug", key: "B", available: attached},
 		{id: "R", name: "research", label: "New research card", key: "R", available: attached},
+		// No accelerator: the board's lowercase letters are spent, and the
+		// kind row of `n` already reaches this. The entry exists so the word
+		// itself is in the vocabulary — a reader who knows what they want
+		// types "/freeform" instead of opening a dialog and cycling a row.
+		{id: "new-freeform", name: "freeform", label: "New freeform card — no workflow, its own branch", key: "", available: attached},
 		{id: "I", name: "ingest", label: "Split a document into cards", key: "I", available: attached && m.engine != nil},
 		{id: "G", name: "import", label: "Import a GitHub issue as a bug", key: "G", available: attached && m.engine != nil},
 		{id: "i", name: "inbox", label: "Open the needs-you inbox", key: "i", available: attached},
@@ -285,6 +290,9 @@ func (m *Shell) runCommand(id string) tea.Cmd {
 		return m.openCardProfilePicker()
 	case "board-profile", "board-model":
 		return m.openBoardValuePicker(id)
+	case "new-freeform":
+		m.Overlay.Push(m.openCardForm(domain.CardType{Kind: domain.KindFreeform}))
+		return nil
 	}
 	return m.boardVerb(id)
 }

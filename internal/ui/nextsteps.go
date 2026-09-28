@@ -85,6 +85,14 @@ type nextInput struct {
 	// Exited). It is the third way a stage counts as finished, and the
 	// only one that survives a restart.
 	exited bool
+	// freeformBusy is a freeform card's own session mid-turn. Such a
+	// session is interactive and is not in e.live, so none of the sess/
+	// live/busy fields above ever describe it — they are read from
+	// Engine.Get, which knows nothing about it. It is a separate field
+	// rather than folded into busy because everything that reads busy
+	// reasons about a STAGE run (freeing a lane, parking a pass), and a
+	// freeform turn is neither.
+	freeformBusy bool
 	// cardOpen is whether the reader is on the card page itself rather
 	// than the board — the same test talkAction makes for the
 	// conversation, for the actions that would only re-open the surface
@@ -354,6 +362,11 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		in.attn, in.escalated = it.Kind, it.Escalated
 	}
 	in.cardOpen = m.cardOpen
+	if r.F.IsFreeform() && m.engine != nil {
+		if ff := m.engine.Freeform(r.F.ID); ff != nil {
+			in.freeformBusy = ff.Snapshot().Busy
+		}
+	}
 	// An attached interactive session counts too. It used to be excluded,
 	// which left talkAction's own engine.StateInteractive branch — "the
 	// architect is already here, do not offer to start it" — unreachable,
@@ -583,6 +596,14 @@ func appendLinkPRSuggestion(acts []nextAction, in nextInput) []nextAction {
 	if !in.pullRequest.Empty() || !in.hasWorktree || in.landed {
 		return acts
 	}
+	// Not on a freeform card. Landing through a PR is a route to the
+	// verify→done gate (DESIGN §3), and a freeform card has neither — what
+	// "gummi follows the PR and waits" would mean for a card with no gate
+	// to wait at is a question nobody has answered yet (§19.6), and an
+	// unanswered route is worse offered than withheld.
+	if in.kind == domain.KindFreeform {
+		return acts
+	}
 	// Offered exactly where hand-off is, by asking the answer set rather
 	// than by restating its conditions: both answer "how does this leave
 	// gummi", which is a question only a card at the clean end of verify
@@ -748,6 +769,37 @@ func stageActions(in nextInput) []nextAction {
 	finished := in.finished()
 
 	switch in.stage {
+	case domain.StageOpen:
+		// A turn in flight owns the screen, exactly as a running stage does
+		// (the session switch above returns nil for one). The difference is
+		// that stopping it is a real answer here: nothing else on this board
+		// would stop an interactive session, and a reader who can see a turn
+		// going the wrong way should not have to pay it out.
+		if in.freeformBusy {
+			return []nextAction{nextStep("pause", "p", "stop this turn",
+				"stop it mid-turn — whatever it has written is committed")}
+		}
+		// A freeform card (DESIGN §19). It has no gate to teach the reader
+		// what comes next and no stage to advance, so saying what its
+		// answers are matters MORE here than on a card with a gate, not
+		// less: the two ends of its review loop, and the ending that keeps
+		// the branch.
+		//
+		// Before anything has run there is nothing to read and nothing to
+		// land — the composer's placeholder is what says how to start, and
+		// a row offering to land an empty branch would be a row that
+		// refuses.
+		if !in.hasWorktree {
+			return nil
+		}
+		return []nextAction{
+			nextStep("diff", "d", "read the diff", "what it has written on this card's branch so far"),
+			nextStep("merge", "m", "land it on "+in.landBase(),
+				"squash-merge the branch — you review and approve the message"),
+			nextStep("handoff", "h", "hand off",
+				"close the card and keep the branch exactly as it is"),
+		}
+
 	case domain.StageTodo:
 		// "the plan stage", the strip's own word for where this goes —
 		// not "flow", which is a noun nothing else on the screen uses.

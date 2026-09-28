@@ -145,7 +145,7 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 			}
 		}
 		if thenDone {
-			if _, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user"); err != nil {
+			if err := m.closeLandedCard(ctx, f); err != nil {
 				// the branch IS on the base; the card just did not move. That
 				// is still the state the inbox item was asking about, so it is
 				// cleared here too — leaving it up would keep inviting a
@@ -157,6 +157,19 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 		}
 		return noticeMsg{text: string(f.ID) + " squash-merged into " + base + " — " + cleanUpNudge, reload: true, clearInbox: f.ID}
 	})
+}
+
+// closeLandedCard moves a just-landed card to done. A card in the workflow
+// crosses its verify→done edge; a freeform card has no edge to cross (its
+// stage has none at all, DESIGN §19), so it closes through the store method
+// that exists for exactly that and refuses every other kind.
+func (m *Shell) closeLandedCard(ctx context.Context, f domain.Feature) error {
+	if f.IsFreeform() {
+		_, err := m.store.CloseFreeform(ctx, f.ID, "user")
+		return err
+	}
+	_, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user")
+	return err
 }
 
 // recordCommitDraftFail persists a squash-merge scribe pass's outcome on

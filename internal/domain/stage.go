@@ -23,6 +23,18 @@ const (
 	StageVerify Stage = "verify"
 	// StageDone is terminal: a verified branch handed to the user.
 	StageDone Stage = "done"
+	// StageOpen is the stage of a card that is NOT in the workflow: a
+	// freeform card (KindFreeform) holds it from mint until it closes at
+	// StageDone. It is deliberately absent from Stages — that list is the
+	// graph, in order — so no transition in internal/workflow names it,
+	// and every graph reader already does the right thing with a stage
+	// that has no edges: CanTransition refuses every move out of it, Next
+	// returns nothing (so there is no advance action and no next-stage
+	// chip), and Terminal reports true (so the headless driver reports it
+	// unresumable). "No workflow" needs no per-kind branch inside the
+	// state machine; it needs a stage the state machine knows nothing
+	// about.
+	StageOpen Stage = "open"
 )
 
 // Stages lists every stage, in workflow order. One list, because there is
@@ -31,8 +43,12 @@ const (
 // gets, which artifact it writes) rather than its own graph.
 var Stages = []Stage{StageTodo, StagePlan, StageImplement, StageVerify, StageDone}
 
-// Valid reports whether s is one of the compiled-in stages.
-func (s Stage) Valid() bool {
+// InGraph reports whether s is a stage of the workflow — that is, one the
+// transition table in internal/workflow can move a card out of. Only
+// StageOpen is not, and a caller that is about to reason about advancing,
+// gating or bouncing a card asks this rather than enumerating the stages
+// it knows about.
+func (s Stage) InGraph() bool {
 	for _, st := range Stages {
 		if s == st {
 			return true
@@ -40,6 +56,13 @@ func (s Stage) Valid() bool {
 	}
 	return false
 }
+
+// Valid reports whether s is a stage a stored card may hold: one of the
+// workflow's own, or StageOpen, which is off the graph. Valid is wider
+// than InGraph on purpose — a freeform card is a legal stored card and an
+// illegal argument to a transition, and those are two different
+// questions.
+func (s Stage) Valid() bool { return s == StageOpen || s.InGraph() }
 
 // SuperState is the kanban grouping of stages.
 type SuperState string
@@ -69,6 +92,11 @@ func (s Stage) SuperState() SuperState {
 		return SuperReviewVerify
 	case StageDone:
 		return SuperDone
+	case StageOpen:
+		// A freeform card is being worked on for its whole life: it has no
+		// backlog (minting one is starting it) and no review column (there
+		// is no gate to wait at). It sits in progress until it closes.
+		return SuperInProgress
 	}
 	return SuperTodo
 }
@@ -81,6 +109,11 @@ func (s Stage) SuperState() SuperState {
 func AtOrPastCoding(st Stage) bool {
 	switch st {
 	case StageImplement, StageVerify, StageDone:
+		return true
+	case StageOpen:
+		// A freeform card is coding from the moment it is minted, so its
+		// dependencies are settled from then too: there is no design stage
+		// in which taking one on could still change what gets built.
 		return true
 	}
 	return false

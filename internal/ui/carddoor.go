@@ -170,6 +170,15 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 		m.openOnLoad = msg.f.ID
 	}
 	cmds := []tea.Cmd{m.loadRows}
+	// A freeform card starts on create, whichever button was pressed:
+	// there are no gates for autopilot to cross, no backlog for it to wait
+	// in, and its description is the first turn (startFreeform). Its page
+	// opens too — work is about to happen and the thread is where it is
+	// visible.
+	if msg.f.IsFreeform() {
+		m.openOnLoad = msg.f.ID
+		return tea.Batch(append(cmds, m.startFreeform(msg.f))...)
+	}
 	if msg.start {
 		cmds = append(cmds, m.openAutopilot(msg.f))
 	}

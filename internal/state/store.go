@@ -1727,6 +1727,65 @@ func (s *Store) Transition(ctx context.Context, id domain.FeatureID, to domain.S
 	return f, nil
 }
 
+// CloseFreeform closes a freeform card: it writes domain.StageDone and
+// records the transition, without asking internal/workflow whether the
+// move is legal — because for this one card it is not a move through the
+// graph at all. A freeform card holds domain.StageOpen, which has no
+// outgoing edge on purpose (DESIGN §19), so every ordinary crossing of
+// its ending would be refused by CanTransition.
+//
+// The safety of bypassing that check is this method's refusal: it closes a
+// KindFreeform card and nothing else. A store method that could write
+// "done" onto any card would be a way to land a feature without verifying
+// it — the exact hole the quality floor exists to prevent — so the check
+// that makes it safe lives here, beside the bypass, rather than in each
+// caller.
+//
+// The card's own history still records the crossing, in the same
+// transaction as the stage write, so a freeform card's ending is as
+// auditable as any other's. What it deliberately does NOT do is append a
+// gate event: nothing gated this, and recording one would claim a
+// checkpoint was answered that never existed.
+func (s *Store) CloseFreeform(ctx context.Context, id domain.FeatureID, actor string) (domain.Feature, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return domain.Feature{}, err
+	}
+	defer tx.Rollback() //nolint:errcheck // no-op after commit
+
+	row := tx.QueryRowContext(ctx,
+		`SELECT `+featureCols+` FROM features WHERE id = ?`, string(id))
+	f, err := scanFeature(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return f, fmt.Errorf("%s: %w", id, ErrNotFound)
+	}
+	if err != nil {
+		return f, err
+	}
+	if !f.IsFreeform() {
+		return f, fmt.Errorf("%s is a %s card: close it through its workflow, not as a freeform card", id, f.Kind)
+	}
+	if f.Stage == domain.StageDone {
+		return f, nil
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE features SET stage=?, updated_at=? WHERE id=?`,
+		string(domain.StageDone), now.Format(timeFmt), string(id)); err != nil {
+		return f, fmt.Errorf("closing %s: %w", id, err)
+	}
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO transitions (feature_id, from_stage, to_stage, actor, at) VALUES (?,?,?,?,?)`,
+		string(id), string(f.Stage), string(domain.StageDone), actor, now.Format(timeFmt)); err != nil {
+		return f, fmt.Errorf("recording %s's close: %w", id, err)
+	}
+	if err := tx.Commit(); err != nil {
+		return f, err
+	}
+	f.Stage, f.UpdatedAt = domain.StageDone, now
+	return f, nil
+}
+
 // mintRetries bounds MintFeatureNum's search for a free number.
 const mintRetries = 1000
 

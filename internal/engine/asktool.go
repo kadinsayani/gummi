@@ -168,6 +168,16 @@ func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent
 		return []agent.ToolDef{verifyVerdictTool(), specViewTool(), specReplaceSectionTool()}
 	case domain.StageImplement:
 		return []agent.ToolDef{resolveAnnotationTool(), specViewTool(), specReplaceSectionTool()}
+	case domain.StageOpen:
+		// A freeform card (DESIGN §19): resolve_annotation and nothing
+		// else. It gets that one because the reader's diff comments are
+		// exactly how work is steered on such a card, and the count has to
+		// burn down as they are addressed. It gets no spec tools because it
+		// has no artifact, and no ask_user because the person is in the
+		// thread — a reply is the answer, so a blocking question tool would
+		// be a second, worse channel for the one thing this card already
+		// does well.
+		return []agent.ToolDef{resolveAnnotationTool()}
 	default:
 		return nil
 	}

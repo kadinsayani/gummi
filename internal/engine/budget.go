@@ -207,3 +207,20 @@ func nudge(pct int, spent, budget float64) string {
 		"current as you go, so what you have learned survives if this stage runs out.",
 		pct, left)
 }
+
+// budgetHintFreeform is the budget instruction for a freeform card's
+// session. It is a third variant beside budgetHint and
+// budgetHintReadMostly for one concrete reason: both of those tell the
+// model to write a checkpoint "into the spec's progress section" when it
+// is running dry, and a freeform card has no spec. A model told to record
+// where it got to in a document that does not exist either invents one in
+// the worktree or does nothing; the thread is where that note belongs.
+func budgetHintFreeform(budget float64) string {
+	return fmt.Sprintf(`You have about %.0f credits (≈$%.2f) left on this card. Work
+budget-consciously: prefer targeted reads over broad exploration, batch
+related edits, and avoid speculative refactors. If the task cannot finish
+within that, stop and say so in the conversation — what is done, what is
+left, and where you would pick it up. Do not run dry mid-edit: whatever
+the worktree holds at the end of your turn is what gets committed.`,
+		budget, budget*0.01)
+}

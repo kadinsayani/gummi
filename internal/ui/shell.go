@@ -2973,6 +2973,15 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "p":
 		if r, ok := m.selected(); ok {
+			// On a freeform card there is no autonomous session to park —
+			// its own is interactive — but a turn in flight is exactly what
+			// a reader who can see it going the wrong way wants to stop, and
+			// stopping it is the only thing p could usefully mean while one
+			// is running. The dependency picker below is still what p opens
+			// between turns.
+			if cmd, handled := m.interruptFreeform(r.F); handled {
+				return cmd
+			}
 			// p pauses the card's own autonomous session (running, queued,
 			// or a finished one p can park) — the existing pause binding —
 			// and otherwise opens the dependency picker for the selected card.
@@ -3013,6 +3022,14 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 	case "s":
 		if r, ok := m.selected(); ok {
 			m.clearTransientNotice()
+			if !cardHasArtifact(r) {
+				// A freeform card has no document to open (DESIGN §19). The
+				// key is filtered out of this card's bindings, so nothing
+				// advertises it here — but the handler still answers, the way
+				// every other withheld key on this board does.
+				m.notice = noticeMsg{text: string(r.F.ID) + ": a freeform card has no document — its thread is the record", id: r.F.ID}
+				return nil
+			}
 			return m.openSpec(r.F)
 		}
 	case "d":
@@ -3205,7 +3222,10 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			if r.F.IsGoal() && r.F.Stage != domain.StageVerify {
 				return m.confirmAbandonGoal(r.F)
 			}
-			if r.F.Stage != domain.StageVerify {
+			// A freeform card is the one card whose hand-off is not gated on
+			// a stage, because it has none: only the person can say when its
+			// work is finished, and saying so IS the ending (DESIGN §19).
+			if r.F.Stage != domain.StageVerify && !r.F.IsFreeform() {
 				m.notice = noticeMsg{text: string(r.F.ID) + ": hand-off ends a verified card — this one is at " + string(r.F.Stage), isErr: true}
 				return nil
 			}
@@ -3235,7 +3255,12 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			// worse, jumping a card that never reached verify straight past
 			// the quality floor. branchVerbRefusal above has already refused
 			// the cards with no branch to land at all.
-			return m.prepareMerge(r.F, r.F.Stage == domain.StageVerify)
+			// A freeform card goes to done with its landing too, and for the
+			// same reason a verified one does: landing IS its ending, and
+			// there is no later stage for it to be stranded at. It cannot
+			// jump a quality floor by doing so — it never had one to cross
+			// (domain.Feature.MayLand).
+			return m.prepareMerge(r.F, r.F.Stage == domain.StageVerify || r.F.IsFreeform())
 		}
 	case "z":
 		if r, ok := m.selected(); ok {
@@ -3888,6 +3913,13 @@ func (m *Shell) parkVerb() tea.Cmd {
 	if !ok {
 		return nil
 	}
+	// On a freeform card the turn in flight is what there is to park, and
+	// it is the one a reader typing the word is looking at: the card page
+	// owns every printable key, so "/park" is how the stop is reached from
+	// the surface the turn is streaming into.
+	if cmd, handled := m.interruptFreeform(r.F); handled {
+		return cmd
+	}
 	if s := m.sessionFor(r.F.ID); s != nil && !s.Interactive {
 		return m.pauseRun(r.F)
 	}
@@ -4075,6 +4107,12 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 // card page's own next step already points at the inbox; this is the
 // line that used to disagree with it.
 func budgetAttentionText(stage domain.Stage, committed bool) string {
+	// A freeform card has no stage to name and nothing to advance to: its
+	// turns are committed as they happen, so the honest sentence is that
+	// the conversation has stopped and what would restart it.
+	if stage == domain.StageOpen {
+		return "spent its budget — its work is committed; top it up to carry on"
+	}
 	if committed {
 		return string(stage) + " reached its budget with work committed — advance it, or top it up from the inbox"
 	}

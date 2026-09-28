@@ -246,6 +246,13 @@ func TestCardFormKindRowCycles(t *testing.T) {
 	if form.Kind() != domain.KindGoal {
 		t.Fatalf("→ past diagnosis = %q, want goal", form.Kind())
 	}
+	// freeform is the row's last stop: the one type that buys no workflow
+	// at all, so it reads as the exception rather than as one of the kinds
+	// of work gummi conducts.
+	form.HandleKey(keyRight)
+	if form.Kind() != domain.KindFreeform {
+		t.Fatalf("→ past goal = %q, want freeform", form.Kind())
+	}
 	form.HandleKey(keyRight)
 	if form.Kind() != domain.KindFeature {
 		t.Fatalf("kind should wrap back to feature, got %q", form.Kind())

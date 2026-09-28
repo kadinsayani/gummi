@@ -95,11 +95,21 @@ const researchPlaceholderText = "message the agent, /approve /verify /ask…, or
 // card can actually do, or the one line telling a newcomer that verbs
 // exist teaches them a verb that will refuse.
 func composerPlaceholder(k domain.Kind) string {
-	if k == domain.KindResearch {
+	switch k {
+	case domain.KindResearch:
 		return researchPlaceholderText
+	case domain.KindFreeform:
+		return freeformPlaceholderText
 	}
 	return placeholderText
 }
+
+// freeformPlaceholderText is the composer's placeholder on a freeform
+// card. It advertises no verb and no inventory, because the ones this
+// surface is built around — approve, send it back, cross the gate — are
+// exactly what such a card does not have. What it does have is a turn and
+// a landing, so those are what it names.
+const freeformPlaceholderText = "say what to do next — it works in this card's branch; alt+d to review, m to land"
 
 // drivenAbroadPlaceholderText is the composer's placeholder on a card
 // another gummi process is driving: no verb vocabulary reaches it (this
@@ -512,6 +522,21 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 		m.threadInput.Reset()
 		return m.goalNote(r.F, text)
 	}
+	// EVERY PROSE LINE ON A FREEFORM CARD IS A TURN. It must not reach the
+	// decision reader below, and the reason is not only that the answer is
+	// always the same: the reader is a MODEL PASS. On a card whose answer
+	// set is permanently on screen ("read the diff / land it / hand off" —
+	// there is no gate, so it never goes away) every sentence typed would
+	// be classified before being delivered, at a real turn's cost and
+	// latency, only to be sent as a message anyway. The pty drive found
+	// this as the status line "could not tell what kind of change that is
+	// — sent as a message instead".
+	//
+	// A verb still keeps the parser: "/land" on a freeform card means what
+	// it says, and the branches below own it.
+	if r.F.IsFreeform() && parseInput(text).Kind == verbNone {
+		return m.sendThreadMessage(r.F, text)
+	}
 	if d := m.visibleDecision(r); d != nil {
 		m.syncDecision(d)
 		if m.threadFreeForm && d.ask != nil {
@@ -909,6 +934,12 @@ func (m *Shell) notWiredVerb(verb, remainder string) tea.Cmd {
 // and the refusal was routed through failRun, so typing a second thought
 // while the spinner was up both lost the thought and killed the stage.
 func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
+	// A freeform card has one session and every line is a turn to it: no
+	// stage to steer, and no read-only consult fallback either, since the
+	// session this card has is the one that can actually act on it.
+	if f.IsFreeform() {
+		return m.sendFreeformTurn(f, text)
+	}
 	sess := m.sessionFor(f.ID)
 	if !sess.Live() {
 		return m.sendConsultMessage(f, text)
@@ -968,6 +999,88 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 			return consultSentMsg{id: id, err: err}
 		}
 		return consultSentMsg{id: id}
+	}
+}
+
+// sendFreeformTurn delivers a line to a freeform card's session, opening
+// one first if this is the first thing said to this card
+// (Engine.OpenFreeform is idempotent, so every later line reuses it).
+//
+// It is sendConsultMessage's shape and shares its in-flight marker, for
+// the same reason: opening the session is itself a model call, and without
+// the marker the composer clears and the line exists nowhere the reader
+// can see for those seconds. What differs is what the session may do —
+// this one writes, holds the card's worktree and commits every turn — so
+// the two can never be the same call.
+func (m *Shell) sendFreeformTurn(f domain.Feature, text string) tea.Cmd {
+	if m.engine == nil {
+		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)"}
+		return nil
+	}
+	m.threadInput.Reset()
+	if m.consultSending == nil {
+		m.consultSending = map[domain.FeatureID]string{}
+	}
+	m.consultSending[f.ID] = text
+	eng := m.engine
+	id := f.ID
+	return func() tea.Msg {
+		ff, err := eng.OpenFreeform(context.Background(), f)
+		if err != nil {
+			return consultSentMsg{id: id, err: err}
+		}
+		if err := ff.Send(context.Background(), text); err != nil {
+			return consultSentMsg{id: id, err: err}
+		}
+		return consultSentMsg{id: id}
+	}
+}
+
+// interruptFreeform stops a freeform card's turn in flight, reporting
+// whether it took the keystroke at all. It is what p means on such a card
+// while it is working: the session is interactive, so nothing else on this
+// board would have stopped it, and a turn a reader can see going the wrong
+// way is one they should not have to pay out.
+//
+// Only a BUSY session is interrupted. Between turns there is nothing to
+// stop, so the key falls through to what it does on every other card.
+func (m *Shell) interruptFreeform(f domain.Feature) (tea.Cmd, bool) {
+	if !f.IsFreeform() || m.engine == nil {
+		return nil, false
+	}
+	ff := m.engine.Freeform(f.ID)
+	if ff == nil || !ff.Snapshot().Busy {
+		return nil, false
+	}
+	eng, id := m.engine, f.ID
+	return func() tea.Msg {
+		if err := eng.InterruptFreeform(context.Background(), id); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		return noticeMsg{text: string(id) + ": stopped mid-turn — whatever it had written is committed", id: id, reload: true}
+	}, true
+}
+
+// startFreeform opens a freeform card's session and hands it the card's
+// own description as its first turn (FreeformSession.Kickoff). It is what
+// creating such a card does: the description IS the task, and a card that
+// sat waiting for the reader to retype it would be waiting for nothing —
+// there is no gate to start it at and no backlog for it to wait in.
+func (m *Shell) startFreeform(f domain.Feature) tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
+	eng := m.engine
+	id := f.ID
+	return func() tea.Msg {
+		ff, err := eng.OpenFreeform(context.Background(), f)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		if err := ff.Kickoff(context.Background()); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		return nil
 	}
 }
 
