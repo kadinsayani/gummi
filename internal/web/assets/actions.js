@@ -8,7 +8,12 @@
 //
 // The server may still stop on a question the request did not answer (409
 // "needs" or "confirm", with the question): the dialog asks it and sends
-// again. A refusal stays in the dialog, in the board's own words.
+// again. A yes is never the page's to give on its own: an action that asks
+// one (delete, clean, hand off …) is sent bare first, and the question the
+// server answers with — its own words, line breaks and all — is what the
+// dialog shows; the yes sent back is the token that question came with,
+// which answers that question and nothing else. A refusal stays in the
+// dialog, in the board's own words.
 
 import { h, clear } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
@@ -21,7 +26,7 @@ const NOUN = { message: 'Message', number: 'Credits', profile: 'Profile', repo: 
 function cap (s) { s = String(s || ''); return s ? s[0].toUpperCase() + s.slice(1) : s }
 
 export async function runAction (card, a) {
-  if (!a.needs) {
+  if (!a.needs || a.needs === 'confirm') {
     try {
       await send(card.id, a, {})
     } catch (err) {
@@ -44,7 +49,10 @@ function dialog (card, a, { ask = null } = {}) {
   const body = h('div', { class: 'aform' })
   const question = h('p', { class: 'aq', testid: 'action-question' }, a.detail ? cap(a.detail) + '.' : `${cap(a.label)} on ${card.id}.`)
   const error = h('p', { class: 'aerr', testid: 'action-error', role: 'alert', hidden: true })
-  let confirm = false
+  // the tokens of the questions the server asked and this dialog showed:
+  // clicking yes under one sends it back, with any asked before it
+  const confirms = []
+  let asked = ''
   body.append(question)
   const addField = (need) => {
     if (!need || need === 'confirm' || fields.has(need)) return
@@ -56,7 +64,9 @@ function dialog (card, a, { ask = null } = {}) {
   body.append(error)
   const takeAsk = (e) => {
     if (e.error === 'confirm' || e.needs === 'confirm') {
-      confirm = true
+      // the server's question, verbatim; its token is the only yes
+      asked = e.confirm || ''
+      question.classList.add('asked')
       clear(question).append(sentence(e.text) || `${cap(a.label)} ${card.id}?`)
       go.textContent = `Yes, ${a.label}`
       go.classList.add('danger')
@@ -75,10 +85,6 @@ function dialog (card, a, { ask = null } = {}) {
         }
       }
     }
-  }
-  if (a.needs === 'confirm') {
-    confirm = true
-    clear(question).append(`${cap(a.label)} ${card.id}${card.title ? ` — ${card.title}` : ''}?`, a.detail ? h('span', { class: 'sub' }, cap(a.detail) + '.') : '')
   }
   const m = openModal({
     title: `${cap(a.label)} · ${card.id}`,
@@ -101,7 +107,8 @@ function dialog (card, a, { ask = null } = {}) {
             Object.assign(req, v)
             void need
           }
-          if (confirm) req.confirm = true
+          if (asked) { confirms.push(asked); asked = '' }
+          if (confirms.length) req.confirm = confirms.join(' ')
           error.hidden = true
           go.disabled = true
           try {
@@ -209,11 +216,11 @@ function cardsField (card, a, label, def) {
 
 // send runs the action. It throws the ApiError for the caller to place.
 async function send (id, a, body) {
-  // an action that is also one of the pinned decision's answers (a gate
-  // crossing, a landing, a send-back) is sent against the stop the page
-  // shows, so it is refused with "moved" rather than run at another
+  // every action is sent against the stop the page shows, so one meant
+  // for it is refused with "moved" rather than run at another; the server
+  // refuses one that carries none while a decision is pinned
   const d = state.sel === id ? state.card?.decision : null
-  if (d?.against?.token && d.options?.some(o => o.id === a.id) && !body.against) body = { ...body, against: d.against.token }
+  if (d?.against?.token && !body.against) body = { ...body, against: d.against.token }
   const res = await post(cardPath(id, `actions/${encodeURIComponent(a.id)}`), body)
   // what the action changed is read again, documents included
   if (res && res.id === state.sel) set({ card: res, cardRev: (state.cardRev || 0) + 1 })

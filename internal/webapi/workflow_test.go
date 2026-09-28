@@ -20,7 +20,7 @@ func TestCardWorkflowShapes(t *testing.T) {
 		Resume   ResumeRequest     `json:"resume"`
 		Board    Board             `json:"board"`
 	}{
-		Answer: AnswerRequest{Ref: "gate:FD-012:plan", Option: "advance", Against: "gate:FD-012:plan#0de111d3@3f2a1bc", Confirm: true},
+		Answer: AnswerRequest{Ref: "gate:FD-012:plan", Option: "advance", Against: "gate:FD-012:plan#0de111d3@3f2a1bc", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2"},
 		Send: SendResponse{Route: RouteMenu, Card: Card{
 			Row: Row{ID: "FD-012", Kind: "feature", Title: "Dark mode", Stage: "verify", Status: StatusNeeds},
 			Decision: &Decision{
@@ -38,11 +38,11 @@ func TestCardWorkflowShapes(t *testing.T) {
 			},
 			Composer: Composer{Says: "“rebase” is in the card's menu, not one of the answers above", Route: RouteMenu},
 		}},
-		Action: ActionRequest{Number: &n, Repo: "api", Mode: "attended", Confirm: true},
+		Action: ActionRequest{Number: &n, Repo: "api", Mode: "attended", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2 c9f8e7d6c5b4a3f2e1d0c9b8", Against: "verify:FD-012:verify#1a2b3c4d@9f8e7d6"},
 		Refusals: []Error{
 			{Error: ConflictAnswered, Text: "Simon advanced plan → implement", By: "Simon", Receipt: "Simon advanced plan → implement"},
 			{Error: ConflictMoved, Text: "the card moved since you read it — now spec 3f2a1bc"},
-			{Error: "confirm", Needs: ActionNeedsConfirm, Text: "delete FD-012? — Dark mode — removes worktree, branch, and record"},
+			{Error: "confirm", Needs: ActionNeedsConfirm, Text: "delete FD-012?\nDark mode — removes worktree, branch, and record", Confirm: "c1a2b3c4d5e6f7a8b9c0d1e2"},
 			{Error: ConflictNeeds, Needs: ActionNeedsMessage, Text: "no landing message was drafted — write one"},
 			{Error: ConflictNewCard, Text: "the export needs a CSV mode too"},
 			{Error: ConflictBusy, Text: "use the system theme"},

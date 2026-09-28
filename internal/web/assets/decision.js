@@ -10,7 +10,8 @@
 //   answered  someone else got there first: say who, and what they said
 //   moved     the card moved under the page: say so, and show it as it is
 //   confirm   the flow stops at a question the TUI would ask (y/n): ask it
-//             here, and send the same answer again with confirm
+//             here — the server's words — and send the same answer again with
+//             the token the question came with
 //   needs     the answer needs words it did not carry: say what, and put
 //             the reader in the composer
 //   newcard   the words read as separate work: open the new-card form
@@ -392,7 +393,8 @@ function refused (id, err, body, label, tookWords, danger) {
       ctx.refresh(id)
       return
     case 'confirm':
-      set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: label, danger, go: () => send(id, { ...body, confirm: true }, label, tookWords, danger) } })
+      // the server's question, verbatim; the yes sent back is its token
+      set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: label, danger, go: () => send(id, { ...body, confirm: [body.confirm, e.confirm].filter(Boolean).join(' ') }, label, tookWords, danger) } })
       reveal = true
       return
     case 'needs':

@@ -3,7 +3,7 @@
     "ref": "gate:FD-012:plan",
     "option": "advance",
     "against": "gate:FD-012:plan#0de111d3@3f2a1bc",
-    "confirm": true
+    "confirm": "c1a2b3c4d5e6f7a8b9c0d1e2"
   },
   "send": {
     "route": "menu",
@@ -80,9 +80,10 @@
   },
   "action": {
     "number": 750,
-    "confirm": true,
+    "confirm": "c1a2b3c4d5e6f7a8b9c0d1e2 c9f8e7d6c5b4a3f2e1d0c9b8",
     "repo": "api",
-    "mode": "attended"
+    "mode": "attended",
+    "against": "verify:FD-012:verify#1a2b3c4d@9f8e7d6"
   },
   "refusals": [
     {
@@ -97,8 +98,9 @@
     },
     {
       "error": "confirm",
-      "text": "delete FD-012? — Dark mode — removes worktree, branch, and record",
-      "needs": "confirm"
+      "text": "delete FD-012?\nDark mode — removes worktree, branch, and record",
+      "needs": "confirm",
+      "confirm": "c1a2b3c4d5e6f7a8b9c0d1e2"
     },
     {
       "error": "needs",

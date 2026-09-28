@@ -63,8 +63,11 @@ type webInput struct {
 	repo    string
 	// mode is the autopilot dialog's answer; empty takes the one the
 	// dialog confirms.
-	mode    string
-	confirm bool
+	mode string
+	// confirm is the confirmation tokens the request carries
+	// (webapi.AnswerRequest.Confirm): each the yes to one question the
+	// person was shown, spent by the dialog that asked it (takeConfirm).
+	confirm string
 	// land: the request is a landing (the menu's land or squash, or the
 	// verify gate's landing answer). Only such a request answers the
 	// landing message; a landing dialog some other request's flow reached
@@ -84,6 +87,8 @@ type webOutcome struct {
 	// question what the dialog asked.
 	needs    webapi.ActionNeeds
 	question string
+	// confirm is the token a confirmation's question was issued with.
+	confirm string
 	// draft is the landing message a landing stopped to have read.
 	draft *string
 	// restore is a composer line the board handed back unsent (the agent
@@ -107,7 +112,7 @@ func (o webOutcome) err() error {
 		return &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: o.restore}
 	case o.needs == webapi.ActionNeedsConfirm:
 		// the same word the surfaces' confirmations answer with
-		return &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(o.needs), Text: o.question}
+		return &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(o.needs), Text: o.question, Confirm: o.confirm}
 	case o.needs != "":
 		return &WebError{Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(o.needs), Text: o.question, Draft: o.draft}
 	case o.newCard != "":
@@ -313,7 +318,7 @@ func (t *webIntent) answerDialogs(m *Shell, before int) tea.Cmd {
 			t.waiting = append(t.waiting, d)
 			continue
 		case res.needs != "":
-			t.out.needs, t.out.question, t.out.draft = res.needs, res.question, res.draft
+			t.out.needs, t.out.question, t.out.draft, t.out.confirm = res.needs, res.question, res.draft, res.token
 		case res.newCard != "":
 			t.out.newCard = res.newCard
 		case res.refused != "":

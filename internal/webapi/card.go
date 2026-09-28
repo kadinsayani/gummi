@@ -126,6 +126,10 @@ const (
 	ActionNeedsNumber  ActionNeeds = "number"
 	ActionNeedsProfile ActionNeeds = "profile"
 	ActionNeedsCards   ActionNeeds = "cards"
+	// ActionNeedsConfirm: the action asks a yes before it acts. The page
+	// collects nothing first: it sends the action bare, shows the question
+	// the 409 "confirm" answers with, and sends its token back
+	// (AnswerRequest.Confirm).
 	ActionNeedsConfirm ActionNeeds = "confirm"
 	// ActionNeedsRepo: the repository picker (ActionRequest.Repo).
 	ActionNeedsRepo ActionNeeds = "repo"
@@ -195,10 +199,17 @@ type AnswerRequest struct {
 	Words  string `json:"words,omitempty"`
 	// Against is the Decision.Against.Token the answer was given against.
 	Against string `json:"against"`
-	// Confirm answers the confirmation the answer's flow raises on the way
-	// (the TUI's y), when the page has already asked it: a 409 "needs"
-	// with needs "confirm" says what it is.
-	Confirm bool `json:"confirm,omitempty"`
+	// Confirm answers the confirmations the answer's flow raises on the
+	// way (the TUI's y). It holds the token of each confirmation the
+	// person was shown and said yes to, space-separated, exactly as a 409
+	// "confirm" handed it out (Error.Confirm). A token is bound to the
+	// question it was issued with — the dialog, the card and the
+	// question's whole text — and answers that one question once: a
+	// question that reads differently now (a goal that has grown a card, a
+	// check list that changed) is asked again, and a second question in
+	// the same flow gets a token of its own. There is no bare "yes": a
+	// page never confirms a question before the server has asked it.
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // Conflict reasons a 409 carries in Error.Error. Any other 409 is a
@@ -219,9 +230,10 @@ const (
 // SendRequest is POST /api/cards/{id}/send: one composer line.
 type SendRequest struct {
 	Text string `json:"text"`
-	// Against, when set, is the pinned decision's Against.Token as the
-	// page showed it: a line sent against a card that has moved since is
-	// refused with 409 "moved" rather than routed at a stop nobody saw.
+	// Against is the pinned decision's Against.Token as the page showed
+	// it: a line sent against a card that has moved since is refused with
+	// 409 "moved" rather than routed at a stop nobody saw. Required while
+	// the card pins a decision.
 	Against string `json:"against,omitempty"`
 }
 
@@ -239,15 +251,33 @@ type ActionRequest struct {
 	Number  *int     `json:"number,omitempty"`
 	Profile string   `json:"profile,omitempty"`
 	Cards   []string `json:"cards,omitempty"`
-	// Confirm is true when the page asked an ActionNeedsConfirm action's question.
-	Confirm bool `json:"confirm,omitempty"`
+	// Confirm is the token(s) of the confirmation(s) the server asked on an
+	// earlier try (409 "confirm") and the person said yes to (AnswerRequest.Confirm).
+	Confirm string `json:"confirm,omitempty"`
 	// Repo is the repository picker's answer.
 	Repo string `json:"repo,omitempty"`
 	// Mode is the autopilot switch's answer: "autopilot" or "attended".
 	// Empty takes the one the card's menu entry names.
 	Mode string `json:"mode,omitempty"`
-	// Against, when set, is the pinned decision's Against.Token as the
-	// page showed it: an action that moves the card (a gate crossing, a
-	// landing) is refused with 409 "moved" if the card moved since.
+	// Against is the pinned decision's Against.Token as the page showed
+	// it: an action is refused with 409 "moved" if the card moved since.
+	// On a card that pins a decision it is required, except for the
+	// actions that do not answer it (DecisionIndependentActions).
 	Against string `json:"against,omitempty"`
+}
+
+// DecisionIndependentActions are the card actions that neither answer nor
+// move past a pinned decision, so they run without an Against: the menu
+// entries that change what the card waits for, what it may spend, which
+// profile or repository it runs under and which pull request it is linked
+// to, and the ones that copy or remove it (each of those asks its own
+// question first). Every other action — a crossing, a landing, a
+// send-back, a run, a pause, a rebase, a hand-off, the autopilot switch —
+// and every composer line (SendRequest) sent while a decision is pinned
+// must carry the token the page showed, and is refused with 409 "moved"
+// without one. An action that is also one of the pinned decision's
+// options is never independent.
+var DecisionIndependentActions = []string{
+	"deps", "profile", "envelope", "repo", "prlink", "prunlink", "prpull",
+	"duplicate", "delete", "clean",
 }

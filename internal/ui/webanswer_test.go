@@ -110,7 +110,7 @@ func TestAConfirmAnswersOnlyItsOwnCard(t *testing.T) {
 	}
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 2 })
 	var fired []string
-	out, err := b.intent(ctx, "FD-001", webInput{confirm: true}, webWait, func(m *Shell, r featureRow) (tea.Cmd, error) {
+	out, err := b.intent(ctx, "FD-001", webInput{confirm: webConfirmToken("confirm-handoff", "FD-001", "hand off FD-001?")}, webWait, func(m *Shell, r featureRow) (tea.Cmd, error) {
 		m.Overlay.Push(&confirmDialog{id: "confirm-handoff", question: "hand off FD-001?", onConfirm: func() tea.Cmd {
 			fired = append(fired, "handoff FD-001")
 			// the yes starts a follow-up that raises a second question,

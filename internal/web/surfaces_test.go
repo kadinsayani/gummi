@@ -627,13 +627,18 @@ func TestBoardAgentThroughTheBoard(t *testing.T) {
 	b.ag.SendErr = nil
 
 	// a switch with a conversation to lose asks first
-	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY"}, &refused); got != http.StatusConflict || refused.Error != "confirm" {
+	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY"}, &refused); got != http.StatusConflict || refused.Error != "confirm" || refused.Confirm == "" {
 		t.Fatalf("an unconfirmed switch = %d %+v", got, refused)
 	}
-	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "nope", Confirm: true}, nil); got != http.StatusBadRequest {
+	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "nope", Confirm: refused.Confirm}, nil); got != http.StatusBadRequest {
 		t.Fatalf("an unknown profile = %d, want 400", got)
 	}
-	b.must(http.StatusOK, http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY", Confirm: true}, nil)
+	// the yes to the switch to thrifty is not a yes to another switch
+	var other webapi.Error
+	if got := b.call(http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY", Model: "m2", Confirm: refused.Confirm}, &other); got != http.StatusConflict || other.Error != "confirm" {
+		t.Fatalf("a switch confirmed for another question = %d %+v, want 409 confirm", got, other)
+	}
+	b.must(http.StatusOK, http.MethodPost, "/api/agent/profile", webapi.AgentProfileRequest{Profile: "THRIFTY", Confirm: refused.Confirm}, nil)
 	b.must(http.StatusOK, http.MethodGet, "/api/agent", nil, &a)
 	if !a.Open || a.Profile != "thrifty" || len(a.Items) != 0 {
 		t.Fatalf("after the switch = %+v", a)

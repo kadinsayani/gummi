@@ -143,6 +143,15 @@ func (b *Bridge) noteAnswer(id string, rec webAnswerRecord) {
 	b.answered[id] = rec
 }
 
+// refOf is the decision ref an Against token was issued for: the token is
+// the ref, then "#" and the answer set's hash, then "@" and the revision.
+func refOf(token string) string {
+	if i := strings.IndexAny(token, "#@"); i >= 0 {
+		return token[:i]
+	}
+	return token
+}
+
 // answeredBy is the recorded answer to ref given against the very
 // revision against names, if there is one.
 func (b *Bridge) answeredBy(id, ref, against string) (webAnswerRecord, bool) {
@@ -218,11 +227,18 @@ func (m *Shell) webAnswer(r featureRow, od *webOpenDecision, req webapi.AnswerRe
 	case webapi.DecisionConfirm:
 		switch req.Option {
 		case webOptionGo:
-			if !od.chip.goOnEnter && !req.Confirm {
+			if !od.chip.goOnEnter {
 				// the TUI's enter says "that spends credits — press y";
-				// the page asks the same question and sends confirm
-				return nil, &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(webapi.ActionNeedsConfirm),
-					Text: string(r.F.ID) + ": that spends credits — go?"}
+				// the page asks the same question, with what the go
+				// does, and sends back the token that answers it
+				q := string(r.F.ID) + ": that spends credits — go?"
+				if detail := strings.TrimSpace(od.api.Options[0].Detail); detail != "" {
+					q += "\n" + detail
+				}
+				if m.intent == nil || !m.intent.in.takeConfirm(webConfirmToken("chip-go", r.F.ID, q)) {
+					return nil, &WebError{Code: WebConflict, Reason: string(webapi.ActionNeedsConfirm), Needs: string(webapi.ActionNeedsConfirm),
+						Text: q, Confirm: webConfirmToken("chip-go", r.F.ID, q)}
+				}
 			}
 			return m.takeReading(r), nil
 		case webOptionKeep:
@@ -321,13 +337,13 @@ func (b *Bridge) Send(ctx context.Context, id string, req webapi.SendRequest, pe
 		return webapi.SendResponse{}, err
 	}
 	defer release()
-	if err := b.checkAgainst(ctx, id, req.Against); err != nil {
+	if err := b.checkAgainst(ctx, id, "", req.Against); err != nil {
 		return webapi.SendResponse{}, err
 	}
 	var route webapi.Route
 	out, werr := b.intent(ctx, webID(id), webInput{actor: state.PersonActor(person)}, webWait,
 		func(m *Shell, r featureRow) (tea.Cmd, error) {
-			if err := m.checkAgainstOnLoop(r, req.Against); err != nil {
+			if err := m.checkAgainstOnLoop(r, "", req.Against); err != nil {
 				return nil, err
 			}
 			decide := func() *threadDecision { return m.openDecision(r) }
@@ -376,16 +392,25 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 		return nil, err
 	}
 	defer release()
-	if err := b.checkAgainst(ctx, id, req.Against); err != nil {
+	if err := b.checkAgainst(ctx, id, action, req.Against); err != nil {
 		return nil, err
 	}
 	wait := webWait
 	if (action == "merge" || action == "squash" || action == "advance") && strings.TrimSpace(req.Message) == "" {
 		wait = webWaitDraft
 	}
+	var answered string
 	out, werr := b.intent(ctx, webID(id), in, wait, func(m *Shell, r featureRow) (tea.Cmd, error) {
-		if err := m.checkAgainstOnLoop(r, req.Against); err != nil {
+		if err := m.checkAgainstOnLoop(r, action, req.Against); err != nil {
 			return nil, err
+		}
+		if od := m.webOpenDecision(r); od != nil && req.Against != "" {
+			if i := slices.IndexFunc(od.api.Options, func(o webapi.Option) bool { return o.ID == action }); i >= 0 {
+				// the action is one of the pinned decision's answers:
+				// a second person answering the same stop is told who
+				// took it (answeredOrMoved)
+				answered = od.api.Options[i].Label
+			}
 		}
 		if action == "advance" && r.F.Stage == domain.StageVerify {
 			// the menu's next stage at verify is the landing (the TUI's
@@ -401,6 +426,9 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	if e := out.err(); e != nil {
 		return nil, e
 	}
+	if answered != "" {
+		b.noteAnswer(id, webAnswerRecord{ref: refOf(req.Against), against: req.Against, by: person, label: answered})
+	}
 	card, werr := b.Card(ctx, id)
 	if werr != nil {
 		if we, ok := IsWebError(werr); ok && we.Code == WebNotFound && action == "delete" {
@@ -411,17 +439,47 @@ func (b *Bridge) Action(ctx context.Context, id, action string, req webapi.Actio
 	return &card, nil
 }
 
+// needsAgainst reports whether a write must carry the pinned decision's
+// token: a composer line (action "") always does while a decision is
+// pinned, and so does every action but the decision-independent ones
+// (webapi.DecisionIndependentActions) — and one of those too when it is
+// also one of the decision's own answers.
+func needsAgainst(action string, d *webapi.Decision) bool {
+	if d == nil {
+		return false
+	}
+	if action == "" || slices.ContainsFunc(d.Options, func(o webapi.Option) bool {
+		return o.ID == action || strings.HasPrefix(o.ID, action+"#")
+	}) {
+		return true
+	}
+	return !slices.Contains(webapi.DecisionIndependentActions, action)
+}
+
+// unseenDecision is the 409 for a write that carried no revision while
+// the card pins a decision it has to be read against: the page has not
+// shown it (or shows an older card), so it reads the card again first.
+func unseenDecision(id string, d *webapi.Decision) error {
+	return &WebError{Code: WebConflict, Reason: webapi.ConflictMoved,
+		Text: "the card moved since you read it — now " + d.Against.Label + " (" + id + " has a decision waiting; read it before acting)"}
+}
+
 // checkAgainst refuses a write sent against a pinned decision the card
 // has moved past (409 "moved"): the page sends the token it showed, and a
-// line or an action meant for that stop is not run at another. An empty
-// token checks nothing — a caller with no decision on screen.
-func (b *Bridge) checkAgainst(ctx context.Context, id, against string) error {
-	if against == "" {
-		return nil
-	}
+// line or an action meant for that stop is not run at another. A write
+// with no token is refused the same way while the card pins a decision,
+// unless it is one that does not answer it (needsAgainst); action is the
+// menu entry, or "" for a composer line.
+func (b *Bridge) checkAgainst(ctx context.Context, id, action, against string) error {
 	cur, err := b.Card(ctx, id)
 	if err != nil {
 		return err
+	}
+	if against == "" {
+		if needsAgainst(action, cur.Decision) {
+			return unseenDecision(id, cur.Decision)
+		}
+		return nil
 	}
 	if cur.Decision == nil || cur.Decision.Against.Token != against {
 		now := "nothing is waiting on you"
@@ -436,11 +494,14 @@ func (b *Bridge) checkAgainst(ctx context.Context, id, against string) error {
 // checkAgainstOnLoop is checkAgainst's second half, on the loop itself:
 // the stop and its answer set are the ones the page was shown (the
 // revision half, a commit, is what checkAgainst read off the loop).
-func (m *Shell) checkAgainstOnLoop(r featureRow, against string) error {
+func (m *Shell) checkAgainstOnLoop(r featureRow, action, against string) error {
+	od := m.webOpenDecision(r)
 	if against == "" {
+		if od != nil && needsAgainst(action, &od.api) {
+			return unseenDecision(string(r.F.ID), &od.api)
+		}
 		return nil
 	}
-	od := m.webOpenDecision(r)
 	if od == nil || !strings.HasPrefix(against, od.api.Against.Token) {
 		return &WebError{Code: WebConflict, Reason: webapi.ConflictMoved, Text: "the card moved since you read it"}
 	}

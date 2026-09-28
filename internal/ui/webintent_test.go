@@ -208,7 +208,7 @@ func TestOnlyALandingRequestAnswersTheLandingDialog(t *testing.T) {
 		land bool
 	}{
 		{"an approval's flow", webInput{}, false},
-		{"a confirmed approval's flow", webInput{confirm: true}, false},
+		{"a confirmed approval's flow", webInput{confirm: webConfirmToken("confirm-design-gate", "FD-001", "advance FD-001?")}, false},
 		// a landing lands the message the person read and sent back; one
 		// with no message stops to have the draft read (the TUI's second
 		// ctrl+s on an unreviewed draft)

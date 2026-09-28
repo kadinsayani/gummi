@@ -216,7 +216,8 @@ registerView('agent', {
     async function switchTo (req, revert) {
       const doit = async (confirm) => {
         try {
-          await ctx.api.post('/api/agent/profile', confirm ? { ...req, confirm: true } : req)
+          // confirm is the token the server's question came with
+          await ctx.api.post('/api/agent/profile', confirm ? { ...req, confirm } : req)
           v.err = null
           v.confirm = null
           nodes.clear()
@@ -227,7 +228,7 @@ registerView('agent', {
               detail: 'The current conversation ends; a fresh one starts under the new choice.',
               yes: 'Switch',
               no: 'Keep this one',
-              onYes: () => doit(true),
+              onYes: () => doit(err.data.confirm || ''),
               onNo: () => { v.confirm = null; revert?.(); draw() }
             }
           } else {

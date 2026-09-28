@@ -77,8 +77,22 @@ func TestActionBudgetAndDelete(t *testing.T) {
 	if h.card(c.ID).ID != c.ID {
 		t.Fatal("an unconfirmed delete removed the card")
 	}
+	if e.Confirm == "" || !strings.HasPrefix(e.Text, "delete "+c.ID+"?\n") {
+		t.Fatalf("the confirm %+v carries no token, or not the question whole", e)
+	}
+	// a bare yes is not a yes: the JSON boolean the page used to send is
+	// refused outright, and a token for another question is asked again
+	if st := h.call(http.MethodPost, "/api/cards/"+c.ID+"/actions/delete", map[string]any{"confirm": true}, nil); st != http.StatusBadRequest {
+		t.Fatalf("delete with a bare confirm: true = %d, want 400", st)
+	}
+	if st, raw := h.actionRaw(c.ID, "delete", webapi.ActionRequest{Confirm: "c0000000000000000000000000"}); st != http.StatusConflict || errorOf(t, raw).Error != "confirm" {
+		t.Fatalf("delete with a token for another question = %d %s, want 409 confirm", st, raw)
+	}
+	if h.card(c.ID).ID != c.ID {
+		t.Fatal("a delete confirmed for another question removed the card")
+	}
 	var ok webapi.OK
-	if st := h.call(http.MethodPost, "/api/cards/"+c.ID+"/actions/delete", webapi.ActionRequest{Confirm: true}, &ok); st != http.StatusOK || !ok.OK {
+	if st := h.call(http.MethodPost, "/api/cards/"+c.ID+"/actions/delete", webapi.ActionRequest{Confirm: e.Confirm}, &ok); st != http.StatusOK || !ok.OK {
 		t.Fatalf("delete = %d %+v", st, ok)
 	}
 	if st := h.call(http.MethodGet, "/api/cards/"+c.ID, nil, nil); st != http.StatusNotFound {
@@ -86,7 +100,7 @@ func TestActionBudgetAndDelete(t *testing.T) {
 	}
 	// an action the card does not offer is refused, not guessed at
 	c = h.create(webapi.CreateCardRequest{Kind: "feature", Title: "Later"})
-	if st, _ := h.actionRaw(c.ID, "clean", webapi.ActionRequest{Confirm: true}); st != http.StatusConflict {
+	if st, _ := h.actionRaw(c.ID, "clean", webapi.ActionRequest{Confirm: e.Confirm}); st != http.StatusConflict {
 		t.Errorf("clean on an unlanded card = %d, want 409", st)
 	}
 }

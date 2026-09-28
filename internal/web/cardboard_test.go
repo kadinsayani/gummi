@@ -214,6 +214,12 @@ func (h *cardBoard) create(req webapi.CreateCardRequest) webapi.Card {
 // action runs a menu entry, failing on anything but 200.
 func (h *cardBoard) action(id, action string, req webapi.ActionRequest) webapi.Card {
 	h.t.Helper()
+	if req.Against == "" {
+		// as the page does: against the decision it shows, if any
+		if d := h.card(id).Decision; d != nil {
+			req.Against = d.Against.Token
+		}
+	}
 	var raw json.RawMessage
 	st := h.call(http.MethodPost, "/api/cards/"+id+"/actions/"+action, req, &raw)
 	if st != http.StatusOK {

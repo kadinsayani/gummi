@@ -463,13 +463,13 @@ type AgentOpenRequest struct {
 
 // AgentProfileRequest is POST /api/agent/profile: end the conversation and
 // start a fresh one under Profile (empty keeps the current one) and Model.
-// When there is a conversation to lose, the TUI asks first; here the page
-// asks and says so with Confirm, and without it the answer is a 409
-// "confirm" carrying the question.
+// When there is a conversation to lose, the TUI asks first; here the
+// server answers a 409 "confirm" carrying the question and its token, and
+// the page asks and sends the token back in Confirm (AnswerRequest.Confirm).
 type AgentProfileRequest struct {
 	Profile string `json:"profile,omitempty"`
 	Model   string `json:"model,omitempty"`
-	Confirm bool   `json:"confirm,omitempty"`
+	Confirm string `json:"confirm,omitempty"`
 }
 
 // PushKey is GET /api/push/key: the server's VAPID public key, base64url,

@@ -54,6 +54,9 @@ type WebError struct {
 	// By and Receipt name who answered first and what they said, on an
 	// "answered"; Needs is the input a "needs" (or "confirm") asks for.
 	By, Receipt, Needs string
+	// Confirm is a "confirm"'s token: the yes to the question in Text,
+	// and to nothing else (webConfirmToken).
+	Confirm string
 	// Draft is the landing message a landing stopped to have read, on a
 	// "needs" message; nil when the stop is not a landing's.
 	Draft *string

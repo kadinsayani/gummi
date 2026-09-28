@@ -174,8 +174,8 @@ func (m *Shell) WebAgentInterrupt() (tea.Cmd, error) {
 
 // WebAgentProfile is POST /api/agent/profile: /profile and /model. The
 // TUI asks before ending a conversation someone could miss
-// (confirmBoardReopen); the page asks instead, and says it did with
-// Confirm.
+// (confirmBoardReopen); the page asks instead, and sends back the token
+// the question came with (webConfirmToken).
 func (m *Shell) WebAgentProfile(req webapi.AgentProfileRequest) (tea.Cmd, error) {
 	if m.engine == nil {
 		return nil, webErr(WebUnavailable, "no agent configured (set a model/provider to enable agents)")
@@ -190,13 +190,16 @@ func (m *Shell) WebAgentProfile(req webapi.AgentProfileRequest) (tea.Cmd, error)
 	if err != nil {
 		return nil, err
 	}
-	if m.boardReopenLoses() && !req.Confirm {
+	if m.boardReopenLoses() {
 		to := "the " + opts.Profile + " profile"
 		if opts.Model != "" {
 			to = "model " + opts.Model
 		}
-		return nil, &WebError{Code: WebConflict, Reason: "confirm",
-			Text: "switch the board to " + to + "? the current conversation ends; a fresh one starts under it"}
+		q := "switch the board to " + to + "? the current conversation ends; a fresh one starts under it"
+		in := webInput{confirm: req.Confirm}
+		if tok := webConfirmToken("confirm-board-reopen", "", q); !in.takeConfirm(tok) {
+			return nil, &WebError{Code: WebConflict, Reason: "confirm", Text: q, Confirm: tok}
+		}
 	}
 	return m.reopenBoard(opts), nil
 }

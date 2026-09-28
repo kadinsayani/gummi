@@ -106,6 +106,11 @@ type Error struct {
 	Text string `json:"text,omitempty"`
 	// Needs is the input a 409 "needs" asks for.
 	Needs ActionNeeds `json:"needs,omitempty"`
+	// Confirm is a 409 "confirm"'s token, bound to the question in Text,
+	// which the page shows as it is (line breaks included). The request
+	// sent again with this token in its Confirm is that question's yes,
+	// and nothing else's (AnswerRequest.Confirm).
+	Confirm string `json:"confirm,omitempty"`
 	// Draft is the landing message a landing stopped to have read (a 409
 	// "needs" with needs "message"): the page shows it, editable, and sends
 	// the landing again with the words the person approved.

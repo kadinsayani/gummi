@@ -75,7 +75,7 @@ func TestTheMenusNextStageAtVerifyIsTheLanding(t *testing.T) {
 			t.Logf("menu advance: %q — %q", a.Label, a.Detail)
 		}
 	}
-	st, raw := h.actionRaw(c.ID, "advance", webapi.ActionRequest{})
+	st, raw := h.actionRaw(c.ID, "advance", webapi.ActionRequest{Against: h.card(c.ID).Decision.Against.Token})
 	t.Logf("advance: %d %.300s", st, raw)
 	time.Sleep(500 * time.Millisecond)
 	after := h.card(c.ID)
@@ -128,6 +128,44 @@ func TestAStaleCrossingIsRefusedEveryWay(t *testing.T) {
 				t.Errorf("the %s crossed the gate against a stale revision: now at %s", via, got)
 			}
 		})
+	}
+}
+
+// A write sent with no revision at all, while the card pins a decision,
+// is refused as "moved" — the page has not shown that decision, and a
+// crossing, a line or a run meant for some other state is not run at this
+// one — except for the menu entries that do not answer it
+// (webapi.DecisionIndependentActions), which run as they are.
+func TestAWriteWithNoRevisionIsRefusedWhileADecisionIsPinned(t *testing.T) {
+	h := newCardBoard(t, agent.NewFake("ok"))
+	c := h.planCard("Dark mode")
+	if c.Decision == nil {
+		t.Fatal("the plan card pins no decision")
+	}
+	for _, tc := range []struct {
+		name string
+		call func() (int, json.RawMessage)
+	}{
+		{"menu advance", func() (int, json.RawMessage) { return h.actionRaw(c.ID, "advance", webapi.ActionRequest{}) }},
+		{"menu run", func() (int, json.RawMessage) { return h.actionRaw(c.ID, "run", webapi.ActionRequest{}) }},
+		{"a line", func() (int, json.RawMessage) {
+			var raw json.RawMessage
+			st := h.call(http.MethodPost, "/api/cards/"+c.ID+"/send", webapi.SendRequest{Text: "/approve"}, &raw)
+			return st, raw
+		}},
+	} {
+		st, raw := tc.call()
+		if st != http.StatusConflict || errorOf(t, raw).Error != webapi.ConflictMoved {
+			t.Errorf("%s with no against = %d %.200s, want 409 moved", tc.name, st, raw)
+		}
+	}
+	if got := h.card(c.ID).Stage; got != string(domain.StagePlan) {
+		t.Fatalf("a write with no revision moved the card to %s", got)
+	}
+	// the budget answers nothing the decision asks
+	n := 900
+	if st, raw := h.actionRaw(c.ID, "envelope", webapi.ActionRequest{Number: &n}); st != http.StatusOK {
+		t.Errorf("a budget with no against = %d %.200s, want 200", st, raw)
 	}
 }
 

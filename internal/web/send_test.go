@@ -32,10 +32,16 @@ func (h *cardBoard) composer(id, text string) webapi.Composer {
 	return c
 }
 
+// send sends a composer line as the page does: against the decision the
+// card pins, if it pins one.
 func (h *cardBoard) send(id, text string) (int, json.RawMessage) {
 	h.t.Helper()
+	req := webapi.SendRequest{Text: text}
+	if d := h.card(id).Decision; d != nil {
+		req.Against = d.Against.Token
+	}
 	var raw json.RawMessage
-	st := h.call(http.MethodPost, "/api/cards/"+id+"/send", webapi.SendRequest{Text: text}, &raw)
+	st := h.call(http.MethodPost, "/api/cards/"+id+"/send", req, &raw)
 	return st, raw
 }
 
