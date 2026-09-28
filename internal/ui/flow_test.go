@@ -181,6 +181,7 @@ func TestFullCRUDAndLifecycleFlow(t *testing.T) {
 		t.Fatalf("stage = %s, want verify", m.rows[0].F.Stage)
 	}
 	commitWork(t, root, "FD-001")
+	m = passVerify(t, m)
 
 	// g at verify is the "done" decision: it routes through the squash
 	// merge — commit-message dialog (drafts a message the user approves), then
@@ -280,6 +281,7 @@ func TestBugLifecycleFlow(t *testing.T) {
 		}
 	}
 	commitWork(t, root, "BG-001")
+	m = passVerify(t, m)
 
 	// g at verify routes through the squash merge before done
 	m = pressAdvance(t, m)

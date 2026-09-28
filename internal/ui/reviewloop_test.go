@@ -73,6 +73,11 @@ func advanceTo(t *testing.T, m *Shell, target domain.Stage) *Shell {
 	t.Helper()
 	for i := 0; i < 8 && m.rows[0].F.Stage != target; i++ {
 		draftRequiredSections(t, m)
+		if m.rows[0].F.Stage == domain.StageVerify {
+			// leaving verify is landing, which a verify pass must come
+			// before (landingRefusal)
+			m = passVerify(t, m)
+		}
 		m = pressAdvance(t, m)
 	}
 	if m.rows[0].F.Stage != target {

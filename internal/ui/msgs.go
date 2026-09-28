@@ -706,6 +706,19 @@ func blockedMsgWeb(actor string, id domain.FeatureID, text, web string) tea.Msg 
 // (blockedMsg above) — a successful crossing is identical either way,
 // including which actor Store.Transition records on the gate event.
 func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
+	// Leaving verify by hand is the landing, and engine.Advance takes a
+	// crossing out of verify as the verdict itself — it stamps VerifiedAt
+	// on its way to the merge. So the landing floor is read here, before
+	// that stamp: a card that never finished a verify pass is not landed
+	// by "next stage" any more than by the land entry (landingRefusal).
+	// A research card lands nothing (its floor is the document's), and a
+	// branch already on main has nothing left to land.
+	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot &&
+		r.F.Stage == domain.StageVerify && r.F.Kind != domain.KindResearch && !r.F.IsFreeform() && !r.F.HandedOff() && !r.Landed {
+		if why := m.landingRefusal(r.F); why != "" {
+			return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
+		}
+	}
 	return func() tea.Msg {
 		return m.withEngine(func(eng *engine.Engine) tea.Msg {
 			res, err := eng.Advance(context.Background(), id, actor)

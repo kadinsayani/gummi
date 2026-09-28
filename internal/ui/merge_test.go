@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -19,14 +20,68 @@ import (
 // feature branch, so there is something to squash-merge.
 func mergeFixture(t *testing.T) (*Shell, string, string) {
 	t.Helper()
+	m, root, wt := unverifiedFixture(t)
+	// a card lands from verify once it has passed it (merge.go's
+	// landingRefusal), so the one these tests land has
+	if err := m.store.SetVerifiedAt(context.Background(), "FD-001", fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	return m, root, wt
+}
+
+// passVerify stamps the selected-first card's verify pass, as the verify
+// gate does when the pass is clean (markVerified), and reloads the rows.
+func passVerify(t *testing.T, m *Shell) *Shell {
+	t.Helper()
+	if err := m.store.SetVerifiedAt(context.Background(), m.rows[0].F.ID, fixedTime); err != nil {
+		t.Fatal(err)
+	}
+	return pump(t, m, m.loadRows)
+}
+
+// unverifiedFixture is a card at verify with a commit on its branch that
+// has not finished a verify pass.
+func unverifiedFixture(t *testing.T) (*Shell, string, string) {
+	t.Helper()
 	m, root, wt := implementFixture(t)
-	// a card lands from verify (merge.go's landingRefusal), so the one
-	// these tests land is there
 	if _, err := m.store.Transition(context.Background(), "FD-001", domain.StageVerify, "test"); err != nil {
 		t.Fatal(err)
 	}
 	m = pump(t, m, m.loadRows)
 	return m, root, wt
+}
+
+// Landing asks for the floor the verify stop's own landing answer asks
+// for, whichever key or request asks: a card at verify that never
+// finished a verify pass does not land from the menu; one whose pass
+// failed lands only as the person's overrule the stop offers ("land
+// anyway"), which the menu reaches too; a verified one lands.
+func TestTheMenuLandsOnTheVerifyFloor(t *testing.T) {
+	m, _, _ := unverifiedFixture(t)
+	f := m.rows[0].F
+	if why := m.landingRefusal(f); why == "" {
+		t.Fatal("a card that never ran verify may land")
+	}
+	m = pressMerge(t, m)
+	if _, ok := m.Overlay.Top().(*commitMsgDialog); ok {
+		t.Fatal("m opened the landing on a card that never ran verify")
+	}
+	// the pass finished and failed: "land anyway" is on offer, and the
+	// menu's landing is that overrule
+	m.rows[0].Exited, m.rows[0].ExitVerdict = true, verdictFail
+	m.inbox.addEscalated(f.ID, attnGate, "verify FAILED — read the evidence and bounce or overrule")
+	if !slices.ContainsFunc(stageActions(m.nextInputFor(m.rows[0])), func(a nextAction) bool { return a.id == "advance" && a.label == "land anyway" }) {
+		t.Fatalf("the failed verify offers no land anyway: %+v", stageActions(m.nextInputFor(m.rows[0])))
+	}
+	if why := m.landingRefusal(m.rows[0].F); why != "" {
+		t.Errorf("land anyway after a failed verify is refused: %s", why)
+	}
+	// verified
+	m2, _, _ := mergeFixture(t)
+	if why := m2.landingRefusal(m2.rows[0].F); why != "" {
+		t.Errorf("a verified card is refused: %s", why)
+	}
 }
 
 // implementFixture is a card at implement with a commit on its branch:

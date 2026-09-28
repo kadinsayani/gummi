@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -105,9 +106,17 @@ func TestActionBudgetAndDelete(t *testing.T) {
 	}
 }
 
-// verifiedCard is a feature at verify whose branch carries one commit of
-// its own, and its worktree.
+// verifiedCard is a feature that passed verify, whose branch carries one
+// commit of its own, and its worktree.
 func (h *cardBoard) verifiedCard(title string) (webapi.Card, string) {
+	h.t.Helper()
+	return h.verifyCard(title, true)
+}
+
+// verifyCard is a feature at verify whose branch carries one commit of
+// its own, and its worktree; passed says whether it passed verify, or
+// never ran it.
+func (h *cardBoard) verifyCard(title string, passed bool) (webapi.Card, string) {
 	t := h.t
 	t.Helper()
 	ctx := context.Background()
@@ -115,6 +124,11 @@ func (h *cardBoard) verifiedCard(title string) (webapi.Card, string) {
 	id := domain.FeatureID(c.ID)
 	for _, to := range []domain.Stage{domain.StagePlan, domain.StageImplement, domain.StageVerify} {
 		if _, err := h.store.Transition(ctx, id, to, "user"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if passed {
+		if err := h.store.SetVerifiedAt(ctx, id, time.Now()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -150,6 +164,28 @@ func TestActionLandsAVerifiedCard(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(h.root, "dark.go")); err != nil {
 		t.Errorf("the landed work is not on main: %v", err)
+	}
+}
+
+// The menu's landing asks for the floor the verify stop's own landing
+// does: a card at verify that never finished a verify pass is refused,
+// by the land entry and by "next stage" alike, and its branch stays off
+// main. (Squash collapses the branch in place and lands nothing.)
+func TestActionRefusesToLandAnUnverifiedCard(t *testing.T) {
+	h := newCardBoard(t, agent.NewFake("ok"))
+	c, _ := h.verifyCard("Dark mode", false)
+	for _, action := range []string{"merge", "advance"} {
+		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Message: "FD-001: dark mode", Against: h.card(c.ID).Decision.Against.Token})
+		if st == http.StatusOK || !strings.Contains(string(raw), "verify") {
+			t.Errorf("%s on a card that never ran verify = %d %s, want a refusal", action, st, raw)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+	if after := h.card(c.ID); after.Landed || after.Stage != string(domain.StageVerify) {
+		t.Errorf("the unverified card landed: stage %s landed %v", after.Stage, after.Landed)
+	}
+	if _, err := os.Stat(filepath.Join(h.root, "dark.go")); err == nil {
+		t.Error("the unverified work is on main")
 	}
 }
 

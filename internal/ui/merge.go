@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -54,6 +55,15 @@ type mergeReadyMsg struct {
 // request asks. A freeform card lands on a person's read of its diff, so
 // not while its agent is still writing it, nor over the person's own open
 // comments on it. A handed-off card may still be landed after all.
+//
+// Every landing path reads this one floor — the verify decision's own
+// "land on main" and "land anyway", the menu's land and squash-to-main,
+// the TUI's m and the web's actions alike — so none of them lands on less
+// than the others. The overrule is the verify stop's: "land anyway" is on
+// offer once a verify pass has finished and failed (or could not run), and
+// a landing that reaches here on such a card is that overrule, whichever
+// way it was asked for. A card that has not finished a verify pass at all
+// has nothing to overrule, and does not land.
 func (m *Shell) landingRefusal(f domain.Feature) string {
 	if f.IsFreeform() {
 		r, ok := m.rowByID(f.ID)
@@ -69,10 +79,25 @@ func (m *Shell) landingRefusal(f domain.Feature) string {
 		return ""
 	}
 	switch {
-	case f.Stage == domain.StageVerify, f.HandedOff():
+	case f.HandedOff():
+		return ""
+	case f.Stage != domain.StageVerify:
+		return string(f.ID) + " is at " + string(f.Stage) + " — it lands from verify, once the branch has been verified"
+	case f.MayLand() == nil:
 		return ""
 	}
-	return string(f.ID) + " is at " + string(f.Stage) + " — it lands from verify, once the branch has been verified"
+	if r, ok := m.rowByID(f.ID); ok {
+		if !r.F.VerifiedAt.IsZero() {
+			// the row read the stamp the copy passed in predates
+			return ""
+		}
+		if slices.ContainsFunc(stageActions(m.nextInputFor(r)), func(a nextAction) bool { return a.id == "advance" }) {
+			// the verify stop offers the landing: a pass the stamp has
+			// not reached yet, or a failure a person may overrule
+			return ""
+		}
+	}
+	return string(f.ID) + " has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)"
 }
 
 // them is "it" or "them" for a count.
