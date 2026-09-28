@@ -198,7 +198,7 @@ func (m *Shell) WebAgentProfile(req webapi.AgentProfileRequest) (tea.Cmd, error)
 		q := "switch the board to " + to + "? the current conversation ends; a fresh one starts under it"
 		in := webInput{confirm: req.Confirm}
 		if tok := webConfirmToken("confirm-board-reopen", "", q); !in.takeConfirm(tok) {
-			return nil, &WebError{Code: WebConflict, Reason: "confirm", Text: q, Confirm: tok}
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictConfirm, Text: q, Confirm: tok}
 		}
 	}
 	return m.reopenBoard(opts), nil

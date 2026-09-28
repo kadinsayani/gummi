@@ -89,8 +89,9 @@ func (c Change) Key() string {
 	}
 }
 
-// Error is every non-2xx body: a sentence for a person, and the fields a
-// specific refusal carries.
+// Error is every non-2xx body — a sentence for a person, and the fields a
+// specific refusal carries — and the body of a question (StatusQuestion,
+// IsQuestion), which is not an error but says what it asks the same way.
 type Error struct {
 	Error string `json:"error"`
 	// Remaining is how many guesses a live pairing code survives (403 on
@@ -101,17 +102,17 @@ type Error struct {
 	// Receipt is the line the thread shows for the answer that won.
 	Receipt string `json:"receipt,omitempty"`
 	// Text is a composer line handed back unsent (409 "busy"), so the page
-	// can put it back in the field; the question a 409 "needs" asks; the
-	// line a 409 "newcard" would start a card with.
+	// can put it back in the field; the question a "needs" or "confirm"
+	// asks; the line a "newcard" would start a card with.
 	Text string `json:"text,omitempty"`
-	// Needs is the input a 409 "needs" asks for.
+	// Needs is the input a "needs" question asks for.
 	Needs ActionNeeds `json:"needs,omitempty"`
-	// Confirm is a 409 "confirm"'s token, bound to the question in Text,
+	// Confirm is a "confirm" question's token, bound to the question in Text,
 	// which the page shows as it is (line breaks included). The request
 	// sent again with this token in its Confirm is that question's yes,
 	// and nothing else's (AnswerRequest.Confirm).
 	Confirm string `json:"confirm,omitempty"`
-	// Draft is the landing message a landing stopped to have read (a 409
+	// Draft is the landing message a landing stopped to have read (a
 	// "needs" with needs "message"): the page shows it, editable, and sends
 	// the landing again with the words the person approved.
 	Draft *string `json:"draft,omitempty"`

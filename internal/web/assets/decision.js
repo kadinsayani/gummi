@@ -4,8 +4,9 @@
 // the decision's ref, the option id (several, comma-separated, for a
 // question that takes more than one), any words, and the against token.
 //
-// The server can refuse an answer with a 409 that says why, and each gets
-// its own treatment rather than a bare error:
+// The server can refuse an answer with a 409 that says why, or stop at a
+// question (a 202, which api.js throws the same way), and each gets its
+// own treatment rather than a bare error:
 //
 //   answered  someone else got there first: say who, and what they said
 //   moved     the card moved under the page: say so, and show it as it is

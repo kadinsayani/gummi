@@ -6,8 +6,9 @@
 // set); then POST /api/cards/{id}/actions/{action} runs it on the server,
 // through the code the TUI's key runs.
 //
-// The server may still stop on a question the request did not answer (409
-// "needs" or "confirm", with the question): the dialog asks it and sends
+// The server may still stop on a question the request did not answer (a
+// "needs" or "confirm" question — a 202, which api.js throws as the 409 it
+// used to be — with the question): the dialog asks it and sends
 // again. A yes is never the page's to give on its own: an action that asks
 // one (delete, clean, hand off …) is sent bare first, and the question the
 // server answers with — its own words, line breaks and all — is what the
@@ -42,8 +43,8 @@ export async function runAction (card, a) {
   dialog(card, a)
 }
 
-// dialog collects an action's input. ask is a 409 the server answered a
-// first try with: the question it stopped on, and what it needs.
+// dialog collects an action's input. ask is the question the server
+// answered a first try with: what it stopped on, and what it needs.
 function dialog (card, a, { ask = null } = {}) {
   const fields = new Map() // need -> { el, value() }
   const body = h('div', { class: 'aform' })

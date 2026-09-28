@@ -128,7 +128,7 @@ const (
 	ActionNeedsCards   ActionNeeds = "cards"
 	// ActionNeedsConfirm: the action asks a yes before it acts. The page
 	// collects nothing first: it sends the action bare, shows the question
-	// the 409 "confirm" answers with, and sends its token back
+	// the "confirm" question answers with, and sends its token back
 	// (AnswerRequest.Confirm).
 	ActionNeedsConfirm ActionNeeds = "confirm"
 	// ActionNeedsRepo: the repository picker (ActionRequest.Repo).
@@ -201,8 +201,8 @@ type AnswerRequest struct {
 	Against string `json:"against"`
 	// Confirm answers the confirmations the answer's flow raises on the
 	// way (the TUI's y). It holds the token of each confirmation the
-	// person was shown and said yes to, space-separated, exactly as a 409
-	// "confirm" handed it out (Error.Confirm). A token is bound to the
+	// person was shown and said yes to, space-separated, exactly as a
+	// "confirm" question handed it out (Error.Confirm). A token is bound to the
 	// question it was issued with — the dialog, the card and the
 	// question's whole text — and answers that one question once: a
 	// question that reads differently now (a goal that has grown a card, a
@@ -212,20 +212,53 @@ type AnswerRequest struct {
 	Confirm string `json:"confirm,omitempty"`
 }
 
-// Conflict reasons a 409 carries in Error.Error. Any other 409 is a
-// refusal, and Error.Error is the board's own sentence for it.
+// The words Error.Error carries for a write that did not go through
+// and says why in a way the page answers specially.
+//
+// Two kinds of answer wear them, and they are told apart by status:
+//
+//   - A refusal is a 409: the card moved, someone answered first, the
+//     agent is busy (the line handed back). Any other 409 is a refusal
+//     too, and Error.Error is the board's own sentence for it.
+//   - A question is a 202 Accepted (StatusQuestion): the request was
+//     understood and nothing was done, because its flow stopped at
+//     something only the person can answer — an input it needs, a
+//     confirmation to give, a line that reads as a new card. Nothing is
+//     wrong, so it is not an HTTP error; the body is the same Error
+//     shape, and the request sent again with the answer goes on (see
+//     IsQuestion).
 const (
 	ConflictMoved    = "moved"
 	ConflictAnswered = "answered"
 	ConflictBusy     = "busy"
-	// ConflictNeeds: the flow stopped at a question the request carried
-	// no answer for. Needs names the input, Text the question; ask the
-	// person and send the request again with it.
+	// ConflictNeeds (a question): the flow stopped at an input the
+	// request carried no answer for. Needs names the input, Text the
+	// question; ask the person and send the request again with it.
 	ConflictNeeds = "needs"
-	// ConflictNewCard: the line reads as separate work. Text is the line;
-	// the page opens the new-card form seeded with it.
+	// ConflictConfirm (a question): the flow stopped at a confirmation.
+	// Text is the question, Confirm its token; the yes is the request
+	// sent again with that token (AnswerRequest.Confirm).
+	ConflictConfirm = "confirm"
+	// ConflictNewCard (a question): the line reads as separate work. Text
+	// is the line; the page opens the new-card form seeded with it.
 	ConflictNewCard = "newcard"
 )
+
+// StatusQuestion is the status a question is answered with: 202
+// Accepted — understood, not done, answer this. A question is ordinary
+// control flow, and a 4xx would have every browser log it as a failed
+// load on every landing, confirmation and hand-off.
+const StatusQuestion = 202
+
+// IsQuestion reports whether an Error.Error word is a question (answered
+// with StatusQuestion) rather than a refusal (409).
+func IsQuestion(word string) bool {
+	switch word {
+	case ConflictNeeds, ConflictConfirm, ConflictNewCard:
+		return true
+	}
+	return false
+}
 
 // SendRequest is POST /api/cards/{id}/send: one composer line.
 type SendRequest struct {
@@ -252,7 +285,7 @@ type ActionRequest struct {
 	Profile string   `json:"profile,omitempty"`
 	Cards   []string `json:"cards,omitempty"`
 	// Confirm is the token(s) of the confirmation(s) the server asked on an
-	// earlier try (409 "confirm") and the person said yes to (AnswerRequest.Confirm).
+	// earlier try ("confirm" question) and the person said yes to (AnswerRequest.Confirm).
 	Confirm string `json:"confirm,omitempty"`
 	// Repo is the repository picker's answer.
 	Repo string `json:"repo,omitempty"`

@@ -3703,8 +3703,8 @@ other side of that trade and contains the risk with four rules instead.
   (the TUI's landing dialog, and its second `ctrl+s` on an unreviewed
   draft). A chip whose "go" spends credits asks first, as `y` does. A
   confirmation is never the page's to give on its own: the page sends a
-  destructive action bare, the server answers `409 confirm` with the
-  question its own dialog asks — every word, line breaks kept, the
+  destructive action bare, the server answers a `confirm` question with
+  the question its own dialog asks — every word, line breaks kept, the
   commands verify would run listed one to a line — and a token bound to
   that dialog, that card and that text. The yes is that token sent back.
   It answers that one question, once: a question that reads differently
@@ -3715,6 +3715,16 @@ other side of that trade and contains the risk with four rules instead.
   the same way, in the TUI overlay's words (what autopilot runs, within
   what budget, and that it never lands); stopping autopilot goes at once,
   and "Create & autopilot" was asked on the new-card form itself.
+- **A question is not an error.** Where a flow stops to ask — an input
+  it needs (`needs`, a landing message to read among them), a
+  confirmation (`confirm`), a line that reads as a new card (`newcard`) —
+  the server answers `202 Accepted`: understood, nothing done, answer
+  this. The body is the same `webapi.Error` shape a refusal carries, and
+  the page asks it and sends the request again. Only a refusal is a 4xx:
+  the card moved, someone answered first, the agent is busy, the answer
+  is not offered, the request is malformed. A question is ordinary
+  control flow on every landing, delete and hand-off, and a 409 had every
+  browser log each one as a failed load, which no page code can silence.
 - **An answer names what it was given against.** Every open decision
   carries the revision it was raised on — the spec commit for a design
   gate, the verify run and branch head for a failure — and the page shows

@@ -82,14 +82,14 @@ func TestActionBudgetAndDelete(t *testing.T) {
 	if c = h.action(c.ID, "envelope", webapi.ActionRequest{Number: &n}); c.Envelope != 750 {
 		t.Errorf("envelope after setting it = %d", c.Envelope)
 	}
-	if st, raw := h.actionRaw(c.ID, "envelope", webapi.ActionRequest{}); st != http.StatusConflict || errorOf(t, raw).Needs != webapi.ActionNeedsNumber {
-		t.Errorf("a budget with no number = %d %s, want 409 needs number", st, raw)
+	if st, raw := h.actionRaw(c.ID, "envelope", webapi.ActionRequest{}); st != webapi.StatusQuestion || errorOf(t, raw).Needs != webapi.ActionNeedsNumber {
+		t.Errorf("a budget with no number = %d %s, want 202 needs number", st, raw)
 	}
 
 	st, raw := h.actionRaw(c.ID, "delete", webapi.ActionRequest{})
 	e := errorOf(t, raw)
-	if st != http.StatusConflict || e.Error != "confirm" || e.Needs != webapi.ActionNeedsConfirm || e.Text == "" {
-		t.Fatalf("delete unconfirmed = %d %s, want 409 confirm with the question", st, raw)
+	if st != webapi.StatusQuestion || e.Error != "confirm" || e.Needs != webapi.ActionNeedsConfirm || e.Text == "" {
+		t.Fatalf("delete unconfirmed = %d %s, want 202 confirm with the question", st, raw)
 	}
 	if h.card(c.ID).ID != c.ID {
 		t.Fatal("an unconfirmed delete removed the card")
@@ -102,8 +102,8 @@ func TestActionBudgetAndDelete(t *testing.T) {
 	if st := h.call(http.MethodPost, "/api/cards/"+c.ID+"/actions/delete", map[string]any{"confirm": true}, nil); st != http.StatusBadRequest {
 		t.Fatalf("delete with a bare confirm: true = %d, want 400", st)
 	}
-	if st, raw := h.actionRaw(c.ID, "delete", webapi.ActionRequest{Confirm: "c0000000000000000000000000"}); st != http.StatusConflict || errorOf(t, raw).Error != "confirm" {
-		t.Fatalf("delete with a token for another question = %d %s, want 409 confirm", st, raw)
+	if st, raw := h.actionRaw(c.ID, "delete", webapi.ActionRequest{Confirm: "c0000000000000000000000000"}); st != webapi.StatusQuestion || errorOf(t, raw).Error != "confirm" {
+		t.Fatalf("delete with a token for another question = %d %s, want 202 confirm", st, raw)
 	}
 	if h.card(c.ID).ID != c.ID {
 		t.Fatal("a delete confirmed for another question removed the card")
@@ -223,7 +223,7 @@ func TestTheMessageQuestionSaysWhatHappens(t *testing.T) {
 	} {
 		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Against: h.card(c.ID).Decision.Against.Token})
 		e := errorOf(t, raw)
-		if st != http.StatusConflict || e.Needs != webapi.ActionNeedsMessage || !strings.Contains(e.Text, want) {
+		if st != webapi.StatusQuestion || e.Needs != webapi.ActionNeedsMessage || !strings.Contains(e.Text, want) {
 			t.Errorf("%s with no message = %d %+v, want its question to say %q", action, st, e, want)
 		}
 		if action == "squash" && strings.Contains(e.Text, "landing") {

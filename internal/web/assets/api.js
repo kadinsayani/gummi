@@ -2,6 +2,17 @@
 // throw an ApiError carrying the status and the server's error body
 // (internal/webapi.Error), so callers can tell a 409 race from a route that
 // is not built yet.
+//
+// A question the server stopped at — an input a flow needs, a confirmation
+// to give, a line that reads as a new card — comes back 202 Accepted with
+// that same body (webapi.StatusQuestion): it is ordinary control flow, not a
+// failed load, so the browser logs nothing. Here it becomes the very ApiError
+// a 409 "needs" / "confirm" / "newcard" used to, status 409 and all, so
+// every caller asks it exactly as it always has.
+
+// QUESTIONS are the error words a 202 carries a question with
+// (webapi.IsQuestion).
+const QUESTIONS = new Set(['needs', 'confirm', 'newcard'])
 
 export class ApiError extends Error {
   constructor (status, data, fallback) {
@@ -37,6 +48,12 @@ export async function api (method, path, body) {
   if (!res.ok) {
     if (res.status === 401 && onUnauthorized) onUnauthorized()
     throw new ApiError(res.status, data, res.statusText)
+  }
+  if (res.status === 202 && data && QUESTIONS.has(data.error)) {
+    // a question, not a result: the page answers it where it asks
+    const q = new ApiError(409, data)
+    q.question = true
+    throw q
   }
   return data
 }

@@ -464,8 +464,9 @@ type AgentOpenRequest struct {
 // AgentProfileRequest is POST /api/agent/profile: end the conversation and
 // start a fresh one under Profile (empty keeps the current one) and Model.
 // When there is a conversation to lose, the TUI asks first; here the
-// server answers a 409 "confirm" carrying the question and its token, and
-// the page asks and sends the token back in Confirm (AnswerRequest.Confirm).
+// server answers a "confirm" question (StatusQuestion) carrying it and
+// its token, and the page asks and sends the token back in Confirm
+// (AnswerRequest.Confirm).
 type AgentProfileRequest struct {
 	Profile string `json:"profile,omitempty"`
 	Model   string `json:"model,omitempty"`

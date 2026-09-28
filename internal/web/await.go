@@ -15,18 +15,22 @@ import (
 // Helpers for the routes that run an intent to its end and answer with
 // what it did (ui.Bridge.Await), rather than the ones that only read.
 
-// fail answers err: a board refusal with its class, a board that has
-// stopped with 503, a browser that went away with nothing.
+// fail answers err: a board refusal with its class, a question the flow
+// stopped at with 202 (webapi.StatusQuestion — it is not an error, so no
+// browser logs it as a failed load), a board that has stopped with 503,
+// a browser that went away with nothing.
 func (s *Server) fail(w http.ResponseWriter, err error) {
 	if we, ok := ui.IsWebError(err); ok {
 		status := http.StatusConflict
-		switch we.Code {
-		case ui.WebBadRequest:
+		switch {
+		case we.Code == ui.WebBadRequest:
 			status = http.StatusBadRequest
-		case ui.WebNotFound:
+		case we.Code == ui.WebNotFound:
 			status = http.StatusNotFound
-		case ui.WebUnavailable:
+		case we.Code == ui.WebUnavailable:
 			status = http.StatusServiceUnavailable
+		case webapi.IsQuestion(we.Reason):
+			status = webapi.StatusQuestion
 		}
 		body := webapi.Error{Error: we.Text}
 		if we.Reason != "" {

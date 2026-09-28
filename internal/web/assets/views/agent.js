@@ -5,8 +5,8 @@
 // sends through the tab's composer (POST /api/agent/send, where `/clear`
 // starts over), stops a turn (interrupt), and switches profile or model
 // (POST /api/agent/profile) — asking first, as the TUI does, when a
-// conversation would be lost: the server answers 409 "confirm" with the
-// question, and the page repeats the request with confirm once you agree.
+// conversation would be lost: the server answers a "confirm" question with
+// the question, and the page repeats the request with confirm once you agree.
 
 import { h, append, clear, cr, storage, $ } from '../dom.js?v=__ASSET_V__'
 import { markdown } from '../markdown.js?v=__ASSET_V__'
