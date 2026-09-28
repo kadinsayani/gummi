@@ -206,8 +206,10 @@ registerView('goal', {
     let busy = false // an action panel is open: hold refreshes until it closes
     let stale = false
     let cardIds = new Set()
+    let gone = false
 
     async function load () {
+      if (gone) return
       if (busy) { stale = true; return }
       try {
         g = await ctx.api.get(`/api/goals/${encodeURIComponent(id)}`)
@@ -250,7 +252,11 @@ registerView('goal', {
     load()
     const offs = [
       ctx.onEvent('board', reload),
-      ctx.onEvent('card', (c) => { if (c?.id === id || cardIds.has(c?.id)) reload() })
+      ctx.onEvent('card', (c) => {
+        // the goal itself was deleted: there is nothing left to fetch
+        if (c?.id === id && c.gone) { gone = true; clear(body); body.append(h('div', { class: 'empty', testid: 'goal-gone' }, h('b', null, `${id} was deleted`))); return }
+        if (!gone && (c?.id === id || cardIds.has(c?.id))) reload()
+      })
     ]
     return () => offs.forEach(off => off())
   }

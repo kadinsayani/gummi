@@ -131,6 +131,26 @@ test.describe('a running goal', () => {
     await page.getByTestId('action-cancel').click();
     expect((await api('GET', `/api/cards/${goal}`)).status).toBe(200);
   });
+
+  // A goal deleted while its page is open says so, and asks the board for
+  // nothing more: a refetch of a card that is gone is a 404 in the console.
+  test('a goal deleted under its open page says so and fetches nothing', async ({ pairedPage: page, api }, info) => {
+    test.skip(info.project.name !== 'desktop', 'one viewport is enough for a page that stops fetching');
+    await page.getByTestId('rail-more').click();
+    await page.getByTestId('menu-goals').click();
+    await page.getByTestId(`goal-row-${goal}`).click();
+    await expect(page.getByTestId('view-goal').getByTestId('goal-id')).toHaveText(goal);
+    const failed: string[] = [];
+    page.on('console', (m) => { if (m.type() === 'error' && /Failed to load resource/.test(m.text())) failed.push(m.text()); });
+    const card = (await api('GET', `/api/cards/${goal}`)).json;
+    const ask = await api('POST', `/api/cards/${goal}/actions/delete`, { against: card.decision?.against?.token });
+    expect(ask.status).toBe(202);
+    const done = await api('POST', `/api/cards/${goal}/actions/delete`, { against: card.decision?.against?.token, confirm: ask.json.confirm });
+    expect(done.status).toBe(200);
+    await expect(page.getByTestId('goal-gone')).toContainText(`${goal} was deleted`);
+    await page.waitForTimeout(1500);
+    expect(failed).toEqual([]);
+  });
 });
 
 test('a goal is created from the form', async ({ pairedPage: page }, info) => {

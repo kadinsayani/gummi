@@ -164,7 +164,7 @@ Form: `goal-form-slot`, `goal-form`, `goal-form-desc`, `goal-form-budget`,
 Page: `goal-head`, `goal-back`, `goal-id`, `goal-title`, `goal-state`,
 `goal-met`, `goal-after`, `goal-open-card`, `goal-partial`; callouts
 `goal-plan`, `goal-plan-open`, `goal-needs-budget`, `goal-needs-substrate`,
-`goal-needs-owner`, `goal-waiting-on`, `goal-unread`; `goal-error` (the goal
+`goal-needs-owner`, `goal-waiting-on`, `goal-unread`; `goal-gone` (the goal was deleted while its page was open), `goal-error` (the goal
 page did not load, with why).
 Verbs: `goal-actions`, `goal-action-<id>` (`note`, `budget`, `substrate`,
 `topup`, `stop`, `sendback`, `reverse`, `land`, `abandon`), `goal-action-slot`,
