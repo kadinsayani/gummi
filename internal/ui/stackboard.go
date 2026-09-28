@@ -13,7 +13,6 @@ package ui
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -54,24 +53,11 @@ func (m *Shell) stackNewCard(ctx context.Context, f domain.Feature, onto domain.
 	if id == "" {
 		// The stack takes its name from the card at the bottom, which is
 		// the only name that means anything to the reader at this point.
-		newID, derr := domain.NewStackID(base.Slug, base.ID)
-		if derr != nil {
-			return "", derr
+		st, serr := m.store.StartStack(ctx, base.ID, "", time.Now())
+		if serr != nil {
+			return "", serr
 		}
-		// A name collision is a real possibility (two cards with the same
-		// slug in one workspace), so the id gets the bottom card's number
-		// when the plain slug is taken.
-		if _, gerr := m.store.GetStack(ctx, newID); gerr == nil {
-			newID = domain.StackID(strings.ToLower(string(base.ID)) + "-" + string(newID))
-		}
-		st := domain.Stack{ID: newID, Name: base.Slug, Repo: base.Repo}
-		if cerr := m.store.CreateStack(ctx, &st, time.Now()); cerr != nil {
-			return "", cerr
-		}
-		if aerr := m.store.AddToStack(ctx, newID, base.ID, 0); aerr != nil {
-			return "", aerr
-		}
-		id = newID
+		id = st.ID
 	}
 	// Directly above the card it was stacked on, not at the top of the
 	// stack: "stack this on FD-101" means exactly that, even when other

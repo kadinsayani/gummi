@@ -36,29 +36,11 @@ func runStackNew(fl cliFlags, args []string) error {
 	if err != nil {
 		return err
 	}
-	f, err := env.store.GetFeature(ctx, bottom)
+	st, err := env.store.StartStack(ctx, bottom, fl.String("name"), time.Now())
 	if err != nil {
 		return err
 	}
-	if f.StackID != "" {
-		return fmt.Errorf("%s is already in stack %s", f.ID, f.StackID)
-	}
-	label := fl.String("name")
-	if label == "" {
-		label = f.Slug
-	}
-	id, err := domain.NewStackID(label, f.ID)
-	if err != nil {
-		return err
-	}
-	st := domain.Stack{ID: id, Name: label, Repo: f.Repo}
-	if err := env.store.CreateStack(ctx, &st, time.Now()); err != nil {
-		return err
-	}
-	if err := env.store.AddToStack(ctx, id, f.ID, 0); err != nil {
-		return err
-	}
-	fmt.Printf("stack %s created with %s at the bottom\n", id, f.ID)
+	fmt.Printf("stack %s created with %s at the bottom\n", st.ID, bottom)
 	return nil
 }
 
@@ -200,37 +182,32 @@ func runStackRestack(args []string) error {
 		return err
 	}
 	// Walk to a fixed point rather than one step: a caller who asked for
-	// this wants the stack settled when the command returns. The cap is
-	// a safety net against a member that reports stale forever; the
-	// policy moves at most one card per tick, so a stack of N settles in
-	// N ticks and anything past 4N is a bug, not a long stack.
-	const maxTicks = 64
-	moved := 0
-	for i := 0; i < maxTicks; i++ {
-		res, terr := env.eng.StackTick(ctx, id)
-		if terr != nil {
-			return terr
-		}
-		if res.Conflict != nil {
-			fmt.Printf("%s: replaying onto its base hit conflicts in %s\n",
-				res.Restacked, strings.Join(res.Conflict.Files, ", "))
-			fmt.Println("its branch is untouched — resolve them on the branch, then run this again")
-			return fmt.Errorf("%s stopped on conflicts", id)
-		}
-		if res.Restacked != "" {
-			moved++
-			fmt.Printf("%s replayed onto its base\n", res.Restacked)
-		}
-		if !res.Again {
-			break
-		}
-		if len(res.Actions) == 1 && res.Actions[0].Kind == stack.ActionWait {
-			fmt.Printf("%s: waiting on %s — %s\n", id, res.Actions[0].Card, res.Actions[0].Reason)
-			return nil
-		}
+	// this wants the stack settled when the command returns.
+	res, err := env.eng.Restack(ctx, id)
+	for _, card := range res.Replayed {
+		fmt.Printf("%s replayed onto its base\n", card)
 	}
-	if moved == 0 {
+	if err != nil {
+		return err
+	}
+	if res.Conflict != nil {
+		fmt.Printf("%s: replaying onto its base hit conflicts in %s\n",
+			res.ConflictCard, strings.Join(res.Conflict.Files, ", "))
+		fmt.Println("its branch is untouched — resolve them on the branch, then run this again")
+		return fmt.Errorf("%s stopped on conflicts", id)
+	}
+	if res.WaitingOn != "" {
+		fmt.Printf("%s: waiting on %s — %s\n", id, res.WaitingOn, res.Waiting)
+		return nil
+	}
+	if len(res.Replayed) == 0 {
 		fmt.Printf("%s is already settled — every card sits on its current base\n", id)
+	} else {
+		// gummi never pushes (DESIGN §18.5): it says what to push.
+		fmt.Println("publish the replayed branches with:")
+		for _, p := range res.Push {
+			fmt.Println("  " + p)
+		}
 	}
 	return printStack(ctx, env.store, id)
 }

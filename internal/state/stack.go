@@ -14,6 +14,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -42,6 +43,48 @@ func (s *Store) CreateStack(ctx context.Context, st *domain.Stack, at time.Time)
 		return fmt.Errorf("creating stack %s: %w", st.ID, err)
 	}
 	return nil
+}
+
+// StartStack creates a stack with bottom at its foot, named name — or,
+// when name is empty, after the bottom card's slug, which is the only name
+// that means anything at the moment a stack is born. The id comes from the
+// name; when that id is taken it gets the bottom card's id in front, so two
+// cards sharing a slug can each start one. A card already in a stack, or
+// of a kind with no branch to chain, is refused and no stack is left
+// behind.
+//
+// It is the one recipe `gummi stack new`, the board's stacking of a second
+// card onto a first, and the web face all use.
+func (s *Store) StartStack(ctx context.Context, bottom domain.FeatureID, name string, at time.Time) (domain.Stack, error) {
+	f, err := s.GetFeature(ctx, bottom)
+	if err != nil {
+		return domain.Stack{}, err
+	}
+	if f.StackID != "" {
+		return domain.Stack{}, fmt.Errorf("%s is already in stack %s", f.ID, f.StackID)
+	}
+	if k := f.Kind; k == domain.KindResearch || k == domain.KindGoal {
+		return domain.Stack{}, fmt.Errorf("starting a stack on %s: %w", f.ID, ErrStackNotStackable)
+	}
+	if name == "" {
+		name = f.Slug
+	}
+	id, err := domain.NewStackID(name, f.ID)
+	if err != nil {
+		return domain.Stack{}, err
+	}
+	if _, gerr := s.GetStack(ctx, id); gerr == nil {
+		id = domain.StackID(strings.ToLower(string(f.ID)) + "-" + string(id))
+	}
+	st := domain.Stack{ID: id, Name: name, Repo: f.Repo}
+	if err := s.CreateStack(ctx, &st, at); err != nil {
+		return domain.Stack{}, err
+	}
+	if err := s.AddToStack(ctx, id, f.ID, 0); err != nil {
+		_ = s.DeleteStack(ctx, id)
+		return domain.Stack{}, err
+	}
+	return st, nil
 }
 
 // GetStack reads one stack record. Returns ErrNotFound when there is none.
