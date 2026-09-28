@@ -303,7 +303,9 @@ refuses `--tailscale`: through the proxy, the unpaired board is open.
 
 A paired device's token is honoured only on the host and port it paired
 on. A device paired on `127.0.0.1:7878` and opened through the tailnet
-name (or the other way round) pairs again there, as a second device.
+name (or the other way round) pairs again there, as a second device —
+which, with a code from `gummi web pair` or one the page asked for, waits
+until a browser already paired approves it on its page.
 Plain HTTP on an address other than loopback carries the pairing code and
 the token in clear; the server warns when it starts that way.
 

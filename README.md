@@ -397,7 +397,7 @@ host at a time, and whichever starts second names the first and exits.
 ```sh
 gummi web                  # 127.0.0.1:7878 (or GUMMI_WEB_ADDR); prints a pairing code
 gummi web pair --name Ana  # a code for another browser, from another terminal
-gummi web devices          # who is paired;  gummi web unpair <id> | --all
+gummi web devices          # who is paired or waiting;  gummi web unpair <id> | --all
 gummi web --tailscale --ts-tls   # also https://gummi.<tailnet>.ts.net, for a phone
 ```
 
@@ -409,10 +409,21 @@ loopback unless told otherwise: `--tls-cert`/`--tls-key` serve HTTPS, and
 login URL to open on any device (or set `TS_AUTHKEY`, which unlike
 `--ts-authkey` stays out of `ps`);
 `--ts-tls` serves HTTPS with a tailnet certificate, which notifications
-need. Pairing still applies on the tailnet, every new pairing is announced
-on every open page and paired device, and `--no-pairing` is refused
+need. Pairing still applies on the tailnet, and `--no-pairing` is refused
 on anything but loopback. See
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md#the-web-host-on-a-tailnet).
+
+Once one browser is paired, a new one paired with a `gummi web pair` code
+(or one a browser asked for) only waits: every page at the board shows the
+request — name, browser, address, how it paired — with **Approve** and
+**Reject**, and it lapses after ten minutes. The first browser, and one
+paired with the code `gummi web` prints when it starts, are let in at
+once. There is no command that approves, on purpose: an agent running as
+you could run it too. This stops an agent on the same machine pairing
+itself silently; it does not stop one that can drive your own browser
+profile or read its cookies, pair before you do, or edit gummi's files
+and restart the server — for those, run agents in a container
+([DESIGN §20.5](docs/DESIGN.md#205-scope-guards)).
 
 ## Backends and configuration
 

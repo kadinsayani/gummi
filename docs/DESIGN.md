@@ -524,10 +524,17 @@ everything the shell can reach.
 
 That includes the web face (§20). An unconfined agent running as the
 operator can run `gummi web pair` — or read the admin token it uses — and
-pair itself to a running `gummi web`, which gives it the landing and
-gate-crossing §16 withholds from agents. gummi cannot tell that apart
-from the operator doing it, and only announces it (§20.5); the container
-boundary above is what prevents it.
+redeem the code it gets. Once any browser is paired, that no longer gets
+it the board: the device only waits until a person on a paired browser
+approves it (§20.3), and there is deliberately no command that approves
+one, since an agent could run it as easily. What the agent can still do
+is what any process with the operator's permissions can: drive the
+operator's own browser profile or read its cookie store, race the
+operator to be the very first device, edit `devices.json` or kill and
+restart the server so a restart trusts what it wrote, or read wherever
+the operator sends the server's output. Those are the operator's own
+account, not a surface gummi can guard; the container boundary above is
+what prevents them.
 
 #### Config layering
 
@@ -3827,11 +3834,38 @@ guesser can keep the pairing form busy but never keep the operator from
 pairing. Until a browser is paired, the session route says only whether
 it is and whether a code is live.
 
+**A new device is let in by one already at the board.** The first
+device has nobody to ask and is let in at once, whatever code it used, as
+is one paired with the code printed when `gummi web` started — that code
+goes to the server's terminal and nowhere else, never to a file under
+`.gummi`. Any other pairing — a code from `gummi web pair`, or one a
+browser asked for (printed in that same terminal, which an agent that
+started the server or can read its pane sees too) — only **waits**: the
+browser shows a waiting screen, `GET /api/session` tells it where it
+stands, and every other route answers 403 "waiting for approval on a
+paired device"; it gets no push and no board event, only a `pairing`
+event about itself. Every page at the board shows the request — name,
+browser and User-Agent, source address, which code it used, when — with
+Approve and Reject; the answer reaches every page and the waiting one at
+once over the event stream, is logged and pushed, and is recorded in
+`devices.json` with who gave it. A request nobody answers lapses after
+ten minutes; three may wait at once and five may be made in ten minutes,
+so asking cannot bury the request that matters. `gummi web devices`
+shows waiting devices and `gummi web unpair` withdraws one, but no
+command approves: a command is exactly what an agent running as the
+operator can run, so approval is only from a paired browser. The
+running server also honours a device only as it knows it — a row written
+into `devices.json` behind its back is ignored and logged, and a waiting
+device edited to "approved" there still waits — though what the file
+takes away (an unpair) counts at once, and a restart trusts the file
+afresh.
+
 Every pairing is announced: a line in the server's terminal naming the
 address and where the code came from, a notice on every open page
-("new device paired: … via the local CLI"), and a push to every
-subscribed device, with the `gummi web unpair` that undoes it; a code
-minted by `gummi web pair` is announced when it is minted too. A
+("new device paired: …", or the request itself for a device that waits),
+and a push to every subscribed device, with the `gummi web unpair` that
+undoes it; a code minted by `gummi web pair` is announced when it is
+minted too, and minting is rate limited like a browser asking. A
 device's token is bound to the host and port it paired on and refused
 through any other — a browser sends its cookies to every port of a host,
 so another server on this machine receives the token, and that must not
@@ -3877,7 +3911,11 @@ needs no `tailscaled` on the host, no port forwarding and no public
 listener, and its identity lives in the workspace's web state, so it
 keeps its name and login across restarts. `--ts-tls` serves HTTPS on 443
 with the tailnet's own certificate, which is the secure origin Web Push
-asks for. The node joins only after the host holds the instance lock
+asks for. A device token is bound to the host and port it paired on, so
+the same browser opened through the tailnet name after pairing on
+loopback pairs again there as a second device — and, pairing with a code
+other than the start-up one while the first has the board, waits for the
+first to approve it. The node joins only after the host holds the instance lock
 (§20.2): a second host is refused before it can bring up a second node on
 the same identity, and the lock's record names the tailnet address once
 the node is up. A tailnet is a network boundary, not an identity check on
@@ -3895,21 +3933,35 @@ reads, and shows the push command for a person to run. It never runs a
 workflow the TUI would not run, and it offers no agent a surface the
 board-level tools (§16) withhold.
 
-That last sentence has a limit it cannot enforce, and it is stated here
-rather than hidden. `gummi web pair` is the operator at the machine: it
-reads the admin token from `.gummi/state/web/server.json` (mode 0600) and
-asks the server over loopback for a code. An agent running unconfined as
-the same user — which is what a stage session is on a bare host (§4.4) —
-can read that file, or simply run `gummi web pair`, pair a "browser" of
-its own and cross gates or land through it. No file mode, nonce or
-second token closes that: anything the operator's CLI can read, a process
-with the operator's permissions can read too. What gummi does instead is
-make it loud: every pairing and every admin-minted code is announced on
-every open page, pushed to every subscribed device and logged, and
-`gummi web devices` records how each device paired, so an unexpected one
-is seen and unpaired. The boundary that actually keeps an agent out is
-the one §4.4 relies on — a container or sandbox in which the agent
-cannot read the workspace's `.gummi/state` or reach the host's loopback.
+That last sentence has a limit, and it is stated here rather than
+hidden. `gummi web pair` is the operator at the machine: it reads the
+admin token from `.gummi/state/web/server.json` (mode 0600) and asks the
+server over loopback for a code. An agent running unconfined as the same
+user — which is what a stage session is on a bare host (§4.4) — can read
+that file, or simply run `gummi web pair`, and redeem the code. No file
+mode, nonce or second token stops that: anything the operator's CLI can
+read, a process with the operator's permissions can read too. So a code
+is not what lets a device in. Once a browser is paired, the device that
+redeems such a code only waits until a person approves it on a paired
+browser (§20.3), and nothing but a paired browser can approve — not a
+command, not an edit to `devices.json` while the server runs. That stops
+an agent pairing itself **silently**: the attempt is a request on every
+open page and a push to every subscribed device, and it goes nowhere
+unless a person says yes.
+
+What it does not stop is an agent acting as the operator in the places
+the operator already is. One that can drive the operator's browser
+profile, or read its cookie store, is a paired browser. One that pairs
+before any browser has — the first device is let in unasked — or that
+unpairs every device so the next pairing is first again, gets the board
+(visibly: the operator's own browser is then the one left waiting, or
+logged out). One that edits `devices.json` and then kills and restarts
+`gummi web` gets what it wrote, since a restart trusts the file. One that
+can read wherever the operator sends the server's output reads the
+start-up code. The boundary that keeps an agent out of those is the one
+§4.4 relies on — a container or sandbox in which the agent cannot reach
+the operator's browser, the workspace's `.gummi/state` or the host's
+loopback.
 
 ### 20.6 Deferred
 
