@@ -1,0 +1,17 @@
+{
+  "name": "gummi-web-e2e",
+  "private": true,
+  "description": "Playwright end-to-end suite for gummi web",
+  "scripts": {
+    "test": "playwright test",
+    "harness": "playwright test --project=harness",
+    "typecheck": "tsc --noEmit",
+    "report": "playwright show-report report"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@playwright/test": "1.63.0",
+    "@types/node": "^22.20.4",
+    "typescript": "^5.9.0"
+  }
+}

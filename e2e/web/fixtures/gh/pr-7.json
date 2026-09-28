@@ -1,0 +1,13 @@
+{
+  "number": 7,
+  "url": "https://github.com/e2e/tiny/pull/7",
+  "state": "OPEN",
+  "headRefOid": "0000000000000000000000000000000000000007",
+  "headRefName": "feat/add-a-farewell-helper",
+  "isCrossRepository": false,
+  "headRepositoryOwner": { "login": "e2e" },
+  "title": "Add a farewell helper",
+  "comments": [
+    { "author": { "login": "octo-reviewer" }, "body": "Thanks, one question inline.", "createdAt": "2026-09-01T10:00:00Z" }
+  ]
+}

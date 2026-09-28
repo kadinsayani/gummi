@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""A stand-in for the `gh` CLI, answering exactly the calls gummi makes.
+
+gummi reaches gh through GUMMI_GH_CMD (internal/pr: pr link/status/comments,
+the board's PR tab, the squash-merge check) and through plain `gh` on PATH
+(internal/engine/bugsource.go: bug import). The suite points the first at
+this file and puts a `gh` symlink to it first on PATH for the second.
+
+Answers come from JSON files in $FAKE_GH_DATA (default: the gh/ directory
+next to this script). A test that needs a different answer writes its own
+file into the workspace's copy of that directory:
+
+    pr-<N>.json        `gh pr view <N> --json <fields>` (fields are picked
+                       out of the file's object)
+    pr-list.json       `gh pr list --head <branch> --json <fields>` (filtered
+                       on headRefName)
+    threads-<N>.json   `gh api graphql ... -F number=<N>` (review threads)
+    repo.json          `gh api repos/<owner>/<repo>` (squash-merge setting)
+    issues.json        `gh issue list` (filtered on --state and --label,
+                       capped by --limit) and `gh issue view <N>`; a
+                       --repo ending in /missing fails as an unknown
+                       repository does
+
+A missing file answers the way gh does when the thing is not there: a
+message on stderr and exit 1. Every invocation is appended, one JSON array
+of argv per line, to $FAKE_GH_LOG when it is set, so a test can assert what
+gummi asked for.
+"""
+
+import json
+import os
+import sys
+
+HERE = os.path.dirname(os.path.realpath(__file__))
+DATA = os.environ.get("FAKE_GH_DATA") or os.path.join(HERE, "gh")
+
+
+def fail(msg, code=1):
+    sys.stderr.write(msg + "\n")
+    sys.exit(code)
+
+
+def load(name):
+    path = os.path.join(DATA, name)
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except FileNotFoundError:
+        return None
+
+
+def out(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+
+
+def flag(args, name, default=None):
+    """The value of --name / -n in args (both `--x v` and `--x=v`)."""
+    for i, a in enumerate(args):
+        if a == name and i + 1 < len(args):
+            return args[i + 1]
+        if a.startswith(name + "="):
+            return a[len(name) + 1:]
+    return default
+
+
+def fields(args):
+    raw = flag(args, "--json")
+    return [f for f in raw.split(",") if f] if raw else None
+
+
+def pick(obj, wanted):
+    if wanted is None:
+        return obj
+    return {k: obj[k] for k in wanted if k in obj}
+
+
+def positional(args):
+    """The first argument that is neither a flag nor a flag's value."""
+    skip = False
+    for a in args:
+        if skip:
+            skip = False
+            continue
+        if a.startswith("-"):
+            skip = "=" not in a and a not in ("--paginate", "--auto")
+            continue
+        return a
+    return None
+
+
+def pr(args):
+    sub, rest = args[0], args[1:]
+    if sub == "view":
+        number = positional(rest)
+        data = load("pr-%s.json" % number)
+        if data is None:
+            fail("GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)" % number)
+        out(pick(data, fields(rest)))
+    elif sub == "list":
+        head = flag(rest, "--head")
+        data = load("pr-list.json") or []
+        if head:
+            data = [p for p in data if p.get("headRefName") == head]
+        out([pick(p, fields(rest)) for p in data])
+    else:
+        fail("fake-gh: unsupported `gh pr %s`" % sub)
+
+
+def api(args):
+    target = positional(args)
+    if target == "graphql":
+        number = None
+        for i, a in enumerate(args):
+            if a in ("-F", "-f") and i + 1 < len(args) and args[i + 1].startswith("number="):
+                number = args[i + 1].split("=", 1)[1]
+        data = load("threads-%s.json" % number)
+        if data is None:
+            data = {"data": {"repository": {"pullRequest": {
+                "headRefOid": "", "reviewThreads": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+                "comments": {"nodes": []}, "reviews": {"nodes": []}}}}}
+        out(data)
+    elif target and target.lstrip("/").startswith("repos/"):
+        data = load("repo.json")
+        if data is None:
+            fail("gh: Not Found (HTTP 404)")
+        out(data)
+    else:
+        fail("gh: Not Found (HTTP 404)")
+
+
+def issue(args):
+    sub, rest = args[0], args[1:]
+    issues = load("issues.json") or []
+    repo = flag(rest, "--repo") or flag(rest, "-R")
+    if repo and repo.endswith("/missing"):
+        fail("GraphQL: Could not resolve to a Repository with the name '%s'. (repository)" % repo)
+    if sub == "list":
+        state = (flag(rest, "--state", "open") or "open").lower()
+        label = flag(rest, "--label")
+        limit = int(flag(rest, "--limit", "30"))
+        if state != "all":
+            issues = [i for i in issues if i.get("state", "").lower() == state]
+        if label:
+            issues = [i for i in issues if any(l.get("name") == label for l in i.get("labels", []))]
+        out([pick(i, fields(rest)) for i in issues[:limit]])
+    elif sub == "view":
+        number = positional(rest)
+        match = [i for i in issues if str(i.get("number")) == str(number)]
+        if not match:
+            fail("GraphQL: Could not resolve to an issue or pull request with the number of %s." % number)
+        out(pick(match[0], fields(rest)))
+    else:
+        fail("fake-gh: unsupported `gh issue %s`" % sub)
+
+
+def main(argv):
+    log = os.environ.get("FAKE_GH_LOG")
+    if log:
+        with open(log, "a", encoding="utf-8") as fh:
+            fh.write(json.dumps(argv) + "\n")
+    if not argv or argv[0] in ("--version", "version"):
+        print("gh version 2.99.0 (fake-gh for gummi's e2e suite)")
+        return
+    cmd, rest = argv[0], argv[1:]
+    if cmd == "pr" and rest:
+        pr(rest)
+    elif cmd == "api" and rest:
+        api(rest)
+    elif cmd == "issue" and rest:
+        issue(rest)
+    elif cmd == "auth":
+        print("github.com\n  ✓ Logged in to github.com account e2e (fake-gh)")
+    else:
+        fail("fake-gh: unsupported `gh %s`" % " ".join(argv))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

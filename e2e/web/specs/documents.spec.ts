@@ -1,0 +1,47 @@
+import { expect, test } from '../fixtures/test';
+import { shot } from '../fixtures/shots';
+
+// The card page against a real `gummi web` and a card the scripted agent
+// walked to a failed verify, with a linked pull request (fake gh): the
+// thread, spec, diff, PR and stats tabs as the server serves them.
+
+let id: string;
+test.use({ seed: { run: async (ws) => { id = await ws.seedVerifyFailed('Add a regressing helper'); await ws.linkPR(id); } } });
+
+async function openPanel(page: import('@playwright/test').Page, phone: boolean) {
+  if (phone) await page.getByTestId('mnav-panel').click();
+}
+
+test('the thread shows the stages the card walked and its verify', async ({ pairedPage: page }, info) => {
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('stage-group-verify').last()).toBeVisible();
+  await expect(page.getByTestId('stage-group-plan').first()).not.toHaveAttribute('open', '');
+  await expect(page.getByTestId('thread-items').getByTestId('verify').last()).toContainText('failed');
+  await shot(page, info, 'real-thread');
+});
+
+test('the spec, diff, PR and stats tabs read the real card', async ({ pairedPage: page }, info) => {
+  const phone = info.project.name === 'phone';
+  await openPanel(page, phone);
+  await page.getByTestId('tab-spec').click();
+  await expect(page.getByTestId('spec-toc')).toContainText('Chosen approach');
+  await expect(page.getByTestId('spec-checks')).toContainText('go build');
+  await shot(page, info, 'real-spec');
+
+  await page.getByTestId('tab-diff').click();
+  await expect(page.getByTestId('diff-files')).toContainText(`${id.replace('-', '').toLowerCase()}.go`);
+  const line = page.locator('[data-testid^="diff-line-"]').nth(3);
+  await line.locator('.n').click();
+  await page.getByTestId('annotation-input').fill('Name the helper after what it does');
+  await page.getByTestId('annotation-save').click();
+  await expect(page.locator('[data-testid^="annotation-"]').filter({ hasText: 'Name the helper' }).first()).toBeVisible();
+  await expect(page.getByTestId('diff-pending')).toContainText('comment');
+  await shot(page, info, 'real-diff');
+
+  await page.getByTestId('tab-pr').click();
+  await expect(page.getByTestId('pr-state')).toContainText('open');
+  await expect(page.getByTestId('pr-push-cmd')).toContainText('git push');
+  await page.getByTestId('tab-stats').click();
+  await expect(page.getByTestId('stats-table')).toContainText('implement');
+  await shot(page, info, 'real-stats');
+});

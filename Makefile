@@ -1,7 +1,7 @@
 GOBIN := $(shell go env GOPATH)/bin
 export PATH := $(PATH):$(GOBIN)
 
-.PHONY: build test lint golden-update vet ci clean demo e2e record-demo
+.PHONY: build test lint golden-update vet ci clean demo e2e web-e2e record-demo
 
 build:
 	go build -o bin/gummi ./cmd/gummi
@@ -32,6 +32,11 @@ demo: build
 # Drive the real TUI end-to-end in a tmux PTY (needs tmux).
 e2e: build
 	./scripts/e2e.sh
+
+# Drive gummi web in headless Chromium with Playwright (needs Node 22 and
+# python3). ARGS passes through, e.g. make web-e2e ARGS=--project=harness
+web-e2e: build
+	GUMMI_E2E_BIN=$(CURDIR)/bin/gummi ./scripts/web-e2e.sh $(ARGS)
 
 # Record the narrated demo against a clone of canonical/lxd.
 # Needs tmux, vhs, ttyd and ffmpeg; writes docs/assets/lxd-demo.mp4

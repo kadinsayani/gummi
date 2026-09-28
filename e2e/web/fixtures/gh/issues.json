@@ -1,0 +1,34 @@
+[
+  {
+    "number": 101,
+    "title": "Greet returns a trailing space for an empty name",
+    "body": "## Description\nGreet(\"\") returns \"hello, \" with a trailing space.\n\n## Steps to reproduce\n1. call Greet(\"\")\n\n## Expected\n\"hello\"\n\n## Actual\n\"hello, \"",
+    "url": "https://github.com/e2e/tiny/issues/101",
+    "state": "OPEN",
+    "labels": [ { "name": "bug" }, { "name": "high" } ],
+    "author": { "login": "octo-user" },
+    "comments": [
+      { "author": { "login": "octo-maintainer" }, "body": "Confirmed on main.", "createdAt": "2026-09-02T09:00:00Z" }
+    ]
+  },
+  {
+    "number": 102,
+    "title": "The greeting ignores the locale",
+    "body": "Greet always says hello in English.",
+    "url": "https://github.com/e2e/tiny/issues/102",
+    "state": "OPEN",
+    "labels": [ { "name": "bug" }, { "name": "low" } ],
+    "author": { "login": "octo-user" },
+    "comments": []
+  },
+  {
+    "number": 103,
+    "title": "Old crash on startup",
+    "body": "Fixed long ago.",
+    "url": "https://github.com/e2e/tiny/issues/103",
+    "state": "CLOSED",
+    "labels": [ { "name": "bug" } ],
+    "author": { "login": "octo-user" },
+    "comments": []
+  }
+]

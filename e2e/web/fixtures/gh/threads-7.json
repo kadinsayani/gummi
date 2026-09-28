@@ -1,0 +1,45 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "headRefOid": "0000000000000000000000000000000000000007",
+        "reviewThreads": {
+          "nodes": [
+            {
+              "id": "PRRT_open1",
+              "path": "fd001.go",
+              "isResolved": false,
+              "isOutdated": false,
+              "comments": {
+                "nodes": [
+                  {
+                    "id": "PRRC_1",
+                    "author": { "login": "octo-reviewer" },
+                    "body": "Should this helper take a name?",
+                    "diffHunk": "@@ -0,0 +1,4 @@\n+package tiny\n+\n+// Fd001 is FD-001's helper.\n+func Fd001() string { return \"FD-001\" }"
+                  },
+                  {
+                    "id": "PRRC_2",
+                    "author": { "login": "e2e-author" },
+                    "body": "Not for now; the card keeps it minimal.",
+                    "diffHunk": "@@ -0,0 +1,4 @@\n+package tiny\n+\n+// Fd001 is FD-001's helper.\n+func Fd001() string { return \"FD-001\" }"
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_resolved",
+              "path": "fd001.go",
+              "isResolved": true,
+              "isOutdated": false,
+              "comments": { "nodes": [ { "id": "PRRC_3", "author": { "login": "octo-reviewer" }, "body": "nit: fixed already", "diffHunk": "@@ -0,0 +1,1 @@\n+package tiny" } ] }
+            }
+          ],
+          "pageInfo": { "hasNextPage": false, "endCursor": null }
+        },
+        "comments": { "nodes": [ { "author": { "login": "octo-reviewer" }, "body": "Thanks, one question inline." } ] },
+        "reviews": { "nodes": [ { "author": { "login": "octo-reviewer" }, "body": "Looks close.", "state": "COMMENTED" } ] }
+      }
+    }
+  }
+}

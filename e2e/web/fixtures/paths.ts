@@ -1,0 +1,20 @@
+import path from 'node:path';
+const here = __dirname;
+
+/** The gummi checkout this suite belongs to (two levels above e2e/web). */
+export const repoRoot = path.resolve(here, '..', '..', '..');
+
+/**
+ * The gummi binary every test drives. global-setup builds it here unless
+ * GUMMI_E2E_BIN names a prebuilt one.
+ */
+export const gummiBin = process.env.GUMMI_E2E_BIN
+  ? path.resolve(process.env.GUMMI_E2E_BIN)
+  : path.join(repoRoot, 'bin', 'gummi');
+
+/** The scripted headless agent (see its docstring for the scenario keywords). */
+export const agentScript = path.join(repoRoot, 'scripts', 'web-e2e-agent.py');
+
+/** The fake `gh` and the directory of canned answers it serves by default. */
+export const fakeGh = path.join(here, 'fake-gh');
+export const fakeGhData = path.join(here, 'gh');
