@@ -17,7 +17,7 @@ func (e *Engine) resolveSandbox(f domain.Feature) sandbox.Resolution {
 	profile := e.resolvedProfile(f.Profile)
 	return sandbox.Resolve(
 		sandbox.Mode(e.cfg.Sandbox),
-		sandbox.Mode(e.cfg.Profiles.Sandboxes[f.Profile]),
+		sandbox.Mode(e.currentProfiles().Sandboxes[f.Profile]),
 		profile,
 		e.capsForProfile(profile),
 	)
@@ -28,10 +28,11 @@ func (e *Engine) resolveSandbox(f domain.Feature) sandbox.Resolution {
 // to the default adapter's concrete name, so the resolver can look each
 // backend up in a capabilities map by name.
 func (e *Engine) resolvedProfile(profileName string) config.Profile {
-	prof, ok := e.cfg.Profiles.Profiles[profileName]
+	profiles := e.currentProfiles()
+	prof, ok := profiles.Profiles[profileName]
 	if !ok {
-		if def := e.cfg.Profiles.Default; def != "" {
-			if d, has := e.cfg.Profiles.Profiles[def]; has {
+		if def := profiles.Default; def != "" {
+			if d, has := profiles.Profiles[def]; has {
 				prof = d
 			}
 		}

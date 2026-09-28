@@ -554,7 +554,7 @@ func TestBoardRolePairsModelAndBackend(t *testing.T) {
 	// the single-model default, as a workspace that predates profiles
 	// carries it — deliberately a model the profile's backend cannot run.
 	e.cfg.Model = "gpt-5"
-	e.cfg.Profiles = config.Profiles{
+	e.profInit, e.profiles = true, config.Profiles{
 		Default: "claude",
 		Profiles: map[string]config.Profile{
 			"claude": {
@@ -582,7 +582,7 @@ func TestBoardRolePairsModelAndBackend(t *testing.T) {
 func TestBoardRoleWithNoProfileNamesNoModel(t *testing.T) {
 	e := newEngine(t, agent.NewFake("hi"))
 	e.cfg.Model = "gpt-5"
-	e.cfg.Profiles = config.Profiles{}
+	e.profInit, e.profiles = true, config.Profiles{}
 
 	rc, backend := e.resolveBoardRole("")
 	if rc.Model != "" {
@@ -602,7 +602,7 @@ func TestBoardRoleWithNoProfileNamesNoModel(t *testing.T) {
 func TestBoardOpenAppliesModelOverride(t *testing.T) {
 	r := &recorder{Fake: agent.NewFake("hi")}
 	e := newEngine(t, r)
-	e.cfg.Profiles = config.Profiles{
+	e.profInit, e.profiles = true, config.Profiles{
 		Default: "p",
 		Profiles: map[string]config.Profile{
 			"p": {"architect": {Model: "profile-model"}},
@@ -623,7 +623,7 @@ func TestBoardOpenAppliesModelOverride(t *testing.T) {
 func TestBoardOpenEmptyModelLeavesProfileAlone(t *testing.T) {
 	r := &recorder{Fake: agent.NewFake("hi")}
 	e := newEngine(t, r)
-	e.cfg.Profiles = config.Profiles{
+	e.profInit, e.profiles = true, config.Profiles{
 		Default: "p",
 		Profiles: map[string]config.Profile{
 			"p": {"architect": {Model: "profile-model"}},
@@ -715,7 +715,7 @@ func TestReopenBoardWithNoPriorSessionJustOpens(t *testing.T) {
 // board tab at a cheaper model than the one that plans cards.
 func TestBoardRolePrefersADeclaredBoardRole(t *testing.T) {
 	e := newEngine(t, agent.NewFake("hi"))
-	e.cfg.Profiles = config.Profiles{
+	e.profInit, e.profiles = true, config.Profiles{
 		Default: "p",
 		Profiles: map[string]config.Profile{
 			"p": {

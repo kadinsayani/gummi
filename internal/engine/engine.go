@@ -429,6 +429,18 @@ type Engine struct {
 	envNotices []string
 	envWarn    func(string)
 
+	// profiles is the profile set new sessions resolve against, re-read
+	// from profiles.yaml when the file changes (profilereload.go);
+	// profStamp is the file version it came from, profErr why the latest
+	// edit was refused, profReloads how many edits were picked up. All
+	// guarded by profMu.
+	profMu      sync.Mutex
+	profInit    bool
+	profiles    config.Profiles
+	profStamp   profileStamp
+	profErr     string
+	profReloads int
+
 	// skillsOnce resolves Config.Skills to absolute directories once per
 	// Engine lifetime (skillDirs holds the result); skillsMu guards
 	// skillWarned, the set of backends already told they cannot take a
@@ -523,6 +535,7 @@ func New(cfg Config) *Engine {
 		freeform: map[domain.FeatureID]*FreeformSession{},
 		pool:     pool,
 	}
+	e.initProfiles()
 	e.consultIdleTimeout = consultIdleTimeout
 	e.freeformIdleTimeout = freeformIdleTimeout
 	e.lanes[poolAttended].max = attendedMax
@@ -2306,7 +2319,7 @@ func (e *Engine) RaiseEnvelope(ctx context.Context, id domain.FeatureID, to int)
 // touched.
 func (e *Engine) ChangeProfile(ctx context.Context, id domain.FeatureID, profile string) error {
 	known := false
-	for _, name := range e.cfg.Profiles.Names() {
+	for _, name := range e.currentProfiles().Names() {
 		if name == profile {
 			known = true
 			break

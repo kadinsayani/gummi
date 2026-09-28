@@ -30,10 +30,11 @@ func (e *Engine) resolveRole(profileName string, role agent.Role) (config.RoleCo
 // for a stage role that every profile is expected to cover. A role no
 // profile is expected to declare at all needs to tell the two apart.
 func (e *Engine) lookupRole(profileName string, role agent.Role) (config.RoleConfig, bool) {
-	prof, ok := e.cfg.Profiles.Profiles[profileName]
+	profiles := e.currentProfiles()
+	prof, ok := profiles.Profiles[profileName]
 	if !ok {
-		if def := e.cfg.Profiles.Default; def != "" {
-			prof, ok = e.cfg.Profiles.Profiles[def]
+		if def := profiles.Default; def != "" {
+			prof, ok = profiles.Profiles[def]
 		}
 	}
 	if !ok {
@@ -140,7 +141,7 @@ type BoardProfile struct {
 // Nil-safe: an engine with no profiles.yaml has an empty
 // cfg.Profiles.Profiles; Names() then returns nil and so does this.
 func (e *Engine) BoardProfiles() []BoardProfile {
-	names := e.cfg.Profiles.Names()
+	names := e.currentProfiles().Names()
 	if len(names) == 0 {
 		return nil
 	}
@@ -169,7 +170,7 @@ func (e *Engine) BoardProfiles() []BoardProfile {
 //
 // Nil-safe, for the identical reason BoardProfiles is.
 func (e *Engine) CardProfiles(stage domain.Stage) []BoardProfile {
-	names := e.cfg.Profiles.Names()
+	names := e.currentProfiles().Names()
 	if len(names) == 0 {
 		return nil
 	}
@@ -209,7 +210,7 @@ type KnownModel struct {
 // cfg.Profiles.Profiles and this returns nil.
 func (e *Engine) KnownModels() []KnownModel {
 	uses := map[string][]string{}
-	for profile, roles := range e.cfg.Profiles.Profiles {
+	for profile, roles := range e.currentProfiles().Profiles {
 		for role, rc := range roles {
 			if rc.Model == "" {
 				continue
