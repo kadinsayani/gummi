@@ -138,6 +138,14 @@ func (m *Shell) measureWsStats() tea.Cmd {
 // failing the page: a reader asking how the workspace ran must still
 // get the part of the answer that is readable.
 func buildWsReport(ctx context.Context, store *state.Store, rows []featureRow, from, now time.Time) (*fleetrun.Report, error) {
+	return buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now)
+}
+
+// buildFleetReport is buildWsReport over any window, not only one ending
+// now — the web face's fleet route asks for arbitrary ones. now is still
+// the clock an open session is counted to.
+func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, w fleetrun.Window, now time.Time) (*fleetrun.Report, error) {
+	from := w.From
 	evs, err := store.WorkspaceEvents(ctx, from)
 	if err != nil {
 		return nil, err
@@ -173,7 +181,7 @@ func buildWsReport(ctx context.Context, store *state.Store, rows []featureRow, f
 		r := rows[i]
 		all = append(all, fleetrun.AllTimeRow{Feature: r.F, Landed: r.Landed, StageSpend: r.StageSpend})
 	}
-	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: fleetrun.Window{From: from, To: now}, Cards: cards, Rows: all})
+	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: w, Cards: cards, Rows: all})
 	return &rep, nil
 }
 

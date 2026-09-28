@@ -203,19 +203,27 @@ func (m *Shell) addDiffComment(text string) tea.Cmd {
 		m.notice = noticeMsg{text: "move to a diff line to comment"}
 		return nil
 	}
-	ann := domain.DiffAnnotation{
-		Feature: dv.f.ID,
-		File:    diffannot.FileAt(dv.lines, idx),
-		Anchor:  diffannot.Anchor(dv.lines, idx),
-		Excerpt: strings.TrimSpace(dv.lines[idx]),
-		Comment: text,
-	}
+	ann := newDiffAnnotation(dv.f.ID, dv.lines, idx, text)
 	reload := m.reloadDiff()
 	return func() tea.Msg {
 		if _, err := m.store.AddDiffAnnotation(context.Background(), ann, m.now()); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
+	}
+}
+
+// newDiffAnnotation is a comment on line idx of a diff split by
+// diffannot.Lines: anchored by the content around the line, so it
+// survives the diff moving under it. Every surface that comments on a
+// diff builds its annotation here.
+func newDiffAnnotation(id domain.FeatureID, lines []string, idx int, text string) domain.DiffAnnotation {
+	return domain.DiffAnnotation{
+		Feature: id,
+		File:    diffannot.FileAt(lines, idx),
+		Anchor:  diffannot.Anchor(lines, idx),
+		Excerpt: strings.TrimSpace(lines[idx]),
+		Comment: text,
 	}
 }
 

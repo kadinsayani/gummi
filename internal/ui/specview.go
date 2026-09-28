@@ -100,25 +100,33 @@ func (m *Shell) addSpecComment(line int, text string) tea.Cmd {
 	reload := m.reloadSpec()
 	path := sv.path
 	return func() tea.Msg {
-		date := m.now().Format("2006-01-02")
-		// Serialize against the engine's annotate/answer-capture writers and
-		// re-read the current file (not the load-time copy) under the lock, so
-		// a concurrent marker isn't clobbered; write atomically.
-		unlock := spec.LockFile(path)
-		defer unlock()
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		out, err := spec.AddComment(string(raw), line, "user", date, text)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
+		if err := writeSpecNote(path, line, m.now().Format("2006-01-02"), text); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
 	}
+}
+
+// writeSpecNote writes one `@user` note under line of the document at
+// path. stamp is the marker's parenthesis (spec.Stamp): the date, and the
+// person when the note came from a named device. It is the one writer
+// every surface that lets a person comment on a document goes through.
+//
+// It serializes against the engine's annotate/answer-capture writers and
+// re-reads the current file (not a load-time copy) under the lock, so a
+// concurrent marker isn't clobbered, and writes atomically.
+func writeSpecNote(path string, line int, stamp, text string) error {
+	unlock := spec.LockFile(path)
+	defer unlock()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out, err := spec.AddComment(string(raw), line, "user", stamp, text)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(path, []byte(out), 0o600)
 }
 
 // resolveSpecComment writes a resolution for the thread at the given
@@ -138,22 +146,46 @@ func (m *Shell) resolveSpecComment(line int, reason string) tea.Cmd {
 	reload := m.reloadSpec()
 	path := sv.path
 	return func() tea.Msg {
-		date := m.now().Format("2006-01-02")
-		unlock := spec.LockFile(path)
-		defer unlock()
-		raw, err := os.ReadFile(path)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		out, err := resolveWithReason(string(raw), line, "user", date, reason)
-		if err != nil {
-			return noticeMsg{text: err.Error(), isErr: true}
-		}
-		if err := atomicfile.Write(path, []byte(out), 0o600); err != nil {
+		if err := writeSpecResolution(path, line, m.now().Format("2006-01-02"), reason, nil); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return reload()
 	}
+}
+
+// writeSpecResolution resolves the marker at line of the document at
+// path as `@user`, with reason folded in (resolveWithReason), under the
+// same writer discipline as writeSpecNote. check, when set, is shown the
+// marker as it stands under the lock and may refuse: a reader who
+// resolved a note they saw on a page that has since moved must not close
+// whatever now sits on that line.
+func writeSpecResolution(path string, line int, stamp, reason string, check func(spec.Marker) error) error {
+	unlock := spec.LockFile(path)
+	defer unlock()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	if check != nil {
+		if err := check(markerAt(spec.Parse(string(raw)), line)); err != nil {
+			return err
+		}
+	}
+	out, err := resolveWithReason(string(raw), line, "user", stamp, reason)
+	if err != nil {
+		return err
+	}
+	return atomicfile.Write(path, []byte(out), 0o600)
+}
+
+// markerAt is the marker on line, or a zero Marker when line holds none.
+func markerAt(d spec.Doc, line int) spec.Marker {
+	for _, mk := range d.Markers {
+		if mk.Line == line {
+			return mk
+		}
+	}
+	return spec.Marker{}
 }
 
 // resolveWithReason closes the marker at line, same placement rule as
