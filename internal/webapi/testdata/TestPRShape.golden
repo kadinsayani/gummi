@@ -1,0 +1,29 @@
+{
+  "linked": true,
+  "ref": "octo/demo#12",
+  "url": "https://github.com/octo/demo/pull/12",
+  "state": "OPEN",
+  "threads": [
+    {
+      "path": "main.go",
+      "line": 3,
+      "resolved": false,
+      "notes": [
+        {
+          "author": "octo",
+          "body": "name it better"
+        }
+      ]
+    }
+  ],
+  "comments": [
+    {
+      "author": "octo",
+      "body": "thanks"
+    }
+  ],
+  "pushCommand": "git push origin fd-012-dark-mode",
+  "commentCount": 2,
+  "headSha": "0123abc",
+  "fetched": "2026-09-27T09:12:00Z"
+}

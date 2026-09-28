@@ -1,0 +1,77 @@
+{
+  "items": [
+    {
+      "key": "stage-1",
+      "seq": 1,
+      "t": "stage",
+      "time": "2026-09-27T09:12:00Z",
+      "stage": "plan",
+      "role": "architect",
+      "model": "gpt-5",
+      "flavor": "work"
+    },
+    {
+      "key": "tools-3",
+      "seq": 4,
+      "t": "tools",
+      "time": "2026-09-27T09:12:00Z",
+      "tools": [
+        {
+          "tool": "read",
+          "label": "read board.go",
+          "status": "ok",
+          "ms": 12
+        }
+      ]
+    },
+    {
+      "key": "msg-5",
+      "seq": 5,
+      "t": "message",
+      "time": "2026-09-27T09:12:00Z",
+      "text": "The plan is **ready**."
+    },
+    {
+      "key": "rcpt-6",
+      "seq": 6,
+      "t": "receipt",
+      "time": "2026-09-27T09:12:00Z",
+      "receipt": {
+        "ok": true,
+        "text": "design approved",
+        "by": "Simon"
+      }
+    },
+    {
+      "key": "stretch-8",
+      "seq": 8,
+      "t": "stretch",
+      "time": "2026-09-27T09:12:00Z",
+      "label": "autopilot",
+      "tally": "2 gates crossed"
+    },
+    {
+      "key": "verify-9",
+      "seq": 9,
+      "t": "verify",
+      "time": "2026-09-27T09:12:00Z",
+      "checks": [
+        {
+          "name": "build",
+          "cmd": "go build ./...",
+          "ok": false,
+          "ms": 900,
+          "output": "boom"
+        }
+      ]
+    }
+  ],
+  "live": {
+    "busy": true,
+    "verb": "thinking",
+    "since": "2026-09-27T09:12:00Z",
+    "spent": 1.25,
+    "state": "running"
+  },
+  "lastSeq": 9
+}

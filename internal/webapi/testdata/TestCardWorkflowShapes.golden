@@ -1,0 +1,176 @@
+{
+  "answer": {
+    "ref": "gate:FD-012:plan",
+    "option": "advance",
+    "against": "gate:FD-012:plan#0de111d3@3f2a1bc",
+    "confirm": true
+  },
+  "send": {
+    "route": "menu",
+    "card": {
+      "id": "FD-012",
+      "kind": "feature",
+      "title": "Dark mode",
+      "stage": "verify",
+      "status": "needs",
+      "spend": 0,
+      "envelope": 0,
+      "decision": {
+        "ref": "verify:FD-012:verify",
+        "kind": "verify",
+        "question": "verification stopped here — choose what happens next.",
+        "anchor": "diff",
+        "against": {
+          "token": "verify:FD-012:verify#1a2b3c4d@9f8e7d6",
+          "label": "feat/dark-mode at 9f8e7d6"
+        },
+        "options": [
+          {
+            "id": "bounce",
+            "label": "send it back",
+            "words": true,
+            "relabel": "send it back with your words",
+            "carriesComments": true
+          },
+          {
+            "id": "advance",
+            "label": "land anyway",
+            "words": false
+          }
+        ]
+      },
+      "decisionsMore": 0,
+      "actions": [
+        {
+          "id": "profile",
+          "label": "profile",
+          "needs": "profile",
+          "default": "thrifty",
+          "choices": [
+            {
+              "value": "premium",
+              "label": "premium",
+              "detail": "copilot · gpt-5"
+            }
+          ]
+        },
+        {
+          "id": "repo",
+          "label": "repository",
+          "key": "o",
+          "needs": "repo",
+          "choices": [
+            {
+              "value": "api",
+              "label": "api"
+            }
+          ]
+        },
+        {
+          "id": "gate",
+          "label": "hand to autopilot",
+          "default": "autopilot"
+        }
+      ],
+      "composer": {
+        "says": "“rebase” is in the card's menu, not one of the answers above",
+        "route": "menu"
+      }
+    }
+  },
+  "action": {
+    "number": 750,
+    "confirm": true,
+    "repo": "api",
+    "mode": "attended"
+  },
+  "refusals": [
+    {
+      "error": "answered",
+      "by": "Simon",
+      "receipt": "Simon advanced plan → implement",
+      "text": "Simon advanced plan → implement"
+    },
+    {
+      "error": "moved",
+      "text": "the card moved since you read it — now spec 3f2a1bc"
+    },
+    {
+      "error": "confirm",
+      "text": "delete FD-012? — Dark mode — removes worktree, branch, and record",
+      "needs": "confirm"
+    },
+    {
+      "error": "needs",
+      "text": "no landing message was drafted — write one",
+      "needs": "message"
+    },
+    {
+      "error": "newcard",
+      "text": "the export needs a CSV mode too"
+    },
+    {
+      "error": "busy",
+      "text": "use the system theme"
+    }
+  ],
+  "create": {
+    "kind": "research:diagnosis",
+    "title": "Slow board",
+    "autopilot": true,
+    "dependsOn": [
+      "FD-001"
+    ],
+    "stackOn": "FD-002"
+  },
+  "resume": {
+    "cards": [
+      "FD-004"
+    ]
+  },
+  "board": {
+    "repo": "gummi",
+    "today": {
+      "spent": 41.5
+    },
+    "counts": {
+      "needs": 0,
+      "running": 0
+    },
+    "viewers": [],
+    "rows": [
+      {
+        "id": "FD-013",
+        "kind": "feature",
+        "title": "Row cache",
+        "stage": "plan",
+        "status": "running",
+        "running": {
+          "verb": "planning",
+          "pausing": true
+        },
+        "spend": 0,
+        "envelope": 0,
+        "stack": {
+          "id": "ST-1",
+          "name": "rows",
+          "pos": 1,
+          "of": 2
+        },
+        "waits": [
+          "FD-012"
+        ]
+      }
+    ],
+    "resume": {
+      "cards": [
+        {
+          "id": "FD-004",
+          "title": "Export",
+          "stage": "implement"
+        }
+      ],
+      "since": "2h ago"
+    }
+  }
+}

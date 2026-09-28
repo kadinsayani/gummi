@@ -1,0 +1,75 @@
+{
+  "repo": "gummi",
+  "head": "main",
+  "today": {
+    "spent": 41.5
+  },
+  "counts": {
+    "needs": 1,
+    "running": 1
+  },
+  "viewers": [
+    {
+      "person": "Simon",
+      "device": "iPhone · Safari",
+      "deviceId": "a1b2c3d4",
+      "since": "2026-09-27T09:12:00Z"
+    }
+  ],
+  "rows": [
+    {
+      "id": "FD-012",
+      "kind": "feature",
+      "title": "Dark mode",
+      "stage": "plan",
+      "status": "needs",
+      "needs": {
+        "kind": "gate",
+        "color": "warn",
+        "question": "Approve the design?"
+      },
+      "spend": 12.3,
+      "envelope": 2000,
+      "profile": "balanced",
+      "stack": {
+        "id": "ST-1",
+        "name": "theme",
+        "pos": 0,
+        "of": 2
+      }
+    },
+    {
+      "id": "BG-003",
+      "kind": "bug",
+      "title": "Crash on empty board",
+      "stage": "implement",
+      "status": "running",
+      "running": {
+        "verb": "editing board.go",
+        "autopilot": true
+      },
+      "spend": 3,
+      "envelope": 500,
+      "autopilot": true,
+      "severity": "high",
+      "goal": {
+        "id": "GL-001",
+        "title": "Stable board"
+      },
+      "waits": [
+        "FD-010"
+      ]
+    },
+    {
+      "id": "FD-001",
+      "kind": "feature",
+      "title": "Landed thing",
+      "stage": "done",
+      "status": "done",
+      "spend": 0,
+      "envelope": 0,
+      "landed": true,
+      "pr": "#12 merged"
+    }
+  ]
+}

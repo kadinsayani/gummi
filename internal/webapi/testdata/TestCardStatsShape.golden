@@ -1,0 +1,73 @@
+{
+  "id": "FD-012",
+  "title": "Dark mode",
+  "kind": "feature",
+  "stage": "verify",
+  "sessions": [
+    {
+      "stage": "plan",
+      "role": "architect",
+      "flavor": "stage",
+      "model": "gpt-5",
+      "started": "2026-09-27T09:12:00Z",
+      "ended": "2026-09-27T09:12:00Z",
+      "turns": 4,
+      "tools": 9,
+      "toolFails": 0,
+      "credits": 3.5,
+      "verdict": "approve"
+    },
+    {
+      "stage": "implement",
+      "role": "implementer",
+      "started": "2026-09-27T09:12:00Z",
+      "turns": 2,
+      "tools": 5,
+      "toolFails": 1,
+      "credits": 1.25,
+      "redo": true,
+      "redoReason": "corrected"
+    }
+  ],
+  "money": {
+    "credits": 4.75,
+    "estimated": 0,
+    "firstPass": 3.5,
+    "rework": 1.25,
+    "corrected": 1.25,
+    "reproved": 0,
+    "elsewhere": 0,
+    "byStage": [
+      {
+        "name": "plan",
+        "credits": 3.5
+      },
+      {
+        "name": "implement",
+        "credits": 1.25
+      }
+    ],
+    "byRole": [
+      {
+        "name": "architect",
+        "credits": 3.5
+      }
+    ],
+    "byModel": [
+      {
+        "name": "gpt-5",
+        "credits": 4.75
+      }
+    ]
+  },
+  "clock": {
+    "agentMs": 60000,
+    "onYouMs": 120000,
+    "idleMs": 30000,
+    "elapsedMs": 210000
+  },
+  "envelope": {
+    "credits": 2000,
+    "left": 1995.25
+  }
+}

@@ -1,0 +1,29 @@
+[
+  {
+    "kind": "board"
+  },
+  {
+    "kind": "card",
+    "id": "FD-012"
+  },
+  {
+    "kind": "live",
+    "id": "FD-012"
+  },
+  {
+    "kind": "toast",
+    "id": "FD-012",
+    "text": "FD-012: paused"
+  },
+  {
+    "kind": "viewers",
+    "viewers": [
+      {
+        "person": "Simon",
+        "device": "Mac · Firefox",
+        "deviceId": "a1b2c3d4",
+        "since": "2026-09-27T09:12:00Z"
+      }
+    ]
+  }
+]

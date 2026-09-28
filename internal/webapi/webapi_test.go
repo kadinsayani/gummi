@@ -1,0 +1,111 @@
+package webapi
+
+import (
+	"encoding/json"
+	"testing"
+	"time"
+
+	"github.com/charmbracelet/x/exp/golden"
+)
+
+var at = time.Date(2026, 9, 27, 9, 12, 0, 0, time.UTC)
+
+func marshal(t *testing.T, v any) []byte {
+	t.Helper()
+	b, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return append(b, '\n')
+}
+
+// The page reads these field names; a rename is a broken page, so it has
+// to show up here as a golden diff first.
+func TestBoardShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Board{
+		Repo:    "gummi",
+		Head:    "main",
+		Today:   Today{Spent: 41.5},
+		Counts:  Counts{Needs: 1, Running: 1},
+		Viewers: []Viewer{{Person: "Simon", Device: "iPhone · Safari", DeviceID: "a1b2c3d4", Since: at}},
+		Rows: []Row{
+			{
+				ID: "FD-012", Kind: "feature", Title: "Dark mode", Stage: "plan", Status: StatusNeeds,
+				Needs: &RowNeeds{Kind: NeedsGate, Color: "warn", Question: "Approve the design?"},
+				Spend: 12.3, Envelope: 2000, Profile: "balanced",
+				Stack: &RowStack{ID: "ST-1", Name: "theme", Pos: 0, Of: 2},
+			},
+			{
+				ID: "BG-003", Kind: "bug", Title: "Crash on empty board", Stage: "implement", Status: StatusRunning,
+				Running: &RowRunning{Verb: "editing board.go", Autopilot: true},
+				Spend:   3, Envelope: 500, Severity: "high", Autopilot: true,
+				Goal: &RowGoal{ID: "GL-001", Title: "Stable board"}, Waits: []string{"FD-010"},
+			},
+			{ID: "FD-001", Kind: "feature", Title: "Landed thing", Stage: "done", Status: StatusDone, Landed: true, PR: "#12 merged"},
+		},
+	}))
+}
+
+func TestCardShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Card{
+		Row:    Row{ID: "FD-012", Kind: "feature", Title: "Dark mode", Stage: "plan", Status: StatusNeeds, Spend: 12.3, Envelope: 2000},
+		Branch: "fd-012-dark-mode", Base: "main",
+		Decision: &Decision{
+			Ref: "d-41", Kind: DecisionGate, Question: "Approve the design?", Anchor: AnchorSpec,
+			Against: Against{Token: "d-41@3f2a1bc", Label: "spec 3f2a1bc"},
+			Options: []Option{
+				{ID: "advance", Label: "Approve, move to implement", Words: false},
+				{ID: "changes", Label: "Ask for changes", Words: true, Relabel: "Send back with note"},
+			},
+		},
+		DecisionsMore: 1,
+		Actions: []Action{
+			{ID: "pause", Label: "Pause", Key: "p"},
+			{ID: "topup", Label: "Raise the envelope", Needs: ActionNeedsNumber, Default: "2000"},
+			{ID: "delete", Label: "Delete the card", Danger: true, Needs: ActionNeedsConfirm},
+		},
+		Composer: Composer{Says: "asks the architect, without interrupting", Route: RouteConsult},
+	}))
+}
+
+func TestThreadShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Thread{
+		Items: []Item{
+			{Key: "stage-1", Seq: 1, T: ItemStage, Time: at, Stage: "plan", Role: "architect", Model: "gpt-5", Flavor: "work"},
+			{Key: "tools-3", Seq: 4, T: ItemTools, Time: at, Tools: []ToolCall{{Tool: "read", Label: "read board.go", Status: "ok", Ms: 12}}},
+			{Key: "msg-5", Seq: 5, T: ItemMessage, Time: at, Text: "The plan is **ready**."},
+			{Key: "rcpt-6", Seq: 6, T: ItemReceipt, Time: at, Receipt: &Receipt{OK: true, Text: "design approved", By: "Simon"}},
+			{Key: "stretch-8", Seq: 8, T: ItemStretch, Time: at, Label: "autopilot", Tally: "2 gates crossed"},
+			{Key: "verify-9", Seq: 9, T: ItemVerify, Time: at, Checks: []CheckRun{{Name: "build", Cmd: "go build ./...", OK: false, Ms: 900, Output: "boom"}}},
+		},
+		Live:    &Live{Busy: true, Verb: "thinking", Since: at, Spent: 1.25, State: "running"},
+		LastSeq: 9,
+	}))
+}
+
+func TestChangeShapes(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, []Change{
+		{Kind: ChangeBoard},
+		{Kind: ChangeCard, ID: "FD-012"},
+		{Kind: ChangeLive, ID: "FD-012"},
+		{Kind: ChangeToast, ID: "FD-012", Text: "FD-012: paused", Err: false},
+		{Kind: ChangeViewers, Viewers: []Viewer{{Person: "Simon", Device: "Mac · Firefox", DeviceID: "a1b2c3d4", Since: at}}},
+	}))
+}
+
+func TestChangeKey(t *testing.T) {
+	for _, tc := range []struct {
+		c    Change
+		want string
+	}{
+		{Change{Kind: ChangeBoard}, "board"},
+		{Change{Kind: ChangeCard, ID: "FD-1"}, "card:FD-1"},
+		{Change{Kind: ChangeLive, ID: "FD-1"}, "live:FD-1"},
+		{Change{Kind: ChangeViewers}, "viewers"},
+		{Change{Kind: ChangeToast, Text: "x"}, ""},
+	} {
+		if got := tc.c.Key(); got != tc.want {
+			t.Errorf("%+v.Key() = %q, want %q", tc.c, got, tc.want)
+		}
+	}
+}

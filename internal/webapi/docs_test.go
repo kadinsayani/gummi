@@ -1,0 +1,102 @@
+package webapi
+
+import (
+	"time"
+
+	"testing"
+
+	"github.com/charmbracelet/x/exp/golden"
+)
+
+func TestLiveShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Live{
+		Busy: true, Verb: "implementing", Since: at, Streaming: "Running the te",
+		Tool:  &ToolCall{Tool: "Bash", Label: "Bash  go test ./...", Detail: "go test ./...", Status: "running"},
+		Spent: 1.25, State: "running", Stage: "implement", Role: "implementer", Model: "gpt-5", Session: at,
+		Turns: []Turn{
+			{Author: "gummi", Text: "Implement the plan."},
+			{Author: "tool", Tool: &ToolCall{Tool: "Read", Label: "Read  main.go", Detail: "main.go", Status: "ok"}},
+			{Author: "you", Text: "keep it small"},
+		},
+		Consult:   &Conversation{Busy: true, Verb: "thinking", Turns: []Turn{{Author: "you", Text: "why two funcs?"}}},
+		Elsewhere: &Elsewhere{PID: 4411, Stage: "verify", Role: "gummi", Since: at, Busy: true, Watching: true, Note: "read-only: another gummi process owns this run"},
+	}))
+}
+
+func TestSpecShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Spec{
+		Path: ".gummi/specs/FD-012-dark-mode.md", Rev: "3f2a1bc0000000000000000000000000000000000", Title: "Dark mode",
+		Markdown: "# Dark mode\n\n## Problem\n\nToo bright.\n%% @user(2026-09-27, Simon): only at night?\n",
+		Sections: []SpecSection{{Name: "Problem", Line: 3}},
+		Notes:    []SpecNote{{Line: 6, Anchor: 5, Author: "user", By: "Simon", Date: "2026-09-27", Text: "only at night?"}},
+		Checks: []SpecCheck{
+			{Name: "build", Cmd: "go build ./...", Last: &CheckOutcome{OK: true, At: at}},
+			{Name: "lint", Cmd: "golangci-lint run", Excused: true},
+		},
+	}))
+}
+
+func TestDiffShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Diff{
+		Base: "main", BaseRev: "1111111", Rev: "2222222", Since: "1111111",
+		Files: []DiffFile{
+			{Path: "main.go", Status: "modified", Add: 1, Del: 1, Since: true, Hunks: []Hunk{{
+				Header: "@@ -1,3 +1,3 @@",
+				Lines: []DiffLine{
+					{T: " ", Old: 1, New: 1, Text: "package main", Idx: 5},
+					{T: "-", Old: 2, Text: "func a() {}", Idx: 6},
+					{T: "+", New: 2, Text: "func a() { b() }", Idx: 7, Since: true},
+				},
+			}}},
+			{Path: "b.md", OldPath: "a.md", Status: "renamed", Hunks: []Hunk{}},
+			{Path: "logo.png", Status: "modified", Binary: true, Hunks: []Hunk{}},
+		},
+		Annotations: []Annotation{
+			{ID: 3, File: "main.go", Idx: 7, Excerpt: "+func a() { b() }", Comment: "why?", Source: "gummi", At: at},
+			{ID: 4, File: "main.go", Idx: -1, Excerpt: "x", Comment: "@octo: stale", By: "octo", Source: "pr", Resolved: true},
+		},
+		PendingComments: 1,
+	}))
+}
+
+func TestPRShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, PR{
+		Linked: true, Ref: "octo/demo#12", URL: "https://github.com/octo/demo/pull/12", State: "OPEN",
+		Threads:     []PRThread{{Path: "main.go", Line: 3, Notes: []PRNote{{Author: "octo", Body: "name it better"}}}},
+		Comments:    []PRNote{{Author: "octo", Body: "thanks"}},
+		PushCommand: "git push origin fd-012-dark-mode", CommentCount: 2, HeadSHA: "0123abc", Fetched: at,
+	}))
+}
+
+func TestCardStatsShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, CardStats{
+		ID: "FD-012", Title: "Dark mode", Kind: "feature", Stage: "verify",
+		Sessions: []StatSession{
+			{Stage: "plan", Role: "architect", Flavor: "stage", Model: "gpt-5", Started: at, Ended: at, Turns: 4, Tools: 9, Credits: 3.5, Verdict: "approve"},
+			{Stage: "implement", Role: "implementer", Started: at, Turns: 2, Tools: 5, ToolFails: 1, Credits: 1.25, Redo: true, RedoReason: "corrected"},
+		},
+		Money: StatMoney{
+			Credits: 4.75, FirstPass: 3.5, Rework: 1.25, Corrected: 1.25,
+			ByStage: []Bucket{{Name: "plan", Credits: 3.5}, {Name: "implement", Credits: 1.25}},
+			ByRole:  []Bucket{{Name: "architect", Credits: 3.5}}, ByModel: []Bucket{{Name: "gpt-5", Credits: 4.75}},
+		},
+		Clock:    StatClock{AgentMs: 60000, OnYouMs: 120000, IdleMs: 30000, ElapsedMs: 210000},
+		Envelope: StatEnvelope{Credits: 2000, Left: 1995.25},
+	}))
+}
+
+func TestFleetShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, Fleet{
+		From: at, To: at, Credits: 12, Rework: 2, Corrected: 2,
+		ByStage: []Bucket{{Name: "implement", Credits: 12}}, ByModel: []Bucket{{Name: "gpt-5", Credits: 12}},
+		AgentMs: 3600000, OnYouMs: 600000, IdleMs: 60000, ElapsedMs: 4260000, Running: 1, PeakLanes: 2,
+		Tokens:  Tokens{Input: 1200, Cached: 800, Output: 300},
+		Busiest: &Busiest{From: at, LenMs: 3600000, AgentMs: 3000000},
+		Lanes: []Lane{{
+			ID: "FD-012", Title: "Dark mode", Kind: "feature", Credits: 12, Redo: 2, Running: true, OpenWaitFrom: at,
+			Tokens: Tokens{Input: 1200, Cached: 800, Output: 300}, Note: "sent back once after a verdict",
+			Blocks: []Span{{From: at, Stage: "implement"}}, Waits: []Span{{From: at, To: at}}, Gates: []time.Time{at},
+		}},
+		AllTimeCredits: 40, AllTimeCards: 5,
+	}))
+}

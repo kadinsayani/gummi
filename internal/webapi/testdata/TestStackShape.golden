@@ -1,0 +1,63 @@
+{
+  "list": {
+    "stacks": [
+      {
+        "id": "theme",
+        "name": "theme",
+        "base": "main",
+        "members": [
+          {
+            "id": "FD-010",
+            "title": "Tokens",
+            "pos": 0,
+            "stage": "verify",
+            "branch": "feat/tokens",
+            "tree": true
+          },
+          {
+            "id": "FD-011",
+            "title": "Dark mode",
+            "pos": 1,
+            "stage": "implement",
+            "branch": "feat/dark-mode",
+            "below": "FD-010",
+            "tree": true,
+            "stale": true,
+            "running": true,
+            "blocker": "FD-010"
+          }
+        ],
+        "push": [
+          "git push --force-with-lease origin feat/dark-mode"
+        ],
+        "replayed": [
+          "FD-011"
+        ],
+        "replayedAt": "2026-09-27T09:12:00Z"
+      }
+    ]
+  },
+  "request": {
+    "card": "FD-011",
+    "pos": 1
+  },
+  "restack": {
+    "stack": {
+      "id": "theme",
+      "name": "theme",
+      "members": [],
+      "push": [
+        "git push --force-with-lease origin feat/dark-mode"
+      ]
+    },
+    "replayed": [
+      "FD-011"
+    ],
+    "conflict": {
+      "card": "FD-012",
+      "files": [
+        "theme.go"
+      ]
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "busy": true,
+  "verb": "implementing",
+  "since": "2026-09-27T09:12:00Z",
+  "streaming": "Running the te",
+  "tool": {
+    "tool": "Bash",
+    "label": "Bash  go test ./...",
+    "detail": "go test ./...",
+    "status": "running"
+  },
+  "spent": 1.25,
+  "state": "running",
+  "stage": "implement",
+  "role": "implementer",
+  "model": "gpt-5",
+  "session": "2026-09-27T09:12:00Z",
+  "turns": [
+    {
+      "author": "gummi",
+      "text": "Implement the plan."
+    },
+    {
+      "author": "tool",
+      "tool": {
+        "tool": "Read",
+        "label": "Read  main.go",
+        "detail": "main.go",
+        "status": "ok"
+      }
+    },
+    {
+      "author": "you",
+      "text": "keep it small"
+    }
+  ],
+  "consult": {
+    "busy": true,
+    "verb": "thinking",
+    "turns": [
+      {
+        "author": "you",
+        "text": "why two funcs?"
+      }
+    ]
+  },
+  "elsewhere": {
+    "pid": 4411,
+    "stage": "verify",
+    "role": "gummi",
+    "since": "2026-09-27T09:12:00Z",
+    "busy": true,
+    "watching": true,
+    "note": "read-only: another gummi process owns this run"
+  }
+}

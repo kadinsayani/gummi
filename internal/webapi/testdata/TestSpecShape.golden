@@ -1,0 +1,38 @@
+{
+  "path": ".gummi/specs/FD-012-dark-mode.md",
+  "rev": "3f2a1bc0000000000000000000000000000000000",
+  "title": "Dark mode",
+  "markdown": "# Dark mode\n\n## Problem\n\nToo bright.\n%% @user(2026-09-27, Simon): only at night?\n",
+  "sections": [
+    {
+      "name": "Problem",
+      "line": 3
+    }
+  ],
+  "notes": [
+    {
+      "line": 6,
+      "anchor": 5,
+      "author": "user",
+      "by": "Simon",
+      "date": "2026-09-27",
+      "text": "only at night?",
+      "resolved": false
+    }
+  ],
+  "checks": [
+    {
+      "name": "build",
+      "cmd": "go build ./...",
+      "last": {
+        "ok": true,
+        "at": "2026-09-27T09:12:00Z"
+      }
+    },
+    {
+      "name": "lint",
+      "cmd": "golangci-lint run",
+      "excused": true
+    }
+  ]
+}

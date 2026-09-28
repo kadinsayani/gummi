@@ -1,0 +1,82 @@
+{
+  "base": "main",
+  "baseRev": "1111111",
+  "since": "1111111",
+  "rev": "2222222",
+  "files": [
+    {
+      "path": "main.go",
+      "status": "modified",
+      "add": 1,
+      "del": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,3 +1,3 @@",
+          "lines": [
+            {
+              "t": " ",
+              "old": 1,
+              "new": 1,
+              "text": "package main",
+              "idx": 5
+            },
+            {
+              "t": "-",
+              "old": 2,
+              "text": "func a() {}",
+              "idx": 6
+            },
+            {
+              "t": "+",
+              "new": 2,
+              "text": "func a() { b() }",
+              "idx": 7,
+              "since": true
+            }
+          ]
+        }
+      ],
+      "since": true
+    },
+    {
+      "path": "b.md",
+      "oldPath": "a.md",
+      "status": "renamed",
+      "add": 0,
+      "del": 0,
+      "hunks": []
+    },
+    {
+      "path": "logo.png",
+      "status": "modified",
+      "binary": true,
+      "add": 0,
+      "del": 0,
+      "hunks": []
+    }
+  ],
+  "annotations": [
+    {
+      "id": 3,
+      "file": "main.go",
+      "idx": 7,
+      "excerpt": "+func a() { b() }",
+      "comment": "why?",
+      "by": "",
+      "source": "gummi",
+      "resolved": false,
+      "at": "2026-09-27T09:12:00Z"
+    },
+    {
+      "id": 4,
+      "file": "main.go",
+      "idx": -1,
+      "excerpt": "x",
+      "comment": "@octo: stale",
+      "by": "octo",
+      "source": "pr",
+      "resolved": true
+    }
+  ],
+  "pendingComments": 1
+}

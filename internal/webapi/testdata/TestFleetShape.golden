@@ -1,0 +1,71 @@
+{
+  "from": "2026-09-27T09:12:00Z",
+  "to": "2026-09-27T09:12:00Z",
+  "credits": 12,
+  "estimated": 0,
+  "rework": 2,
+  "corrected": 2,
+  "reproved": 0,
+  "byStage": [
+    {
+      "name": "implement",
+      "credits": 12
+    }
+  ],
+  "byModel": [
+    {
+      "name": "gpt-5",
+      "credits": 12
+    }
+  ],
+  "agentMs": 3600000,
+  "onYouMs": 600000,
+  "idleMs": 60000,
+  "elapsedMs": 4260000,
+  "running": 1,
+  "peakLanes": 2,
+  "tokens": {
+    "input": 1200,
+    "cached": 800,
+    "output": 300
+  },
+  "busiest": {
+    "from": "2026-09-27T09:12:00Z",
+    "lenMs": 3600000,
+    "agentMs": 3000000
+  },
+  "lanes": [
+    {
+      "id": "FD-012",
+      "title": "Dark mode",
+      "kind": "feature",
+      "credits": 12,
+      "redo": 2,
+      "tokens": {
+        "input": 1200,
+        "cached": 800,
+        "output": 300
+      },
+      "running": true,
+      "note": "sent back once after a verdict",
+      "openWaitFrom": "2026-09-27T09:12:00Z",
+      "blocks": [
+        {
+          "from": "2026-09-27T09:12:00Z",
+          "stage": "implement"
+        }
+      ],
+      "waits": [
+        {
+          "from": "2026-09-27T09:12:00Z",
+          "to": "2026-09-27T09:12:00Z"
+        }
+      ],
+      "gates": [
+        "2026-09-27T09:12:00Z"
+      ]
+    }
+  ],
+  "allTimeCredits": 40,
+  "allTimeCards": 5
+}

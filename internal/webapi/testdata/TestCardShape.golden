@@ -1,0 +1,58 @@
+{
+  "id": "FD-012",
+  "kind": "feature",
+  "title": "Dark mode",
+  "stage": "plan",
+  "status": "needs",
+  "spend": 12.3,
+  "envelope": 2000,
+  "branch": "fd-012-dark-mode",
+  "base": "main",
+  "decision": {
+    "ref": "d-41",
+    "kind": "gate",
+    "question": "Approve the design?",
+    "anchor": "spec",
+    "against": {
+      "token": "d-41@3f2a1bc",
+      "label": "spec 3f2a1bc"
+    },
+    "options": [
+      {
+        "id": "advance",
+        "label": "Approve, move to implement",
+        "words": false
+      },
+      {
+        "id": "changes",
+        "label": "Ask for changes",
+        "words": true,
+        "relabel": "Send back with note"
+      }
+    ]
+  },
+  "decisionsMore": 1,
+  "actions": [
+    {
+      "id": "pause",
+      "label": "Pause",
+      "key": "p"
+    },
+    {
+      "id": "topup",
+      "label": "Raise the envelope",
+      "needs": "number",
+      "default": "2000"
+    },
+    {
+      "id": "delete",
+      "label": "Delete the card",
+      "danger": true,
+      "needs": "confirm"
+    }
+  ],
+  "composer": {
+    "says": "asks the architect, without interrupting",
+    "route": "consult"
+  }
+}
