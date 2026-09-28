@@ -38,8 +38,15 @@ func TestCritiqueHintsAndTools(t *testing.T) {
 		names = append(names, td.Name)
 	}
 	got := strings.Join(names, ",")
-	if !strings.Contains(got, "submit_verdict") || !strings.Contains(got, "spec_annotate") {
-		t.Errorf("critique tools = %s, want submit_verdict + spec_annotate", got)
+	// and spec_view: the artifact lives outside the worktree, where a
+	// backend that cages reads to it (opencode) cannot open the plan the
+	// critique exists to read
+	if !strings.Contains(got, "submit_verdict") || !strings.Contains(got, "spec_annotate") ||
+		!strings.Contains(got, "spec_view") {
+		t.Errorf("critique tools = %s, want submit_verdict + spec_annotate + spec_view", got)
+	}
+	if !strings.Contains(toolHint(domain.StagePlan, flavorCritique), "spec_view") {
+		t.Error("critique tool hint does not say how to read the plan")
 	}
 	var writerNames []string
 	for _, td := range stageTools(domain.StagePlan, flavorStage, nil) {

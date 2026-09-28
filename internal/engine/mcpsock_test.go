@@ -151,11 +151,11 @@ func TestMCPSockListTools(t *testing.T) {
 
 // list_tools honors the run's pass flavor, not the flavorStage default:
 // a plan-critique pass at StagePlan advertises the critique tools it was
-// prompted with (submit_verdict + spec_annotate), and a rebase-resolve
+// prompted with (submit_verdict + spec_annotate + spec_view), and a rebase-resolve
 // pass at StageVerify advertises none — otherwise the tool list drifts
 // from the toolHint the model was told about (BG-022).
 func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
-	// plan-critique pass borrowing StagePlan: two critique tools, not the
+	// plan-critique pass borrowing StagePlan: three critique tools, not the
 	// empty set flavorStage would compute for StagePlan.
 	e := newEngine(t, &fakeNoTools{agent.NewFake("")})
 	f := domain.Feature{ID: "FD-001", Stage: domain.StagePlan, Profile: "default"}
@@ -170,10 +170,10 @@ func TestMCPSockListToolsRespectsFlavor(t *testing.T) {
 	c.send(mcp.Request{JSONRPC: mcp.JSONRPC, ID: jsonRaw(id), Method: "list_tools"})
 	resp := c.read(id)
 	tools := resp["result"].(map[string]any)["tools"].([]any)
-	if len(tools) != 2 {
-		t.Fatalf("plan-critique tools length = %d, want 2", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("plan-critique tools length = %d, want 3", len(tools))
 	}
-	for i, want := range []string{"submit_verdict", "spec_annotate"} {
+	for i, want := range []string{"submit_verdict", "spec_annotate", "spec_view"} {
 		if tools[i].(map[string]any)["name"] != want {
 			t.Fatalf("plan-critique tool[%d] = %v, want %s", i, tools[i].(map[string]any)["name"], want)
 		}

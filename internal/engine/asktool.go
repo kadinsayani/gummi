@@ -159,7 +159,12 @@ const (
 func stageTools(stage domain.Stage, flavor runFlavor, deciding []string) []agent.ToolDef {
 	switch flavor {
 	case flavorCritique:
-		return []agent.ToolDef{critiqueVerdictTool(), specAnnotateTool()}
+		// spec_view because the artifact lives beside the workspace, not
+		// in the worktree: a backend that cages its file tools to the
+		// worktree (opencode denies every other directory) left the
+		// critique no way to read the plan it exists to refute, and it
+		// spent its turns probing the cage instead
+		return []agent.ToolDef{critiqueVerdictTool(), specAnnotateTool(), specViewTool()}
 	case flavorRebase:
 		return nil
 	}
@@ -487,12 +492,15 @@ func toolHint(stage domain.Stage, flavor runFlavor) string {
 		return "" // no gummi tools: the rebase outcome is read from git state
 	}
 	if flavor == flavorCritique {
-		return `You have two gummi tools. spec_annotate: attach each finding to the
-plan line it indicts and let gummi place the %% marker with correct
-anchoring, instead of writing %% lines yourself. submit_verdict: call it
-exactly once at the end of your critique (verdict "pass" or "changes")
-to drive gummi's critique→replan loop, instead of writing a VERDICT:
-line.`
+		return `You have three gummi tools. spec_view: read the spec's sections —
+pass the section heading text for one section's body, omit it for the
+whole document (read-only); read the plan with it rather than opening
+the spec file, which may sit outside what your file tools can reach.
+spec_annotate: attach each finding to the plan line it indicts and let
+gummi place the %% marker with correct anchoring, instead of writing %%
+lines yourself. submit_verdict: call it exactly once at the end of your
+critique (verdict "pass" or "changes") to drive gummi's critique→replan
+loop, instead of writing a VERDICT: line.`
 	}
 	switch stage {
 	case domain.StagePlan:

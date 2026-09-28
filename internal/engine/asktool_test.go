@@ -931,12 +931,13 @@ func TestReadOnlyResearchKeepsItsDocumentTools(t *testing.T) {
 			}
 		}
 	}
-	// A critique judges and files findings: it needs the annotate.
+	// A critique judges and files findings: it needs the annotate, and a
+	// way to read the artifact it judges wherever the backend cages reads.
 	names := map[string]bool{}
 	for _, td := range stageTools(domain.StageImplement, flavorCritique, nil) {
 		names[td.Name] = true
 	}
-	for _, w := range []string{"submit_verdict", "spec_annotate"} {
+	for _, w := range []string{"submit_verdict", "spec_annotate", "spec_view"} {
 		if !names[w] {
 			t.Errorf("a critique is not served %s: %v", w, names)
 		}
