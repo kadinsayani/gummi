@@ -54,6 +54,17 @@ type inbox struct {
 	// fix it after construction still take effect — see NewShell) used to
 	// stamp a live-raised item that arrives with no At of its own.
 	now func() time.Time
+	// onChange, when set, is told which feature's item was added, changed
+	// or removed (Shell.SetChangeHook). It is called with the lock held, so
+	// it must not call back into the inbox.
+	onChange func(domain.FeatureID)
+}
+
+// changed reports id's item moved. Callers hold b.mu.
+func (b *inbox) changed(id domain.FeatureID) {
+	if b.onChange != nil {
+		b.onChange(id)
+	}
 }
 
 func newInbox(now func() time.Time) *inbox {
@@ -83,6 +94,7 @@ func (b *inbox) put(it attnItem) bool {
 		b.order = append(b.order, it.Feature)
 	}
 	b.items[it.Feature] = it
+	b.changed(it.Feature)
 	return !existed
 }
 
@@ -106,6 +118,7 @@ func (b *inbox) seed(it attnItem) {
 	}
 	b.order = append(b.order, it.Feature)
 	b.items[it.Feature] = it
+	b.changed(it.Feature)
 }
 
 // get returns a feature's pending attention item, if any.
@@ -124,6 +137,7 @@ func (b *inbox) remove(id domain.FeatureID) {
 		return
 	}
 	delete(b.items, id)
+	b.changed(id)
 	for i, q := range b.order {
 		if q == id {
 			b.order = append(b.order[:i], b.order[i+1:]...)

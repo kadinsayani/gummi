@@ -19,6 +19,20 @@ import (
 // feature branch, so there is something to squash-merge.
 func mergeFixture(t *testing.T) (*Shell, string, string) {
 	t.Helper()
+	m, root, wt := implementFixture(t)
+	// a card lands from verify (merge.go's landingRefusal), so the one
+	// these tests land is there
+	if _, err := m.store.Transition(context.Background(), "FD-001", domain.StageVerify, "test"); err != nil {
+		t.Fatal(err)
+	}
+	m = pump(t, m, m.loadRows)
+	return m, root, wt
+}
+
+// implementFixture is a card at implement with a commit on its branch:
+// work that has not been verified.
+func implementFixture(t *testing.T) (*Shell, string, string) {
+	t.Helper()
 	m, root, wt := rebaseFeatureFixture(t)
 	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x // feature work\n"), 0o600); err != nil {
 		t.Fatal(err)
@@ -106,7 +120,7 @@ func TestSquashMergeFlow(t *testing.T) {
 	if d.input.Value() != "" {
 		t.Fatalf("dialog prefill = %q, want empty with no agent to draft", d.input.Value())
 	}
-	if m.mergePrep {
+	if len(m.mergePrep) > 0 {
 		t.Error("mergePrep flag still set with the dialog open")
 	}
 
@@ -362,7 +376,7 @@ func TestSquashMergeRefusedDirtyMain(t *testing.T) {
 
 func TestSquashMergeReentryRefused(t *testing.T) {
 	m, _, _ := mergeFixture(t)
-	m.mergePrep = true
+	m.markMergePrep(m.rows[0].F.ID)
 	m = pressMerge(t, m)
 	if !m.notice.isErr || !strings.Contains(m.notice.text, "already preparing") {
 		t.Fatalf("notice = %q (err=%v), want a re-entry refusal", m.notice.text, m.notice.isErr)
@@ -374,8 +388,8 @@ func TestSquashMergeReentryRefused(t *testing.T) {
 func atVerify(t *testing.T, m *Shell) *Shell {
 	t.Helper()
 	ctx := context.Background()
-	for _, st := range []domain.Stage{domain.StageVerify} {
-		if _, err := m.store.Transition(ctx, "FD-001", st, "test"); err != nil {
+	if m.rows[0].F.Stage != domain.StageVerify {
+		if _, err := m.store.Transition(ctx, "FD-001", domain.StageVerify, "test"); err != nil {
 			t.Fatal(err)
 		}
 	}

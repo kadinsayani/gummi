@@ -110,7 +110,7 @@ func TestReadInFlightIsInTheThread(t *testing.T) {
 	if len(m.scribing) != 0 {
 		t.Errorf("the read leaked its busy count: %+v", m.scribing)
 	}
-	if p := m.reentryPending; p == nil || p.out.Action != reentry.NewCard {
+	if p := m.pendingChip(); p == nil || p.out.Action != reentry.NewCard {
 		t.Fatalf("the answer did not become a chip: %+v", p)
 	}
 }
@@ -156,8 +156,8 @@ func TestEscWhileReadingStopsItAndKeepsTheLine(t *testing.T) {
 
 	// the answer to the cancelled read arrives late and is dropped
 	m = pump(t, m, classify)
-	if m.reentryPending != nil {
-		t.Errorf("a withdrawn read still raised a chip: %+v", m.reentryPending)
+	if m.pendingChip() != nil {
+		t.Errorf("a withdrawn read still raised a chip: %+v", m.pendingChip())
 	}
 }
 
@@ -167,7 +167,7 @@ func TestEscWhileReadingStopsItAndKeepsTheLine(t *testing.T) {
 func TestEscOnTheChipSendsTheLineAndSaysSo(t *testing.T) {
 	m := separateWorkStop(t)
 	m = typeAndSend(t, m, separateWork)
-	if m.reentryPending == nil {
+	if m.pendingChip() == nil {
 		t.Fatal("no chip to decline")
 	}
 	model, sent := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
@@ -191,7 +191,7 @@ func TestEscOnTheChipSendsTheLineAndSaysSo(t *testing.T) {
 func TestAbandoningTheSeededCardFormGivesTheLineBack(t *testing.T) {
 	m := separateWorkStop(t)
 	m = typeAndSend(t, m, separateWork)
-	if p := m.reentryPending; p == nil || p.out.Action != reentry.NewCard {
+	if p := m.pendingChip(); p == nil || p.out.Action != reentry.NewCard {
 		t.Fatalf("no new-card chip: %+v", p)
 	}
 	before := len(m.rows)

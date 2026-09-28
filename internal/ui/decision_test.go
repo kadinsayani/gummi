@@ -505,11 +505,11 @@ func TestThreadDecisionTypedProseRidesTheRun(t *testing.T) {
 		t.Errorf("typing did not relabel the run:\n%s", out)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if p := m.reentryPending; p == nil || p.out.Target != domain.StagePlan || p.goOnEnter {
+	if p := m.pendingChip(); p == nil || p.out.Target != domain.StagePlan || p.goOnEnter {
 		t.Fatalf("no y-only chip to start the design stage: %+v", p)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Fatal("y did not take the chip")
 	}
 	settleChat(t, eng)
@@ -1015,5 +1015,19 @@ func TestGateAnswerCrosses(t *testing.T) {
 	}
 	if decisions.GateAnswerCrosses(nil, engine.GateAdvanceLabel) {
 		t.Error("a workflow decision (no ask at all) read as a gate crossing")
+	}
+}
+
+// A freeform card mid-turn offers one answer — stop the turn — and its
+// question says the turn is running, never that nothing is.
+func TestAFreeformTurnInFlightIsNotCalledIdle(t *testing.T) {
+	r := featureRow{F: domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen}}
+	in := nextInput{stage: domain.StageOpen, freeformBusy: true}
+	q := decisionQuestion(decisionIdle, r, in)
+	if strings.Contains(q, "nothing is running") || !strings.Contains(q, "working on a turn") {
+		t.Errorf("question = %q", q)
+	}
+	if acts := stageActions(in); len(acts) != 1 || acts[0].id != "pause" {
+		t.Errorf("answers = %+v, want the one that stops the turn", acts)
 	}
 }

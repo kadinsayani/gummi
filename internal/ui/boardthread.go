@@ -235,7 +235,7 @@ func (m *Shell) boardThreadRender(w, h int, measure bool) string {
 			// turn runs, and a turn running is the only moment the key is
 			// wanted. Faint, because it is an aside to the state, not part
 			// of it.
-			add("  " + s.Info.Render(m.spinner()+" thinking…") + " " + s.Faint.Render("(esc to interrupt)"))
+			add("  " + s.Info.Render(m.spinner()+" "+boardBusyWord(snap)+"…") + " " + s.Faint.Render("(esc to interrupt)"))
 		}
 	}
 	if len(body) == 0 {

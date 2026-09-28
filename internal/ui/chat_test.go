@@ -48,7 +48,7 @@ func TestFollowUpsStayInTheConversation(t *testing.T) {
 	if asked != 1 {
 		t.Errorf("a follow-up was read (asked=%d)", asked)
 	}
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Error("a follow-up raised a chip")
 	}
 
@@ -57,7 +57,7 @@ func TestFollowUpsStayInTheConversation(t *testing.T) {
 	if asked != 2 {
 		t.Errorf("the rest of a send-it-back line was not read (asked=%d)", asked)
 	}
-	if p := m.reentryPending; p == nil || p.out.Action != reentry.RerunInPlace {
+	if p := m.pendingChip(); p == nil || p.out.Action != reentry.RerunInPlace {
 		t.Errorf("send it back from a conversation raised no chip: %+v", p)
 	}
 }
@@ -77,7 +77,7 @@ func TestApproveInAConversationNeedsNoRead(t *testing.T) {
 	if asked != 1 {
 		t.Errorf("\"approve\" spent a read (asked=%d)", asked)
 	}
-	if p := m.reentryPending; p == nil || p.out.Action != reentry.Advance {
+	if p := m.pendingChip(); p == nil || p.out.Action != reentry.Advance {
 		t.Errorf("\"approve\" raised no advance chip: %+v", p)
 	}
 }
@@ -94,7 +94,7 @@ func TestConversationEndsWithoutAWord(t *testing.T) {
 		t.Error("a verb did not end the conversation")
 	}
 	m.startChat(id)
-	m.syncDecision(&threadDecision{key: "somewhere-else"})
+	m.syncDecision(&threadDecision{card: id, key: "somewhere-else"})
 	if m.inChat(id) {
 		t.Error("the card moving did not end the conversation")
 	}

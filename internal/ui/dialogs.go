@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -112,7 +113,11 @@ func padRight(str string, n int) string {
 // is built lazily on first use from confirmLabel/cancelLabel, which
 // default to "Confirm"/"Cancel" when left unset.
 type confirmDialog struct {
-	id        string
+	id string
+	// card is the card the question is about, when it is about one: a web
+	// intent answers only a confirm about its own card (webdialogs.go), so
+	// a yes sent for one card is never taken as another card's yes.
+	card      domain.FeatureID
 	question  string
 	detail    string
 	onConfirm func() tea.Cmd

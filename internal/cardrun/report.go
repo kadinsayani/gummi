@@ -3,6 +3,7 @@ package cardrun
 import (
 	"encoding/json"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -61,8 +62,9 @@ func Report(in Input) Run {
 			Spent:   in.Feature.Spend.Credits,
 		},
 	}
-	run.Sessions = sessions(evs, in.Spend)
-	run.Money = money(run.Sessions, in.Spend, in.Feature)
+	var claimed []bool
+	run.Sessions, claimed = sessions(evs, in.Spend)
+	run.Money = money(run.Sessions, in.Spend, claimed, in.Feature)
 	run.Clock = clock(run.Sessions, evs, in.Feature)
 	run.Hands = hands(evs, in.Baseline)
 	run.Judgment = judgment(evs, in.Rounds)
@@ -114,7 +116,7 @@ type exitPayload struct {
 //   - The last pass, with nothing after it, is genuinely still open —
 //     which on a live card is the pass someone is asking about, and the
 //     one it would be worst to drop.
-func sessions(evs []state.CardEvent, spend []state.StageSpend) []Session {
+func sessions(evs []state.CardEvent, spend []state.StageSpend) ([]Session, []bool) {
 	var out []Session
 	open := -1
 	for _, ev := range evs {
@@ -159,48 +161,105 @@ func sessions(evs []state.CardEvent, spend []state.StageSpend) []Session {
 			}
 		}
 	}
-	attachSpend(out, spend)
+	claimed := attachSpend(out, spend)
 	markRedone(out)
-	return out
+	return out, claimed
 }
 
-// attachSpend files each rollup row on the pass that spent it.
+// attachSpend files each rollup row on the pass that spent it, and
+// returns which rows it filed — the rest are the card's spend outside
+// any pass (money's Charges).
 //
 // The rollup's session key is the generation the mirror stamped on that
-// pass's events, but the log does not carry the key itself — so passes
-// are matched to keys by their order within a (stage, role, flavour),
-// which is the order both were written in. Rows with no session key at
-// all (written before the key existed, or by something that is not a
-// stage session — a one-shot, a goal's lead) belong to no pass, and are
-// left for the card's totals to pick up rather than guessed onto one.
-func attachSpend(sess []Session, spend []state.StageSpend) {
+// pass's events — the pass's own start, in Unix nanoseconds, which is
+// also the moment its stage_enter records (engine's Session.generation).
+// So a pass claims the rows filed under its own start first, exactly.
+// Only then are any keys still unclaimed matched to the passes still
+// without one, by their order within a (stage, role): the order both
+// were written in, which is how a record whose times do not line up
+// with its keys is still read. The order is never tried first, because
+// it is wrong the moment a pass spent nothing: a pass cut off before its
+// first sample leaves no row, and matching by order handed its
+// successor's row to it and left the successor to be reconstructed
+// from its own stage_exit — the same credits counted twice.
+//
+// Rows with no session key at all (written before the key existed, or
+// by something that is not a stage session — a one-shot, a goal's lead)
+// belong to no pass, and neither does a row filed under a pass's key by
+// another role (a backend's helper call): each is left for the card's
+// totals to pick up rather than guessed onto one.
+func attachSpend(sess []Session, spend []state.StageSpend) []bool {
+	claimed := make([]bool, len(spend))
 	if len(sess) == 0 {
-		return
+		return claimed
 	}
-	// every distinct session key seen for a (stage, role), in the order
-	// the rollup reports them; ties broken by first write so the order is
-	// the order the passes ran.
+	byKey := map[string][]int{}
+	for i, r := range spend {
+		if r.Session != "" {
+			byKey[r.Session] = append(byKey[r.Session], i)
+		}
+	}
+	taken := map[string]bool{}
+	file := func(p *Session, key string) {
+		taken[key] = true
+		p.Key = key
+		for _, i := range byKey[key] {
+			r := spend[i]
+			if r.Role != p.Role || r.Stage != p.Stage {
+				continue
+			}
+			claimed[i] = true
+			p.Credits += r.Credits
+			p.Estimated += r.EstimatedCredits
+			p.InputTokens += r.InputTokens
+			p.CachedTokens += r.CachedTokens
+			p.OutputTokens += r.OutputTokens
+			if p.Model == "" {
+				p.Model = r.Model
+			}
+		}
+	}
+	exact := make([]bool, len(sess))
+	for i := range sess {
+		if sess[i].Started.IsZero() {
+			continue
+		}
+		key := strconv.FormatInt(sess[i].Started.UnixNano(), 10)
+		if len(byKey[key]) > 0 {
+			file(&sess[i], key)
+			exact[i] = true
+		}
+	}
+
+	// The fallback: every distinct key no pass claimed by its start, per
+	// (stage, role), in the order the rollup first wrote them.
 	type slot struct{ stage, role string }
 	keys := map[slot][]string{}
 	seen := map[string]bool{}
-	byKey := map[string][]state.StageSpend{}
-	ordered := append([]state.StageSpend(nil), spend...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		return ordered[i].UpdatedAt.Before(ordered[j].UpdatedAt)
+	ordered := make([]int, 0, len(spend))
+	for i := range spend {
+		ordered = append(ordered, i)
+	}
+	sort.SliceStable(ordered, func(a, b int) bool {
+		return spend[ordered[a]].UpdatedAt.Before(spend[ordered[b]].UpdatedAt)
 	})
-	for _, r := range ordered {
-		if r.Session == "" {
+	for _, i := range ordered {
+		r := spend[i]
+		if r.Session == "" || taken[r.Session] {
 			continue
 		}
-		byKey[r.Session] = append(byKey[r.Session], r)
 		s := slot{string(r.Stage), r.Role}
-		if !seen[s.stage+"\x00"+s.role+"\x00"+r.Session] {
-			seen[s.stage+"\x00"+s.role+"\x00"+r.Session] = true
+		id := s.stage + "\x00" + s.role + "\x00" + r.Session
+		if !seen[id] {
+			seen[id] = true
 			keys[s] = append(keys[s], r.Session)
 		}
 	}
 	used := map[slot]int{}
 	for i := range sess {
+		if exact[i] {
+			continue
+		}
 		s := slot{string(sess[i].Stage), sess[i].Role}
 		n := used[s]
 		if n >= len(keys[s]) {
@@ -215,23 +274,10 @@ func attachSpend(sess []Session, spend []state.StageSpend) {
 			}
 			continue
 		}
-		key := keys[s][n]
 		used[s] = n + 1
-		sess[i].Key = key
-		for _, r := range byKey[key] {
-			if r.Role != sess[i].Role || r.Stage != sess[i].Stage {
-				continue
-			}
-			sess[i].Credits += r.Credits
-			sess[i].Estimated += r.EstimatedCredits
-			sess[i].InputTokens += r.InputTokens
-			sess[i].CachedTokens += r.CachedTokens
-			sess[i].OutputTokens += r.OutputTokens
-			if sess[i].Model == "" {
-				sess[i].Model = r.Model
-			}
-		}
+		file(&sess[i], keys[s][n])
 	}
+	return claimed
 }
 
 // markRedone flags every pass the card had already done once.
@@ -265,47 +311,38 @@ func markRedone(sess []Session) {
 // money splits the card's realized spend by where it went and by whether
 // the card had been there before.
 //
-// The totals come from the feature's own counters, which are the card's
-// authoritative figures; the splits come from the sessions. A card whose
-// rollup has rows no pass claimed (a one-shot's spend, a legacy row) will
-// see those credits in the total and not in the split, which is the
-// honest result: they were spent, and no pass of a stage spent them.
-func money(sess []Session, spend []state.StageSpend, f domain.Feature) Money {
+// The total is the feature's own counter — the figure the board prints
+// on the card and the envelope is drawn against — and every split sums
+// back to it. The passes take what they spent; whatever of the counter
+// no pass accounts for is itemized as Charges (see Charge) and totalled
+// as Elsewhere, so FirstPass + Rework + Elsewhere is Credits on every
+// card whose two meters agree.
+func money(sess []Session, spend []state.StageSpend, claimed []bool, f domain.Feature) Money {
 	m := Money{
 		Credits:   f.Spend.Credits,
 		Estimated: f.Spend.EstimatedCredits,
 	}
-	// Every session's generation, so a rollup row can be told from one a
-	// pass accounts for. A session with no key predates the keyed rollup
-	// and can match nothing, which is why the empty key is never added.
-	passKeys := map[string]bool{}
-	for _, s := range sess {
-		if s.Key != "" {
-			passKeys[s.Key] = true
-		}
-	}
 	byStage, byRole, byModel := map[string]float64{}, map[string]float64{}, map[string]float64{}
-	elsewhere := map[string]float64{}
+	var rowsTotal float64
 	for _, r := range spend {
 		byStage[string(r.Stage)] += r.Credits
 		byRole[r.Role] += r.Credits
 		byModel[r.Model] += r.Credits
+		rowsTotal += r.Credits
 		m.InputTokens += r.InputTokens
 		m.CachedTokens += r.CachedTokens
 		m.OutputTokens += r.OutputTokens
-		// A row with no session key predates the keyed rollup and cannot
-		// be attributed either way: it is not evidence of a turn outside
-		// the passes, only of a card recorded before the question could
-		// be asked. Counting it here reported every credit of an old
-		// card as spent on turns that are not passes, while the pass
-		// list held the same credits — the double count this figure
-		// exists to prevent.
-		if r.Session != "" && !passKeys[r.Session] {
-			m.Elsewhere += r.Credits
-			elsewhere[r.Role] += r.Credits
-		}
 	}
+	// What a reconstructed pass took off its stage_exit is already in an
+	// unkeyed row of the same (stage, role): that is the row the rollup
+	// wrote for it before it carried keys. It is netted out of that row
+	// rather than counted again beside the pass.
+	type slot struct{ stage, role string }
+	recon := map[slot]float64{}
 	for _, s := range sess {
+		if s.Reconstructed {
+			recon[slot{string(s.Stage), s.Role}] += s.Credits
+		}
 		switch {
 		case !s.Redo:
 			m.FirstPass += s.Credits
@@ -317,11 +354,88 @@ func money(sess []Session, spend []state.StageSpend, f domain.Feature) Money {
 			m.Corrected += s.Credits
 		}
 	}
+	for i, r := range spend {
+		if claimed[i] {
+			continue
+		}
+		c := chargeOf(r)
+		netted := false
+		if k := (slot{string(r.Stage), r.Role}); r.Session == "" && recon[k] > 0 {
+			net := min(recon[k], c.Credits)
+			recon[k] -= net
+			c.Credits -= net
+			c.Estimated = min(c.Estimated, c.Credits)
+			netted = true
+		}
+		if c.Credits <= crumb && (netted || c.tokens() == 0) {
+			continue
+		}
+		m.Charges = append(m.Charges, c)
+	}
+	for _, c := range Unrecorded(f, rowsTotal) {
+		m.Charges = append(m.Charges, c)
+		byStage[c.Bucket()] += c.Credits
+		byRole[c.Role] += c.Credits
+		byModel[unknownModel] += c.Credits
+	}
+	elsewhere := map[string]float64{}
+	for _, c := range m.Charges {
+		m.Elsewhere += c.Credits
+		if c.Credits > 0 {
+			elsewhere[c.Role] += c.Credits
+		}
+	}
 	m.ElsewhereBy = buckets(elsewhere)
 	m.ByStage = buckets(byStage)
 	m.ByRole = buckets(byRole)
 	m.ByModel = buckets(byModel)
 	return m
+}
+
+// crumb is the smallest share of a credit a split reports. The counter
+// and the rollup are summed in floating point from the same samples, and
+// a difference below this is their rounding, not spend nobody recorded.
+const crumb = 0.005
+
+// unknownModel is the rollup's own name for a sample that named no model
+// (state.Store.RecordStageSpend), used for spend that has no row at all.
+const unknownModel = "unknown"
+
+// chargeOf is a rollup row as a Charge, stamped with its last sample.
+func chargeOf(r state.StageSpend) Charge {
+	return Charge{
+		Stage: r.Stage, Role: r.Role, Model: r.Model, At: r.UpdatedAt,
+		Credits: r.Credits, Estimated: r.EstimatedCredits,
+		InputTokens: r.InputTokens, CachedTokens: r.CachedTokens, OutputTokens: r.OutputTokens,
+	}
+}
+
+// Unrecorded is the part of a card's counter that no rollup row records:
+// the counter less rowsTotal, the sum of the card's stage_spend rows.
+// The two are written beside each other for every stage session, lead
+// turn and one-shot, so on most cards this is nothing. What it is when
+// it is not: a decomposition pass at ingest, which books the counter
+// alone (state.Store.AddDecomposeSpend), and spend older than the
+// rollup. Both are charged to the card's creation — the moment a
+// decomposition runs, and the only one the record holds for the other.
+//
+// It is exported because the all-time ledger folds the same counters
+// and rows at workspace scale, and a second derivation of what is
+// missing from the rows is how the two scales would start to disagree.
+func Unrecorded(f domain.Feature, rowsTotal float64) []Charge {
+	rest := f.Spend.Credits - rowsTotal
+	if rest <= crumb {
+		return nil
+	}
+	var out []Charge
+	if d := min(rest, f.Spend.DecomposeCredits); d > crumb {
+		out = append(out, Charge{Role: "decompose", Model: unknownModel, At: f.CreatedAt, Credits: d})
+		rest -= d
+	}
+	if rest > crumb {
+		out = append(out, Charge{Role: "unrecorded", Model: unknownModel, At: f.CreatedAt, Credits: rest})
+	}
+	return out
 }
 
 // buckets turns a name→credits map into the largest-first slice every

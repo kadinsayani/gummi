@@ -143,7 +143,8 @@ type Money struct {
 
 	// Elsewhere is what the card spent outside any stage session, and
 	// ElsewhereBy names it by role. FirstPass + Rework + Elsewhere is
-	// Credits.
+	// Credits: Elsewhere is every credit of the card's counter that no
+	// pass accounts for, whether a rollup row records it or not.
 	//
 	// Not every turn a card pays for is a pass. A goal's lead turns are
 	// short synchronous sessions that open and close between ticks, and
@@ -155,8 +156,14 @@ type Money struct {
 	// one panel whose whole job is to say where the money went. The
 	// stage totals had it all along, which is worse than either — the
 	// same report said two different things about what the card cost.
+	//
+	// Charges itemizes Elsewhere, one entry per share, each with the one
+	// moment the record holds for it (Charge.At) — which is what lets the
+	// workspace fold put a card's non-pass spend in a window at all, and
+	// so keep a lane from disagreeing with the card it is drawn from.
 	Elsewhere   float64
 	ElsewhereBy []Bucket
+	Charges     []Charge
 
 	ByStage []Bucket
 	ByRole  []Bucket
@@ -165,6 +172,42 @@ type Money struct {
 	InputTokens  int64
 	CachedTokens int64
 	OutputTokens int64
+}
+
+// Charge is one share of a card's spend that no pass accounts for.
+//
+// Three things leave one. A rollup row no pass claims — a goal lead's
+// turns, a one-shot scribe, a backend's helper call — is a charge at the
+// moment its last sample was written (its UpdatedAt), the only time the
+// row carries: the rollup keeps no per-sample times, so this is when the
+// spend was last added to, never apportioned across a span. And spend
+// the card's counter holds that no row records at all — a decomposition
+// pass at ingest (Role "decompose"), or anything older than the rollup
+// (Role "unrecorded") — is a charge at the card's creation, the one
+// moment the record has for it. Stage is empty on those two.
+type Charge struct {
+	Stage domain.Stage
+	Role  string
+	Model string
+	At    time.Time
+
+	Credits   float64
+	Estimated float64
+
+	InputTokens  int64
+	CachedTokens int64
+	OutputTokens int64
+}
+
+func (c Charge) tokens() int64 { return c.InputTokens + c.CachedTokens + c.OutputTokens }
+
+// Bucket names the charge files under where a stage would go: its stage,
+// or, on spend no stage holds, what it was.
+func (c Charge) Bucket() string {
+	if c.Stage != "" {
+		return string(c.Stage)
+	}
+	return c.Role
 }
 
 // ReworkShare is the fraction of realized spend that went on work the

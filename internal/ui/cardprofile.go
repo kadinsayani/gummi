@@ -56,6 +56,7 @@ func (m *Shell) confirmCardProfileChange(id domain.FeatureID, profile string) te
 		return m.applyCardProfileChange(id, profile)
 	}
 	m.Overlay.Push(&confirmDialog{
+		card:         id,
 		id:           "confirm-card-profile",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Switch",

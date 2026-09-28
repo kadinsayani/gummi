@@ -48,6 +48,7 @@ func (m *Shell) offerAgentRebase(msg rebaseConflictMsg) {
 		detail = sanitize("conflicts: "+strings.Join(files, ", ")) + " — " + detail
 	}
 	m.Overlay.Push(&confirmDialog{
+		card:      f.ID,
 		id:        "agent-rebase",
 		question:  "rebase " + string(f.ID) + " onto main hit conflicts — let the agent resolve them?",
 		detail:    detail,

@@ -142,11 +142,12 @@ func pad(label string) string {
 // base branch, and a reader who is about to go push something needs the
 // branch name in front of them.
 func (m *Shell) handOffFeature(f domain.Feature) tea.Cmd {
+	actor := m.humanActor()
 	return m.cardLocked(f.ID, func() tea.Msg {
 		return m.withEngine(func(eng *engine.Engine) tea.Msg {
-			res, err := eng.HandOff(context.Background(), f.ID, "user")
+			res, err := eng.HandOff(context.Background(), f.ID, actor)
 			if err != nil || res.Status != engine.StatusAdvanced {
-				return m.advanceOutcome(f.ID, "user", res, err)
+				return m.advanceOutcome(f.ID, actor, res, err)
 			}
 			m.dropSession(f.ID)
 			return noticeMsg{

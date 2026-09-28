@@ -36,7 +36,7 @@ func typeAndSend(t *testing.T, m *Shell, line string) *Shell {
 func TestProceedAtAClearGateAdvancesOnY(t *testing.T) {
 	m := clearPlanGate(t, "proceed")
 	m = typeAndSend(t, m, "looks right, go")
-	p := m.reentryPending
+	p := m.pendingChip()
 	if p == nil || p.out.Action != reentry.Advance || p.out.Target != domain.StageImplement {
 		t.Fatalf("no advance chip: %+v", p)
 	}
@@ -47,7 +47,7 @@ func TestProceedAtAClearGateAdvancesOnY(t *testing.T) {
 		t.Errorf("the chip took the line out of the composer: %q", got)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.reentryPending == nil || m.rows[0].F.Stage != domain.StagePlan {
+	if m.pendingChip() == nil || m.rows[0].F.Stage != domain.StagePlan {
 		t.Fatal("enter took a chip that spends")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
@@ -75,7 +75,7 @@ func TestProceedAtABlockedGateSaysWhy(t *testing.T) {
 	}
 	m = openCardPage(t, m)
 	m = typeAndSend(t, m, "go")
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Fatal("a blocked gate raised a chip")
 	}
 	if !strings.Contains(m.notice.text, "can't go on yet") {
@@ -91,18 +91,18 @@ func TestProceedAtABlockedGateSaysWhy(t *testing.T) {
 func TestEditingWithdrawsTheChipAndDigitsDoNothing(t *testing.T) {
 	m := clearPlanGate(t, "proceed")
 	m = typeAndSend(t, m, "go")
-	if m.reentryPending == nil {
+	if m.pendingChip() == nil {
 		t.Fatal("no chip")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: '1', Text: "1"})
-	if m.reentryPending == nil {
+	if m.pendingChip() == nil {
 		t.Error("a digit took the chip down")
 	}
 	if got := m.rows[0].F.Stage; got != domain.StagePlan {
 		t.Errorf("a digit under a chip moved the card to %s", got)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'x', Text: "x"})
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Error("typing did not withdraw the chip")
 	}
 	if got := m.threadInput.Value(); !strings.HasSuffix(got, "gox") {
@@ -127,7 +127,7 @@ func TestLandingFromProseIsYOnly(t *testing.T) {
 		t.Fatalf("fixture is not at a clear landing gate: forward=%s blocked=%q acts=%+v", fwd, blocked, stageActions(in))
 	}
 	m = typeAndSend(t, m, "ship it")
-	p := m.reentryPending
+	p := m.pendingChip()
 	if p == nil || p.out.Action != reentry.Advance || p.out.Target != domain.StageDone {
 		t.Fatalf("no landing chip: %+v", p)
 	}
@@ -135,11 +135,11 @@ func TestLandingFromProseIsYOnly(t *testing.T) {
 		t.Fatal("the landing went on enter")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.reentryPending == nil {
+	if m.pendingChip() == nil {
 		t.Fatal("enter took the landing chip")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Error("y did not take the landing chip")
 	}
 }
@@ -193,7 +193,7 @@ func chipFixture(t *testing.T, w, h int) *Shell {
 	_ = m.View()
 	out := reentry.Decide(reentry.Input{Stage: domain.StageImplement, Kind: domain.KindFeature, Intent: reentry.RequirementMissing, Note: "the persistence step was never in the spec"})
 	m.threadInput.SetValue("the persistence step was never in the spec")
-	m.reentryPending = &reentryReading{line: "the persistence step was never in the spec", out: out, goOnEnter: goOnEnter(out)}
+	m.setChip(&reentryReading{id: m.rows[0].F.ID, line: "the persistence step was never in the spec", out: out, goOnEnter: goOnEnter(out)})
 	return m
 }
 
@@ -215,6 +215,6 @@ func TestChipSpendGolden(t *testing.T) {
 	fwd, rerun, blocked, label := stopForward(m.nextInputFor(m.rows[0]))
 	out := reentry.Decide(reentry.Input{Stage: domain.StagePlan, Kind: domain.KindFeature, Intent: reentry.Proceed, Note: "looks right, go", Forward: fwd, Rerun: rerun, Blocked: blocked})
 	m.threadInput.SetValue("looks right, go")
-	m.reentryPending = &reentryReading{line: "looks right, go", out: out, forward: label, goOnEnter: goOnEnter(out)}
+	m.setChip(&reentryReading{id: m.rows[0].F.ID, line: "looks right, go", out: out, forward: label, goOnEnter: goOnEnter(out)})
 	golden.RequireEqual(t, []byte(m.View().Content))
 }

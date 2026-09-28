@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/exp/golden"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -495,6 +496,45 @@ func TestAutopilotDialogConfirmSubmitsAutopilot(t *testing.T) {
 	}
 	if msg, ok := cmd().(noticeMsg); !ok || !strings.Contains(msg.text, "nothing started") {
 		t.Fatalf("Cancel notice = %#v, want a noticeMsg saying nothing started", cmd())
+	}
+}
+
+// On a card already on autopilot the switch is labelled "stop autopilot"
+// (gateLabelWhy), and its confirm must stop it: the dialog used to submit
+// autopilot whatever the card's mode was, so the only way to take a card
+// back from the menu re-affirmed the mode it was leaving. The web's
+// answer to the same dialog, with no mode named, takes the same path.
+func TestAutopilotDialogOnAnAutopilotCardStopsIt(t *testing.T) {
+	var got string
+	f := domain.Feature{ID: "FD-001", GateApproval: domain.GateAutopilot}
+	d := newAutopilotDialog(f, autopilotPlan{bucket: "running", working: true}, "main", func(mode string) tea.Cmd {
+		got = mode
+		return nil
+	})
+	if done, _ := d.HandleKey(tea.KeyPressMsg{Text: "enter"}); !done {
+		t.Fatal("enter should close the dialog")
+	}
+	if got != domain.GateAttended {
+		t.Fatalf("stopping autopilot submitted %q, want %q", got, domain.GateAttended)
+	}
+	if view := ansi.Strip(d.View(theme.New(theme.GummiDark()), 100, 30)); !strings.Contains(view, "Stop autopilot") {
+		t.Errorf("the confirm does not say it stops autopilot:\n%s", view)
+	}
+
+	got = ""
+	d.webAnswer(nil, &webInput{autopilot: true})
+	if got != domain.GateAttended {
+		t.Fatalf("the web's unnamed answer submitted %q, want %q", got, domain.GateAttended)
+	}
+	// a request about something else never flips the switch on its way
+	got = "untouched"
+	if res := d.webAnswer(nil, &webInput{}); !res.dismiss || got != "untouched" {
+		t.Fatalf("a request not about autopilot answered its switch (dismiss=%v, submitted %q)", res.dismiss, got)
+	}
+	got = ""
+	d.webAnswer(nil, &webInput{mode: domain.GateAutopilot})
+	if got != domain.GateAutopilot {
+		t.Fatalf("a named mode submitted %q, want it honoured", got)
 	}
 }
 

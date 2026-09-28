@@ -16,6 +16,9 @@ import (
 type openDecisionsMsg struct {
 	decisions map[domain.FeatureID][]state.OpenDecision
 	err       error
+	// refresh marks a re-read after another process committed, as
+	// opposed to the startup read (refreshInboxFromDecisions).
+	refresh bool
 }
 
 // fetchOpenDecisions runs Store.OpenDecisions once, at startup: a database
@@ -25,6 +28,38 @@ type openDecisionsMsg struct {
 func (m *Shell) fetchOpenDecisions() tea.Msg {
 	open, err := m.store.OpenDecisions(context.Background())
 	return openDecisionsMsg{decisions: open, err: err}
+}
+
+// refetchOpenDecisions is the same read after another process committed
+// (a run beside the board that stopped at a gate, an answer given from
+// the CLI).
+func (m *Shell) refetchOpenDecisions() tea.Msg {
+	open, err := m.store.OpenDecisions(context.Background())
+	return openDecisionsMsg{decisions: open, err: err, refresh: true}
+}
+
+// refreshInboxFromDecisions brings the needs-you queue in line with the
+// record after another process wrote to it: a stop it raised is seeded
+// like one found at startup, and one it answered — a card with no open
+// decision left, that this board is not driving — leaves the queue. Only
+// the kinds the record holds are dropped: a failed session is this
+// board's own knowledge and has no row to be missing from.
+func (m *Shell) refreshInboxFromDecisions(open map[domain.FeatureID][]state.OpenDecision) {
+	m.seedInboxFromDecisions(open)
+	for _, it := range m.inbox.list() {
+		if _, still := open[it.Feature]; still {
+			continue
+		}
+		switch it.Kind {
+		case attnGate, attnQuestion, attnBudget:
+		default:
+			continue
+		}
+		if s := m.sessionFor(it.Feature); s != nil && s.Live() {
+			continue
+		}
+		m.inbox.remove(it.Feature)
+	}
 }
 
 // seedInboxFromDecisions seeds the needs-attention queue from the durable

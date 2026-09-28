@@ -1,0 +1,630 @@
+package ui
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/morphis/gummi/internal/decisions"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
+	"github.com/morphis/gummi/internal/threadfold"
+	"github.com/morphis/gummi/internal/webapi"
+)
+
+// The card page's head as the web face reads it (DESIGN §20.1): the one
+// decision the TUI's card page pins, with the answers its picker offers;
+// the card's menu; and what the composer would do with a line. Each is
+// read from the function the TUI draws the same thing with — openDecision,
+// stageActions and decisions.AskOptions, cardActionsFor,
+// classifyThreadLine — so the browser and the terminal cannot offer a
+// card different answers.
+//
+// What the TUI does not show is the render-fit check: visibleDecision
+// withholds a decision the terminal is too short to draw, and a page has
+// no such limit.
+
+// webOpenDecision is the pinned decision with what answering it needs:
+// the TUI decision behind it and each option id's place in it.
+type webOpenDecision struct {
+	api  webapi.Decision
+	d    *threadDecision
+	chip *reentryReading
+	// index maps an option id to its index in d's picker (an ask's
+	// option, or a workflow action).
+	index map[string]int
+	// rev says what the decision's revision is read from: "spec", the
+	// card's artifact; "branch", its branch head; "" the ref alone.
+	rev string
+}
+
+// Option ids that are not an index or an action id.
+const (
+	webOptionChat = "chat"
+	webOptionGo   = "go"
+	webOptionKeep = "keep"
+)
+
+// webOpenDecision is the decision the card page pins right now, or nil.
+// It must be called with the card entered (enterCard).
+func (m *Shell) webOpenDecision(r featureRow) *webOpenDecision {
+	d := m.openDecision(r)
+	if p := m.chip(r.F.ID); p != nil && (d == nil || d.ask == nil) {
+		return m.worded(m.webChipDecision(r, p), r)
+	}
+	if d == nil {
+		return nil
+	}
+	if d.ask != nil {
+		return m.worded(m.webAskDecision(r, d), r)
+	}
+	return m.worded(m.webWorkflowDecision(r, d), r)
+}
+
+// worded fills a decision's word and tone.
+func (m *Shell) worded(od *webOpenDecision, r featureRow) *webOpenDecision {
+	if od != nil {
+		od.api.Word, od.api.Tone = m.webDecisionWord(od.api.Kind, r)
+	}
+	return od
+}
+
+// webAskDecision is an open ask_user question: its options as the picker
+// offers them, the "Chat about this" row last.
+func (m *Shell) webAskDecision(r featureRow, d *threadDecision) *webOpenDecision {
+	ask := d.ask
+	id := ask.DecisionID
+	if id == "" {
+		id = ask.CallID
+	}
+	ref := "ask:" + id
+	anchor := webapi.AnchorSpec
+	if !cardHasArtifact(r) {
+		anchor = webapi.AnchorThread
+	}
+	od := &webOpenDecision{
+		d:     d,
+		index: map[string]int{},
+		api: webapi.Decision{
+			Ref: ref, Kind: webapi.DecisionAsk, Question: ask.Question, Anchor: anchor,
+			Against: webapi.Against{Token: ref, Label: "question " + webHash(id)},
+			Options: []webapi.Option{},
+			Multi:   ask.MultiPick,
+		},
+	}
+	for i, o := range decisions.AskOptions(ask) {
+		oid := strconv.Itoa(i)
+		if o.Chat {
+			oid = webOptionChat
+		}
+		od.index[oid] = i
+		od.api.Options = append(od.api.Options, webapi.Option{
+			ID: oid, Label: o.Label, Detail: o.Detail, Danger: o.Danger,
+			Chat: o.Chat, Words: o.Chat,
+		})
+	}
+	return od
+}
+
+// webWorkflowDecision is a stop's answer set: stageActions in the order
+// the picker shows it, the word-eating option marked and relabelled the
+// way the picker relabels it once a line is typed.
+func (m *Shell) webWorkflowDecision(r featureRow, d *threadDecision) *webOpenDecision {
+	in := m.nextInputFor(r)
+	kind, anchor, rev := webDecisionKind(d.kind, r)
+	ref := string(kind) + ":" + string(r.F.ID) + ":" + string(r.F.Stage)
+	od := &webOpenDecision{
+		d: d, index: map[string]int{}, rev: rev,
+		api: webapi.Decision{Ref: ref, Kind: kind, Question: d.question, Anchor: anchor, Options: []webapi.Option{}},
+	}
+	consumer := d.wordConsumer()
+	ids := make([]string, 0, len(d.actions))
+	for i, a := range d.actions {
+		oid := a.id
+		for n := 2; ; n++ {
+			if _, taken := od.index[oid]; !taken {
+				break
+			}
+			oid = a.id + "#" + strconv.Itoa(n)
+		}
+		od.index[oid] = i
+		ids = append(ids, oid)
+		opt := webapi.Option{ID: oid, Label: a.label, Detail: a.detail, Danger: a.danger}
+		if i == consumer {
+			opt.Words = true
+			opt.Relabel = a.label + " with your words"
+		}
+		// A send-back that lands on implement takes the card's open diff
+		// comments with it: every implement run folds them into its hints
+		// (engine newAgentSession), which is what "send it back" from a
+		// failed verify means.
+		if a.sendBack && in.openDiffComments > 0 &&
+			(in.stage == domain.StageVerify || in.stage == domain.StageImplement) {
+			opt.CarriesComments = true
+		}
+		od.api.Options = append(od.api.Options, opt)
+	}
+	// the options are part of what the answer was given against: a stop
+	// whose answers changed (a blocker cleared) is not the one the page
+	// showed
+	od.api.Against.Token = ref + "#" + webHash(strings.Join(ids, ","))
+	return od
+}
+
+// webDecisionWord is the word the page heads a decision with, and its
+// tone: the kind alone cannot say it — a verify decision is a landing on
+// a passed verify and a failure on a failed one, and an idle card whose
+// freeform turn is in flight is working, not idle.
+func (m *Shell) webDecisionWord(kind webapi.DecisionKind, r featureRow) (word, tone string) {
+	switch kind {
+	case webapi.DecisionGate:
+		return gateWord(r.F.Stage), ""
+	case webapi.DecisionAsk:
+		return "question", "info"
+	case webapi.DecisionVerify:
+		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() {
+			return "verify passed", "ok"
+		}
+		return "verify failed", "err"
+	case webapi.DecisionConflict:
+		return "conflict", "err"
+	case webapi.DecisionBudget:
+		return "envelope spent", "warn"
+	case webapi.DecisionConfirm:
+		return "confirm", "warn"
+	case webapi.DecisionFailure:
+		return "stage failed", "err"
+	case webapi.DecisionClosed:
+		return "closed", ""
+	}
+	if m.freeformTurnBusy(r) {
+		return "working", "info"
+	}
+	return "idle", ""
+}
+
+// webDecisionKind maps the picker's kind to the contract's, with the tab
+// the decision is about and what its revision is read from. A gate is
+// about the document its stage wrote — at implement that is the diff; a
+// stop's revision is what the stage it stops works on: the spec at the
+// design stage, the branch once there is code.
+func webDecisionKind(k decisionKind, r featureRow) (webapi.DecisionKind, webapi.Anchor, string) {
+	rev := ""
+	switch r.F.Stage {
+	case domain.StagePlan:
+		if cardHasArtifact(r) {
+			rev = "spec"
+		}
+	case domain.StageImplement, domain.StageVerify, domain.StageOpen:
+		rev = "branch"
+	}
+	switch k {
+	case decisionGate:
+		if r.F.Stage == domain.StageImplement || !cardHasArtifact(r) {
+			return webapi.DecisionGate, webapi.AnchorDiff, rev
+		}
+		return webapi.DecisionGate, webapi.AnchorSpec, rev
+	case decisionVerify:
+		return webapi.DecisionVerify, webapi.AnchorDiff, rev
+	case decisionBudget:
+		return webapi.DecisionBudget, webapi.AnchorThread, rev
+	case decisionFailure:
+		return webapi.DecisionFailure, webapi.AnchorThread, rev
+	case decisionClosed:
+		return webapi.DecisionClosed, webapi.AnchorThread, ""
+	}
+	return webapi.DecisionIdle, webapi.AnchorThread, rev
+}
+
+// webChipDecision is the re-entry's confirm chip as a decision: the
+// reading of a line the person sent, and the two answers the chip takes —
+// do it, or keep the line here as a message.
+func (m *Shell) webChipDecision(r featureRow, p *reentryReading) *webOpenDecision {
+	act := chipAct(r.F, r.baseBranch(), p)
+	ref := "confirm:" + string(r.F.ID) + ":" + webHash(p.line)
+	details := chipDetails(r, p)
+	return &webOpenDecision{
+		chip:  p,
+		index: map[string]int{webOptionGo: 0, webOptionKeep: 1},
+		api: webapi.Decision{
+			Ref: ref, Kind: webapi.DecisionConfirm,
+			Question: "I read that as " + readingNoun(p.out) + ".",
+			Anchor:   webapi.AnchorThread,
+			Against:  webapi.Against{Token: ref, Label: "your line"},
+			Options: []webapi.Option{
+				// a go that spends is never given on enter (chip.go's
+				// goOnEnter): the page marks it, and the answer asks first
+				{ID: webOptionGo, Label: "go", Detail: strings.TrimSpace(act + " " + strings.Join(details, " ")), Danger: !p.goOnEnter},
+				{ID: webOptionKeep, Label: "keep it here", Detail: "send the line as a message instead"},
+			},
+		},
+	}
+}
+
+func webHash(s string) string {
+	sum := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(sum[:])[:8]
+}
+
+// webCardState is WebCard plus what finishing it off the loop needs.
+type webCardState struct {
+	card webapi.Card
+	f    domain.Feature
+	rev  string
+}
+
+// webCard projects one card's head, decision, menu and composer. The
+// decision's revision and the count of decisions behind it are IO, so
+// they are left for Bridge.Card to fill off the loop.
+func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
+	r, ok := m.rowByID(id)
+	if !ok {
+		return webCardState{}, false
+	}
+	leave := m.enterCard(id, true)
+	defer leave()
+	titles := map[domain.FeatureID]string{}
+	if r.F.GoalID != "" {
+		if g, ok := m.rowByID(r.F.GoalID); ok {
+			titles[g.F.ID] = g.F.Title
+		}
+	}
+	st := webCardState{f: r.F, card: webapi.Card{
+		Row:      m.webRow(r, titles),
+		Branch:   r.F.BranchName(),
+		Base:     r.baseBranch(),
+		Adopted:  r.F.Adopted(),
+		OneLiner: r.F.OneLiner,
+	}}
+	if od := m.webOpenDecision(r); od != nil {
+		dec := od.api
+		st.card.Decision, st.rev = &dec, od.rev
+	}
+	st.card.Actions = m.webActions(r)
+	st.card.Composer = m.webComposer(r, "")
+	return st, true
+}
+
+// WebCard is one card's head as the loop knows it. ok is false for a
+// card the board does not have. Bridge.Card is the complete read.
+func (m *Shell) WebCard(id string) (webapi.Card, bool) {
+	st, ok := m.webCard(webID(id))
+	return st.card, ok
+}
+
+// Card is GET /api/cards/{id}: the head the loop projects, finished off
+// the loop with the decision's revision and how many decisions wait
+// behind it — both reads of the store and the repository that Update
+// must not make.
+func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
+	var (
+		st webCardState
+		ok bool
+		m  *Shell
+	)
+	if err := b.Do(ctx, func(s *Shell) tea.Cmd { st, ok = s.webCard(webID(id)); m = s; return nil }); err != nil {
+		return webapi.Card{}, err
+	}
+	if !ok {
+		return webapi.Card{}, refuse(WebNotFound, "no card "+id+" on this board")
+	}
+	c := st.card
+	if c.Decision != nil && st.rev != "" {
+		rev, label := m.webRevision(ctx, st.f, st.rev)
+		c.Decision.Against.Token += "@" + rev
+		c.Decision.Against.Label = label
+	} else if c.Decision != nil && c.Decision.Against.Label == "" {
+		c.Decision.Against.Label = "the card at " + c.Stage
+	}
+	c.DecisionsMore = m.webDecisionsMore(ctx, st.f.ID, c.Decision)
+	m.webActionDefaults(ctx, st.f, c.Actions)
+	return c, nil
+}
+
+// webLandingEmpty is what a landing entry says when no message has been
+// drafted for it yet.
+const webLandingEmpty = " — leave the message empty to use the drafted one"
+
+// webActionDefaults fills the inputs whose suggested value is a read of
+// the store or the repository, which the loop must not make: the landing
+// message the merge dialog would open on, and the dependencies the
+// dependency picker would open with ticked. Off the loop.
+func (m *Shell) webActionDefaults(ctx context.Context, f domain.Feature, acts []webapi.Action) {
+	for i := range acts {
+		a := &acts[i]
+		switch a.ID {
+		case "merge", "squash":
+			if msg := m.webLandingDraft(ctx, f); msg != "" {
+				// the draft is in the box, so there is nothing to leave empty
+				a.Default = msg
+				a.Detail = strings.TrimSuffix(a.Detail, webLandingEmpty)
+			}
+		case "deps":
+			if m.store == nil {
+				continue
+			}
+			deps, err := m.store.ListDependencies(ctx, f.ID)
+			if err != nil {
+				continue
+			}
+			ids := make([]string, 0, len(deps))
+			for _, d := range deps {
+				ids = append(ids, string(d))
+			}
+			a.Default = strings.Join(ids, ",")
+		}
+	}
+}
+
+// webLandingDraft is the message the landing dialog opens on without
+// drafting: a goal's merge message, or the landing message the verify
+// gate pre-drafted for the branch as it stands (engine.PendingCommitDraft,
+// the store half of engine.LandingMessage). "" when there is none, and
+// the dialog would draft at the keypress. Off the loop.
+func (m *Shell) webLandingDraft(ctx context.Context, f domain.Feature) string {
+	if m.engine == nil {
+		return ""
+	}
+	if f.IsGoal() {
+		return m.engine.GoalMergeMessage(ctx, f)
+	}
+	return m.engine.PendingCommitDraft(ctx, f)
+}
+
+// webRevision reads what a decision was raised on: the artifact's content
+// or the branch head. It does IO and runs off the loop; it touches only
+// the Shell's fixed wiring (store, pool, workspace).
+func (m *Shell) webRevision(ctx context.Context, f domain.Feature, rev string) (token, label string) {
+	switch rev {
+	case "spec":
+		path := m.artifactFile(&f)
+		if path == "" {
+			return "none", "no " + artifactNoun(f.Kind) + " yet"
+		}
+		b, err := os.ReadFile(path) //nolint:gosec // the card's own artifact
+		if err != nil {
+			return "unreadable", artifactNoun(f.Kind) + " unreadable"
+		}
+		rev := spec.Rev(b)
+		return rev, artifactNoun(f.Kind) + " " + rev[:7]
+	case "branch":
+		if m.wt == nil {
+			return "none", "no branch"
+		}
+		head, err := m.wt.Head(ctx, &f)
+		if err != nil || head == "" {
+			return "none", "no branch yet"
+		}
+		if len(head) > 7 {
+			head = head[:7]
+		}
+		return head, f.BranchName() + " at " + head
+	}
+	return "", ""
+}
+
+// webDecisionsMore counts the card's other open decisions: the durable
+// records (§10.18) that are not the one pinned. Off the loop.
+func (m *Shell) webDecisionsMore(ctx context.Context, id domain.FeatureID, shown *webapi.Decision) int {
+	if m.store == nil {
+		return 0
+	}
+	open, err := m.store.OpenDecisions(ctx)
+	if err != nil {
+		return 0
+	}
+	n, matched := 0, false
+	for _, d := range open[id] {
+		if d.Kind == state.DecisionKindIdle {
+			continue
+		}
+		n++
+		if shown != nil && !matched && d.Kind == string(shown.Kind) {
+			matched = true
+		}
+	}
+	if matched {
+		n--
+	}
+	return n
+}
+
+// webActionHidden are the menu entries the page does not list as actions:
+// the ones that only open a surface the page already shows (its tabs, its
+// thread) or a terminal the browser has no way to host.
+var webActionHidden = map[string]bool{
+	"spec": true, "diff": true, "attach": true, "inbox": true,
+	"ask": true, "goalpage": true, expandID: true,
+}
+
+// webActions is the card's menu: cardActionsFor plus the Shell-level
+// entries the TUI appends (the profile switch) and the repository picker
+// its o key opens, less what webActionHidden leaves out.
+func (m *Shell) webActions(r featureRow) []webapi.Action {
+	in := m.nextInputFor(r)
+	list := append(cardActionsFor(in, r), m.cardProfileActions()...)
+	if m.repoPickable(r) {
+		list = append(list, cardAction{id: "repo", key: "o", label: "repository", why: "choose the repository this card works in"})
+	}
+	out := make([]webapi.Action, 0, len(list))
+	for _, a := range list {
+		if webActionHidden[a.id] {
+			continue
+		}
+		// enter on a card already running, or blocked on a question, only
+		// opens what the page has open already
+		if a.id == "run" && (a.label == "watch" || in.hasAsk) {
+			continue
+		}
+		act := webapi.Action{ID: a.id, Label: strings.TrimSuffix(a.label, "…"), Key: a.key, Danger: a.danger, Detail: a.why}
+		m.webActionInput(r, &act)
+		out = append(out, act)
+	}
+	return out
+}
+
+// webActionInput says what an action's flow will ask for, so the page
+// collects it first: the dialog the TUI opens on the way, as a field.
+func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
+	switch a.ID {
+	case "merge", "squash":
+		// the drafted message, when there is one, is the input's default
+		// (Bridge.Card fills it off the loop)
+		a.Needs = webapi.ActionNeedsMessage
+		a.Detail += webLandingEmpty
+	case "changes", "newbug":
+		a.Needs = webapi.ActionNeedsMessage
+	case "envelope":
+		a.Needs = webapi.ActionNeedsNumber
+		a.Default = strconv.Itoa(r.F.Budget.Envelope)
+	case "profile":
+		a.Needs = webapi.ActionNeedsProfile
+		a.Default = r.F.Profile
+		if m.engine != nil {
+			for _, p := range m.engine.CardProfiles(r.F.Stage) {
+				backend, model := labelBackendModel(p.Backend, p.Model)
+				a.Choices = append(a.Choices, webapi.Choice{Value: p.Name, Label: p.Name, Detail: backend + " · " + model})
+			}
+		}
+	case "deps":
+		// the current dependencies are the default (Bridge.Card fills
+		// them off the loop); the choices are the board's other cards.
+		// The page's picker is the field itself, so it says what the
+		// choice means rather than which dialog it opens.
+		a.Needs = webapi.ActionNeedsCards
+		a.Detail = "choose the cards " + string(r.F.ID) + " waits for — it starts implementing once each of them is done"
+	case "prlink":
+		// the dialog's field: a URL or a number, or nothing, which finds
+		// the one open pull request for the card's branch
+		a.Needs = webapi.ActionNeedsText
+		a.Detail = "link " + string(r.F.ID) + " to a GitHub pull request by its URL or number — leave it empty to find the open one for " + r.F.BranchName()
+	case "repo":
+		a.Needs = webapi.ActionNeedsRepo
+		a.Default = r.F.Repo
+		for _, n := range m.repoNames {
+			a.Choices = append(a.Choices, webapi.Choice{Value: n, Label: n})
+		}
+	case "gate":
+		a.Default = autopilotSwitchTo(r.F.GateApproval)
+	case "delete", "clean", "duplicate", "handoff", "adopt", "prunlink", "goalstop":
+		a.Needs = webapi.ActionNeedsConfirm
+	}
+}
+
+// repoPickable mirrors boardVerb's o: a card whose repository can still
+// move — not a goal, no worktree yet, and somewhere else to move it to.
+func (m *Shell) repoPickable(r featureRow) bool {
+	return !r.F.IsGoal() && !r.HasWorktree && len(m.repoNames) > 0 && !r.watchOnly()
+}
+
+// webComposer says what the composer would do with text — an empty line
+// reads as prose, which is what the page is about to type.
+func (m *Shell) webComposer(r featureRow, text string) webapi.Composer {
+	line := strings.TrimSpace(text)
+	if line == "" {
+		line = "…"
+	}
+	c := m.classifyThreadLine(r, line, func() *threadDecision { return m.openDecision(r) })
+	route, says := m.webLineRoute(r, line, c)
+	return webapi.Composer{Route: route, Says: says}
+}
+
+// webLineRoute names a classified line's destination in the contract's
+// words, and says it the way the page shows it under the composer.
+func (m *Shell) webLineRoute(r featureRow, text string, c lineClass) (webapi.Route, string) {
+	switch c.route {
+	case lineConsult:
+		return webapi.RouteConsult, "asks " + string(r.F.ID) + "'s consult agent — " + r.watchDriver() + " is driving it, so this never steers"
+	case lineConducted:
+		return webapi.RouteBlocked, fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID)
+	case lineGoalNote:
+		return webapi.RouteGoalNote, "a note for the goal's lead — it reads it next turn"
+	case lineFreeformTurn:
+		return webapi.RouteFreeform, "a turn for this card's agent — it works on the branch"
+	case lineAskAnswer:
+		return webapi.RouteAnswer, "answers the question above, in your words"
+	case lineChat:
+		return m.webMessageRoute(r)
+	case lineChatReentry, lineChatIntent, lineReentry:
+		if sess := m.sessionFor(r.F.ID); sess != nil && sess.Live() {
+			return m.webMessageRoute(r)
+		}
+		if c.consumer >= 0 && c.d != nil {
+			return webapi.RouteAnswer, "goes with “" + c.d.actions[c.consumer].label + "” — read first, to place it"
+		}
+		// no answer takes words: the line is sent as a line and read, as
+		// the TUI's enter reads it — never given as the highlighted answer
+		return webapi.RouteRead, "is read first, to place it — a message if it is not a change"
+	}
+	parsed := parseInput(text)
+	switch parsed.Kind {
+	case verbMenu:
+		return webapi.RouteMenu, "opens the card's menu"
+	case verbCommand:
+		if parsed.Verb == "ask" {
+			return webapi.RouteConsult, "asks the card's consult agent — read-only, never steers"
+		}
+		if parsed.Remainder != "" && verbCarriesReason(parsed.Verb) {
+			return webapi.RouteVerb, "sends it back with your words"
+		}
+		if m.verbDegrades(r, parsed.Verb) {
+			return webapi.RouteMenu, "“" + parsed.Verb + "” is in the card's menu, not one of the answers above"
+		}
+		return webapi.RouteVerb, "runs " + parsed.Verb
+	}
+	return m.webMessageRoute(r)
+}
+
+// webMessageRoute is where sendThreadMessage delivers prose: the card's
+// own session when one is live, its consult session otherwise.
+func (m *Shell) webMessageRoute(r featureRow) (webapi.Route, string) {
+	if r.F.IsFreeform() {
+		return webapi.RouteFreeform, "a turn for this card's agent — it works on the branch"
+	}
+	if sess := m.sessionFor(r.F.ID); sess.Live() {
+		return webapi.RouteSteer, "goes to the " + string(r.F.Stage) + " agent as its next turn"
+	}
+	return webapi.RouteConsult, "asks the card's consult agent — read-only, never steers"
+}
+
+// answerTo finds the answer the log holds to the decision ref names — an
+// ask's by its decision id, a stop's by the crossing out of its stage — so
+// a stale answer can be told "someone answered it" only when someone did.
+// Off the loop.
+func (m *Shell) answerTo(ctx context.Context, id domain.FeatureID, ref string) (by, receipt string, ok bool) {
+	if m.store == nil {
+		return "", "", false
+	}
+	parts := strings.SplitN(ref, ":", 3)
+	evs, err := m.store.Events(ctx, id)
+	if err != nil || len(parts) < 2 {
+		return "", "", false
+	}
+	for i := len(evs) - 1; i >= 0; i-- {
+		ev := evs[i]
+		switch {
+		case parts[0] == "ask" && ev.Kind == state.EventAsk:
+			var p state.AskPayload
+			if jsonInto(ev.Payload, &p) && p.Answer != "" && p.ID != "" && p.ID == strings.TrimPrefix(ref, "ask:") {
+				return threadfold.AskAnswerer(p), threadfold.AskLine(p), true
+			}
+		case parts[0] != "ask" && len(parts) == 3 && ev.Kind == state.EventGate:
+			var p state.GatePayload
+			if jsonInto(ev.Payload, &p) && p.From == parts[2] {
+				return threadfold.GateCrosser(p), threadfold.GateLine(p), true
+			}
+		}
+	}
+	return "", "", false
+}
+
+// jsonInto decodes a payload, reporting whether it could.
+func jsonInto(payload string, v any) bool { return json.Unmarshal([]byte(payload), v) == nil }

@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/fleetrun"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 // The stats tab: where the whole workspace's credits and hours went.
@@ -116,6 +117,7 @@ func (m *Shell) measureWsStats() tea.Cmd {
 	}
 	store := m.store
 	rows := append([]featureRow(nil), m.rows...)
+	busy := m.boardBusy()
 	v := m.wsstats
 	now := m.now()
 	from := time.Time{}
@@ -124,7 +126,7 @@ func (m *Shell) measureWsStats() tea.Cmd {
 	}
 	return func() tea.Msg {
 		ctx := context.Background()
-		rep, err := buildWsReport(ctx, store, rows, from, now)
+		rep, err := buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, busy)
 		if err != nil {
 			return wsStatsLoadedMsg{err: err}
 		}
@@ -136,15 +138,18 @@ func (m *Shell) measureWsStats() tea.Cmd {
 // (the fold does its own windowing) and every row's counters for the
 // all-time ledger. Every read degrades to being skipped rather than
 // failing the page: a reader asking how the workspace ran must still
-// get the part of the answer that is readable.
+// get the part of the answer that is readable. It reads running off the
+// record (fleetrun.Input.Busy nil) — its reader wants money, not lanes.
 func buildWsReport(ctx context.Context, store *state.Store, rows []featureRow, from, now time.Time) (*fleetrun.Report, error) {
-	return buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now)
+	return buildFleetReport(ctx, store, rows, fleetrun.Window{From: from, To: now}, now, nil)
 }
 
 // buildFleetReport is buildWsReport over any window, not only one ending
 // now — the web face's fleet route asks for arbitrary ones. now is still
-// the clock an open session is counted to.
-func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, w fleetrun.Window, now time.Time) (*fleetrun.Report, error) {
+// the clock an open session is counted to, and busy the board's own
+// reading of which cards are running (boardBusy), nil to read it off the
+// record.
+func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow, w fleetrun.Window, now time.Time, busy map[domain.FeatureID]bool) (*fleetrun.Report, error) {
 	from := w.From
 	evs, err := store.WorkspaceEvents(ctx, from)
 	if err != nil {
@@ -153,6 +158,26 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 	active := map[domain.FeatureID]bool{}
 	for _, ev := range evs {
 		active[ev.Feature] = true
+	}
+	// A card can spend in the window without logging an event there: a
+	// freeform card logs none at all (DESIGN §19.3a), and a goal's lead
+	// or a one-shot books spend beside no stage session. The fold charges
+	// that spend by its row's last sample, or the card's creation for a
+	// counter no row holds (cardrun.Charge), so a card whose row or
+	// creation falls in the window is in it too — without that, the lane
+	// could not add up to the card, and a freeform card had no lane.
+	for i := range rows {
+		r := &rows[i]
+		if busy[r.F.ID] || (r.F.Spend.Credits > 0 && !r.F.CreatedAt.Before(from)) {
+			active[r.F.ID] = true
+			continue
+		}
+		for _, sp := range r.StageSpend {
+			if !sp.UpdatedAt.Before(from) {
+				active[r.F.ID] = true
+				break
+			}
+		}
 	}
 	var cards []fleetrun.Card
 	for i := range rows {
@@ -181,8 +206,24 @@ func buildFleetReport(ctx context.Context, store *state.Store, rows []featureRow
 		r := rows[i]
 		all = append(all, fleetrun.AllTimeRow{Feature: r.F, Landed: r.Landed, StageSpend: r.StageSpend})
 	}
-	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: w, Cards: cards, Rows: all})
+	rep := fleetrun.Fold(fleetrun.Input{Now: now, Window: w, Cards: cards, Rows: all, Busy: busy})
 	return &rep, nil
+}
+
+// boardBusy is the board's own set of running cards: every row whose web
+// status is running — the rows the board header's running pill counts
+// (webapi.BoardCounts.Running). The stats headline reads its "running"
+// from this rather than from the record, so the two figures a person
+// sees for the same moment are one count. The map is never nil, so the
+// fold always takes the board's word over the record's.
+func (m *Shell) boardBusy() map[domain.FeatureID]bool {
+	out := map[domain.FeatureID]bool{}
+	for _, r := range m.rows {
+		if m.webRow(r, nil).Status == webapi.StatusRunning {
+			out[r.F.ID] = true
+		}
+	}
+	return out
 }
 
 func (m *Shell) wsStatsLoaded(msg wsStatsLoadedMsg) tea.Cmd {
@@ -828,16 +869,18 @@ func (m *Shell) wsLegend(rep *fleetrun.Report, flags wsLegendFlags, width int) s
 }
 
 // wsMoneyLines is where the credits went, two columns of the same
-// shape: the window's passes on the left, the workspace's own counters
-// on the right. The columns never try to agree — one is attributed to a
-// window by a stated rule, the other needs no rule at all (fleetrun's
-// doc owns both sentences).
+// shape: what the window's cards spent in it on the left, the
+// workspace's own counters on the right. One is attributed to a window
+// by a stated rule, the other needs no rule at all (fleetrun's doc owns
+// both sentences) — and a window that holds every card's whole life
+// comes to the right column's total, because the rule charges every
+// credit somewhere.
 func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 	s := m.styles
 	if rep.Credits == 0 && rep.AllTime.Credits == 0 && rep.Tokens.Zero() && rep.AllTime.Tokens.Zero() {
 		return nil
 	}
-	out := wsHeading(s, "WHERE IT WENT", wsWindowName(rep.Window)+" · passes started in the window")
+	out := wsHeading(s, "WHERE IT WENT", wsWindowName(rep.Window)+" · spent in the window")
 	clip := func(line string) string { return ansi.Truncate(line, max(w-1, 10), "…") }
 	left := wsBucketLines(s, rep.ByStage, rep.Credits)
 	right := wsBucketLines(s, rep.AllTime.ByStage, rep.AllTime.Credits)
@@ -893,9 +936,8 @@ func (m *Shell) wsMoneyLines(rep *fleetrun.Report, w int) []string {
 // truncated first.
 //
 // The rows are labelled "window" and "all-time" for the reason the
-// columns above are: the two figures are attributed differently on
-// purpose (fleetrun's doc owns both rules), so a reader who finds them
-// disagreeing is reading two answers to two questions, not one error.
+// columns above are: the two figures answer two questions (fleetrun's
+// doc owns both rules), and differ only by what the window leaves out.
 func (m *Shell) wsTotalLines(rep *fleetrun.Report, w int) []string {
 	s := m.styles
 	// The figure sits in the bucket rows' own credits column — a total

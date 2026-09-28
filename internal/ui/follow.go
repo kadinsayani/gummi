@@ -229,6 +229,9 @@ type foreignTickMsg struct{}
 // by another process.
 type foreignMsg struct {
 	drives map[domain.FeatureID]state.ForeignDrive
+	// storeVersion is the store's data_version at the probe (0 when it
+	// could not be read): a change means another process committed.
+	storeVersion int64
 	// reload asks for a full row reload alongside applying the probe —
 	// the other process has been writing to the store, and the board's
 	// derived state (stage, spend, worktree) is behind.
@@ -251,7 +254,11 @@ func (m *Shell) probeForeign() tea.Msg {
 	}
 	m.foreignTicks++
 	reload := len(drives) > 0 && m.foreignTicks%foreignReloadEvery == 0
-	return foreignMsg{drives: drives, reload: reload}
+	var version int64
+	if m.store != nil {
+		version, _ = m.store.DataVersion(context.Background())
+	}
+	return foreignMsg{drives: drives, reload: reload, storeVersion: version}
 }
 
 // applyForeign updates the rows' driven-elsewhere state in place. It

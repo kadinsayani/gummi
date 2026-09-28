@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 )
 
@@ -34,6 +35,14 @@ type Span struct {
 // recorded at or before its own question is a clock skew, not a
 // negative wait, and the span is dropped rather than inverted.
 //
+// OpenDecisions' other half holds here too: a decision whose stage the
+// card has left is dead, not waiting — nothing can answer it any more
+// (DESIGN §6.3's reopen path re-arms a question only into its own
+// stage). An unanswered decision therefore ends at the first later
+// record of the card anywhere else: an event filed under another stage,
+// or the gate crossing that carried it out. Only a decision whose stage
+// the card still sits at is open to the right edge.
+//
 // The spans are unioned rather than left as written because two
 // decisions can stand open together — an ask raised while a gate waits
 // — and a card cannot wait on two people for twice the time.
@@ -50,6 +59,17 @@ func DecisionSpans(evs []state.CardEvent) []Span {
 // agent, and the time falls to the person instead. A gate standing open
 // while a session runs is not like that: the session is really working,
 // and that time stays the agent's.
+//
+// A question blocks the pass that asked it and no other. One left
+// unanswered — the session was stopped mid-question, or the card was
+// moved on by hand — ends with that pass: at its stage_exit, or at the
+// next stage_enter where the log never wrote one (a card runs one stage
+// session at a time, the rule cardrun's pass list closes an unexited
+// pass by). Read the other way, a question nobody answered went on
+// subtracting from every later pass on the card, and a morning's
+// implementation read as time on you. A question the record shows
+// answered still runs to its answer, wherever that lands: a session
+// restored with its question re-armed is blocked on it until then.
 func AskSpans(evs []state.CardEvent) []Span {
 	return decisionSpans(evs, true)
 }
@@ -61,14 +81,38 @@ func WorkingTime(from, to time.Time, asks []Span) time.Duration {
 	if !to.After(from) {
 		return 0
 	}
-	d := to.Sub(from)
-	for _, sp := range clampSpans(asks, from, to) {
-		d -= sp.To.Sub(sp.From)
-	}
+	// unioned, so two questions standing together are not subtracted
+	// twice — AskSpans already unions its own, a caller's may not be
+	d := to.Sub(from) - unionDuration(clampSpans(asks, from, to))
 	if d < 0 {
 		return 0
 	}
 	return d
+}
+
+// WorkingSpans is WorkingTime at drawing grain: the interval [from,to)
+// less every ask span, as the stretches that remain. The workspace fold
+// reads concurrency and its busiest stretch off these rather than off
+// the session blocks, so a lane blocked on a question neither counts as
+// running at once with another nor makes an hour busy.
+func WorkingSpans(from, to time.Time, asks []Span) []Span {
+	if !to.After(from) {
+		return nil
+	}
+	var out []Span
+	cur := from
+	for _, sp := range unionSpans(clampSpans(asks, from, to)) {
+		if sp.From.After(cur) {
+			out = append(out, Span{From: cur, To: sp.From})
+		}
+		if sp.To.After(cur) {
+			cur = sp.To
+		}
+	}
+	if to.After(cur) {
+		out = append(out, Span{From: cur, To: to})
+	}
+	return out
 }
 
 func decisionSpans(evs []state.CardEvent, asksOnly bool) []Span {
@@ -87,7 +131,7 @@ func decisionSpans(evs []state.CardEvent, asksOnly bool) []Span {
 	}
 
 	var spans []Span
-	for _, ev := range evs {
+	for i, ev := range evs {
 		if ev.Kind != state.EventDecisionOpen {
 			continue
 		}
@@ -95,19 +139,50 @@ func decisionSpans(evs []state.CardEvent, asksOnly bool) []Span {
 		if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.ID == "" {
 			continue
 		}
-		if asksOnly && p.Kind != state.DecisionKindAsk {
+		ask := p.Kind == state.DecisionKindAsk
+		if asksOnly && !ask {
 			continue
 		}
 		var to time.Time
 		if at, ok := answeredAt[p.ID]; ok {
-			if !at.After(ev.At) {
-				continue
-			}
 			to = at
+		} else if end, ok := abandonedAt(evs, i, asksOnly); ok {
+			to = end
+		}
+		if !to.IsZero() && !to.After(ev.At) {
+			continue
 		}
 		spans = append(spans, Span{From: ev.At, To: to})
 	}
 	return unionSpans(spans)
+}
+
+// abandonedAt is when the unanswered decision opened at evs[i] stopped
+// being answerable: the first later event the card left its stage by
+// (an event filed under another stage, or a gate crossing out of it) —
+// and, for a question's hold on its own pass (passEnd), the end of the
+// pass it was asked in, whichever comes first. False while nothing on
+// the record has ended it.
+func abandonedAt(evs []state.CardEvent, i int, passEnd bool) (time.Time, bool) {
+	stage := evs[i].Stage
+	for _, ev := range evs[i+1:] {
+		if passEnd && (ev.Kind == state.EventStageExit || ev.Kind == state.EventStageEnter) {
+			return ev.At, true
+		}
+		if stage == "" {
+			continue
+		}
+		if ev.Stage != "" && ev.Stage != stage {
+			return ev.At, true
+		}
+		if ev.Kind == state.EventGate {
+			var g state.GatePayload
+			if json.Unmarshal([]byte(ev.Payload), &g) == nil && g.To != "" && domain.Stage(g.To) != stage {
+				return ev.At, true
+			}
+		}
+	}
+	return time.Time{}, false
 }
 
 // WaitSpans is DecisionSpans at drawing grain: the decision spans

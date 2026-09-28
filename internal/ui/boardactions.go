@@ -309,6 +309,7 @@ func (m *Shell) confirmDuplicate() tea.Cmd {
 	}
 	f := r.F
 	m.Overlay.Push(&confirmDialog{
+		card:         f.ID,
 		id:           "confirm-duplicate",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Duplicate",

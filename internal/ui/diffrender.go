@@ -198,6 +198,7 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) stri
 // hints (see newAgentSession), so either way the implementer addresses
 // each comment. Blocks with a notice when there is nothing open to send.
 func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
+	actor := m.humanActor()
 	if m.engine == nil {
 		m.notice = noticeMsg{text: "no agent configured", isErr: true}
 		return nil
@@ -280,7 +281,7 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 		}
 		// transition first (it validates the edge); only then drop the
 		// stale session, so a rejected bounce is never destructive.
-		nf, err := m.store.Transition(ctx, f.ID, workStage, "user")
+		nf, err := m.store.Transition(ctx, f.ID, workStage, actor)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

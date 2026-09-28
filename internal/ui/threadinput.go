@@ -12,6 +12,9 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/reentry"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -498,29 +501,74 @@ func (m *Shell) handleThreadPaste(msg tea.PasteMsg) tea.Cmd {
 // reaching fireVerb/engine.Send against a lock this process does not
 // hold.
 func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
+	return m.routeThreadLine(r, text, func() *threadDecision { return m.visibleDecision(r) })
+}
+
+// lineRoute is where a composer line goes. classifyThreadLine decides it
+// without sending anything, so the one set of rules serves both enter
+// (routeThreadLine) and the web composer's "what would this line do"
+// (WebComposer), which asks while the line is still being typed.
+type lineRoute int
+
+const (
+	// lineConsult: a card another process drives — consult, verbatim.
+	lineConsult lineRoute = iota
+	// lineConducted: a card its goal's lead conducts takes no line here.
+	lineConducted
+	// lineGoalNote: prose into a running goal is a note for its lead.
+	lineGoalNote
+	// lineFreeformTurn: prose on a freeform card is a turn.
+	lineFreeformTurn
+	// lineAskAnswer: prose (or the armed channel) at an open ask is its
+	// answer.
+	lineAskAnswer
+	// lineChat: a conversation in progress stays one.
+	lineChat
+	// lineChatReentry: the conversation's leading word asks for a send-back.
+	lineChatReentry
+	// lineChatIntent: the conversation's leading word is itself the reading.
+	lineChatIntent
+	// lineReentry: prose at a stop is read, then routed.
+	lineReentry
+	// lineInput: no decision claims the line — verbs, or a message.
+	lineInput
+)
+
+// lineClass is a classified line: its route, the decision that claimed
+// it, and what the route needs to carry it out.
+type lineClass struct {
+	route lineRoute
+	d     *threadDecision
+	// consumer is the decision's word-eating option, -1 when none;
+	// fallback is its id — the route a send-back declares for itself.
+	consumer int
+	fallback string
+	// intent and rest are a conversation's leading word, read.
+	intent reentry.Intent
+	rest   string
+}
+
+// classifyThreadLine decides where a line goes, reading the model and
+// changing nothing. decide yields the decision the line meets; it is only
+// asked once the card is one whose decisions can take a line at all, the
+// order the routing has always asked in.
+func (m *Shell) classifyThreadLine(r featureRow, text string, decide func() *threadDecision) lineClass {
 	if r.DrivenAbroad {
-		return m.sendConsultMessage(r.F, text)
+		return lineClass{route: lineConsult, consumer: -1}
 	}
 	// A card its goal's lead conducts takes no line here. Not a turn (the
 	// lead is mid-turn on this very card and the backend would refuse the
 	// second one), not an answer (goalAnswerAsk is already answering),
 	// and not a consult session either — that would spend the goal's
-	// budget on a conversation the conductor never sees. The line is
-	// kept, not discarded: it stays in the composer so it can be retyped
-	// where it lands, which is the goal's own thread.
+	// budget on a conversation the conductor never sees.
 	if r.conducted() {
-		m.notice = noticeMsg{
-			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID),
-			isErr: true,
-			id:    r.F.ID,
-		}
-		return nil
+		return lineClass{route: lineConducted, consumer: -1}
 	}
+	prose := parseInput(text).Kind == verbNone
 	// a line typed into a running goal is a note for its lead: the goal
 	// has no stage agent to talk to, and the lead reads notes next turn
-	if r.F.IsGoal() && r.F.Stage == domain.StageImplement && m.engine != nil && parseInput(text).Kind == verbNone {
-		m.threadInput.Reset()
-		return m.goalNote(r.F, text)
+	if r.F.IsGoal() && r.F.Stage == domain.StageImplement && m.engine != nil && prose {
+		return lineClass{route: lineGoalNote, consumer: -1}
 	}
 	// EVERY PROSE LINE ON A FREEFORM CARD IS A TURN. It must not reach the
 	// decision reader below, and the reason is not only that the answer is
@@ -534,60 +582,110 @@ func (m *Shell) submitThreadLine(r featureRow, text string) tea.Cmd {
 	//
 	// A verb still keeps the parser: "/land" on a freeform card means what
 	// it says, and the branches below own it.
-	if r.F.IsFreeform() && parseInput(text).Kind == verbNone {
-		return m.sendThreadMessage(r.F, text)
+	if r.F.IsFreeform() && prose {
+		return lineClass{route: lineFreeformTurn, consumer: -1}
 	}
-	if d := m.visibleDecision(r); d != nil {
-		m.syncDecision(d)
-		if m.threadFreeForm && d.ask != nil {
-			return m.answerAskWith(r, text)
-		}
-		if parseInput(text).Kind == verbNone {
-			if d.ask != nil {
-				// EVERY PROSE LINE AT AN OPEN ASK IS THE ANSWER. A
-				// structured ask used to "keep its terms" and route prose
-				// as a turn instead — which is the one thing that cannot
-				// work here: the ask is blocking the agent's turn from
-				// inside a client tool, so the backend refuses the second
-				// turn, and the line was lost after being echoed into the
-				// transcript as if it had been delivered. Engine.Answer takes arbitrary text and
-				// hands it back as the tool's result, so the model reads
-				// the sentence the person actually wrote.
-				return m.answerAskWith(r, text)
-			}
-			// EVERY PROSE LINE AT A STOP IS READ. Not only one aimed at
-			// "send it back": the row the highlight happened to sit on
-			// used to take the line — a bug report typed above "run
-			// verify" became that run's kickoff note — and the reader
-			// never picked that row. The read decides what the line
-			// means; the fallback, for a card with no reader, is still
-			// the highlighted word-consumer, which is what it always was.
-			fallback := ""
-			if i := d.wordConsumer(); i >= 0 {
-				m.decisionCursor = i
-				fallback = d.actions[i].id
-			}
-			// A conversation in progress stays one (chat.go): no read,
-			// unless the line leads with a vocabulary word asking for a
-			// move — then the word is the reading and the rest is read.
-			if m.inChat(r.F.ID) {
-				intent, rest, exit := chatExit(text)
-				switch {
-				case !exit:
-					return m.sendThreadMessage(r.F, text)
-				case intent == "":
-					return m.routeReentry(r, fallback, rest)
-				default:
-					note := rest
-					if note == "" {
-						note = text
-					}
-					return m.applyReentry(reentryClassifiedMsg{f: r.F, note: note, fallback: fallback, intent: intent})
-				}
-			}
-			return m.routeReentry(r, fallback, text)
-		}
+	d := decide()
+	if d == nil {
+		return lineClass{route: lineInput, consumer: -1}
+	}
+	// routeThreadLine syncs the decision before routing, and a decision
+	// the composer has not been looking at drops the channel armed for
+	// the last one and the conversation held against it (syncDecision).
+	fresh := d.key != m.decisionKey
+	c := lineClass{d: d, consumer: -1}
+	if m.threadFreeForm && !fresh && d.ask != nil {
+		c.route = lineAskAnswer
+		return c
+	}
+	if !prose {
 		// a command keeps the parser, always.
+		c.route = lineInput
+		return c
+	}
+	if d.ask != nil {
+		// EVERY PROSE LINE AT AN OPEN ASK IS THE ANSWER. A structured ask
+		// used to "keep its terms" and route prose as a turn instead —
+		// which is the one thing that cannot work here: the ask is
+		// blocking the agent's turn from inside a client tool, so the
+		// backend refuses the second turn, and the line was lost after
+		// being echoed into the transcript as if it had been delivered.
+		// Engine.Answer takes arbitrary text and hands it back as the
+		// tool's result, so the model reads the sentence the person
+		// actually wrote.
+		c.route = lineAskAnswer
+		return c
+	}
+	// EVERY PROSE LINE AT A STOP IS READ. Not only one aimed at "send it
+	// back": the row the highlight happened to sit on used to take the
+	// line — a bug report typed above "run verify" became that run's
+	// kickoff note — and the reader never picked that row. The read
+	// decides what the line means; the fallback, for a card with no
+	// reader, is still the highlighted word-consumer, which is what it
+	// always was.
+	if i := d.wordConsumer(); i >= 0 {
+		c.consumer, c.fallback = i, d.actions[i].id
+	}
+	// A conversation in progress stays one (chat.go): no read, unless the
+	// line leads with a vocabulary word asking for a move — then the word
+	// is the reading and the rest is read.
+	if m.inChat(r.F.ID) && !fresh {
+		intent, rest, exit := chatExit(text)
+		c.intent, c.rest = intent, rest
+		switch {
+		case !exit:
+			c.route = lineChat
+		case intent == "":
+			c.route = lineChatReentry
+		default:
+			c.route = lineChatIntent
+		}
+		return c
+	}
+	c.route = lineReentry
+	return c
+}
+
+// routeThreadLine carries a line where classifyThreadLine sends it.
+func (m *Shell) routeThreadLine(r featureRow, text string, decide func() *threadDecision) tea.Cmd {
+	c := m.classifyThreadLine(r, text, decide)
+	if c.d != nil {
+		m.syncDecision(c.d)
+		if c.consumer >= 0 && c.route >= lineChat && c.route <= lineReentry {
+			m.decisionCursor = c.consumer
+		}
+	}
+	switch c.route {
+	case lineConsult:
+		return m.sendConsultMessage(r.F, text)
+	case lineConducted:
+		// The line is kept, not discarded: it stays in the composer so it
+		// can be retyped where it lands, which is the goal's own thread.
+		m.notice = noticeMsg{
+			text:  fmt.Sprintf("%s is conducted by %s — send the line to %s and its lead reads it next turn", r.F.ID, goalDriver(r.F.GoalID), r.F.GoalID),
+			isErr: true,
+			id:    r.F.ID,
+		}
+		return nil
+	case lineGoalNote:
+		m.threadInput.Reset()
+		return m.goalNote(r.F, text)
+	case lineFreeformTurn:
+		return m.sendThreadMessage(r.F, text)
+	case lineAskAnswer:
+		return m.answerAskWith(r, text)
+	case lineChat:
+		return m.sendThreadMessage(r.F, text)
+	case lineChatReentry:
+		return m.routeReentry(r, c.fallback, c.rest)
+	case lineChatIntent:
+		note := c.rest
+		if note == "" {
+			note = text
+		}
+		return m.applyReentry(reentryClassifiedMsg{f: r.F, note: note, fallback: c.fallback, intent: c.intent})
+	case lineReentry:
+		return m.routeReentry(r, c.fallback, text)
 	}
 	return m.submitThreadInput(r)
 }
@@ -947,11 +1045,12 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 	m.threadInput.Reset()
 	eng := m.engine
 	id := f.ID
+	ctx := engine.WithActor(context.Background(), m.lineActor())
 	return func() tea.Msg {
 		if eng.Get(id) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
-		if err := eng.Send(context.Background(), id, text); err != nil {
+		if err := eng.Send(ctx, id, text); err != nil {
 			if errors.Is(err, agent.ErrBusy) {
 				return noticeMsg{
 					text:    string(id) + ": the agent is still mid-turn — your line is back in the composer, send it when the turn ends",
@@ -990,12 +1089,13 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 	m.consultSending[f.ID] = text
 	eng := m.engine
 	id := f.ID
+	who := engine.WithActor(context.Background(), m.lineActor())
 	return func() tea.Msg {
 		c, err := eng.OpenConsult(context.Background(), f)
 		if err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
-		if err := c.Send(context.Background(), text); err != nil {
+		if err := c.Send(who, text); err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
 		return consultSentMsg{id: id}
@@ -1024,12 +1124,13 @@ func (m *Shell) sendFreeformTurn(f domain.Feature, text string) tea.Cmd {
 	m.consultSending[f.ID] = text
 	eng := m.engine
 	id := f.ID
+	who := engine.WithActor(context.Background(), m.lineActor())
 	return func() tea.Msg {
 		ff, err := eng.OpenFreeform(context.Background(), f)
 		if err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
-		if err := ff.Send(context.Background(), text); err != nil {
+		if err := ff.Send(who, text); err != nil {
 			return consultSentMsg{id: id, err: err}
 		}
 		return consultSentMsg{id: id}
@@ -1145,7 +1246,7 @@ func (m *Shell) threadInputBindings() []binding {
 		})
 	}
 	if r, ok := m.selected(); ok {
-		if p := m.reentryPending; p != nil {
+		if p := m.chip(r.F.ID); p != nil {
 			return m.chipBindings(p)
 		}
 		if p := m.reentryRead; p != nil && p.id == r.F.ID {
@@ -1299,4 +1400,14 @@ func (m *Shell) threadOutputsBinding() binding {
 		label, help = "fold", "fold the captured tool outputs back"
 	}
 	return binding{key: "alt+o", label: label, help: help, bar: true}
+}
+
+// lineActor is who a composer line is from, for its author on the
+// transcript: the web person an intent acts for, and nobody in particular
+// (the terminal's own "you") otherwise.
+func (m *Shell) lineActor() string {
+	if a := m.humanActor(); a != state.ActorUser {
+		return a
+	}
+	return ""
 }

@@ -59,6 +59,7 @@ func (m *Shell) openAdopt(r featureRow) tea.Cmd {
 	}
 	f, back := r.F, adoptBackStage(edges)
 	m.Overlay.Push(&confirmDialog{
+		card:         f.ID,
 		id:           "confirm-adopt",
 		cancelLabel:  "Leave it",
 		confirmLabel: "Adopt",
@@ -72,8 +73,9 @@ func (m *Shell) openAdopt(r featureRow) tea.Cmd {
 // adoptCard performs the adoption under the card's lock, the same way
 // every other verb that touches a branch does.
 func (m *Shell) adoptCard(f domain.Feature) tea.Cmd {
+	actor := m.humanActor()
 	return m.cardLocked(f.ID, func() tea.Msg {
-		got, err := m.engine.Adopt(context.Background(), f.ID, "user")
+		got, err := m.engine.Adopt(context.Background(), f.ID, actor)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}

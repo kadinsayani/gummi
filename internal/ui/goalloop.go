@@ -346,7 +346,7 @@ func (m *Shell) goalReady(id domain.FeatureID) tea.Cmd {
 // answering "it needs 600 more credits" with arithmetic, a dialog and a
 // second verb, on a card page that had not said what the number was.
 func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudget) tea.Cmd {
-	eng, store := m.engine, m.store
+	eng, store, actor := m.engine, m.store, m.humanActor()
 	m.inbox.remove(f.ID)
 	return func() tea.Msg {
 		ctx := context.Background()
@@ -362,7 +362,7 @@ func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudg
 		if err := eng.RaiseGoalBudget(ctx, f.ID, to); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		if err := eng.SendBackGoal(ctx, f.ID, "", "user"); err != nil {
+		if err := eng.SendBackGoal(ctx, f.ID, "", actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s topped up to %d credits — %s carries on", f.ID, to, need.Card),
@@ -443,12 +443,19 @@ func (m *Shell) goalVerifyOutcome(id domain.FeatureID, out gatepolicy.Outcome) t
 // catch-up, a fresh run of its checks when that brought anything in, and
 // one merge commit over its cards' commits.
 func (m *Shell) landGoal(f domain.Feature, message string) tea.Cmd {
+	return m.landGoalAs(f, message, m.humanActor())
+}
+
+// landGoalAs is landGoal recorded as by — for a caller that already knows
+// who is landing and runs off the Update goroutine, where humanActor must
+// not be read.
+func (m *Shell) landGoalAs(f domain.Feature, message, by string) tea.Cmd {
 	eng := m.engine
 	return m.cardLocked(f.ID, func() tea.Msg {
 		if eng == nil {
 			return noticeMsg{text: "no engine to land the goal with", isErr: true}
 		}
-		sha, err := eng.LandGoal(context.Background(), f.ID, message, "user")
+		sha, err := eng.LandGoal(context.Background(), f.ID, message, by)
 		if err != nil {
 			return noticeMsg{text: sanitize(string(f.ID) + ": " + err.Error()), isErr: true, reload: true}
 		}
@@ -478,12 +485,12 @@ func shortHash(sha string) string {
 // sendBackGoal returns a goal to its cards with your line as notes for its
 // lead.
 func (m *Shell) sendBackGoal(f domain.Feature, note string) tea.Cmd {
-	eng := m.engine
+	eng, actor := m.engine, m.humanActor()
 	return func() tea.Msg {
 		if eng == nil {
 			return noticeMsg{text: "no engine to send the goal back with", isErr: true}
 		}
-		if err := eng.SendBackGoal(context.Background(), f.ID, note, "user"); err != nil {
+		if err := eng.SendBackGoal(context.Background(), f.ID, note, actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		text := string(f.ID) + " sent back to its cards"
@@ -511,7 +518,8 @@ func (m *Shell) goalNote(f domain.Feature, note string) tea.Cmd {
 // confirmStopGoal asks before telling a goal to finish now.
 func (m *Shell) confirmStopGoal(f domain.Feature) tea.Cmd {
 	m.Overlay.Push(&confirmDialog{
-		id: "confirm-stop-goal", question: "Stop " + string(f.ID) + "?", confirmLabel: "Stop",
+		card: f.ID,
+		id:   "confirm-stop-goal", question: "Stop " + string(f.ID) + "?", confirmLabel: "Stop",
 		detail:    "Nothing new starts. Verified cards land on the goal branch, the rest are dropped, and the goal comes back to you partial.",
 		onConfirm: func() tea.Cmd { return m.stopGoal(f) },
 	})
@@ -534,7 +542,8 @@ func (m *Shell) stopGoal(f domain.Feature) tea.Cmd {
 // unfinished cards are dropped and its branch is kept until you clean it.
 func (m *Shell) confirmAbandonGoal(f domain.Feature) tea.Cmd {
 	m.Overlay.Push(&confirmDialog{
-		id: "confirm-abandon-goal", question: "Abandon " + string(f.ID) + "?", confirmLabel: "Abandon",
+		card: f.ID,
+		id:   "confirm-abandon-goal", question: "Abandon " + string(f.ID) + "?", confirmLabel: "Abandon",
 		detail:    "Its unfinished cards are dropped and the goal closes without landing anything. Its branch stays until you clean it up.",
 		onConfirm: func() tea.Cmd { return m.abandonGoal(f) },
 	})
@@ -544,9 +553,9 @@ func (m *Shell) confirmAbandonGoal(f domain.Feature) tea.Cmd {
 // abandonGoal closes a goal without landing anything: the confirm's yes,
 // and the web face's abandon.
 func (m *Shell) abandonGoal(f domain.Feature) tea.Cmd {
-	eng := m.engine
+	eng, actor := m.engine, m.humanActor()
 	return func() tea.Msg {
-		if _, err := eng.AbandonGoal(context.Background(), f.ID, "user"); err != nil {
+		if _, err := eng.AbandonGoal(context.Background(), f.ID, actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + " abandoned — its branch is kept", reload: true, clearInbox: f.ID}

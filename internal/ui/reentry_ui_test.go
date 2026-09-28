@@ -82,7 +82,7 @@ func TestSendItBackWalksToPlanAfterConfirming(t *testing.T) {
 	if got := m.rows[0].F.Stage; got != domain.StageVerify {
 		t.Fatalf("the card moved before the confirm (at %s)", got)
 	}
-	p := m.reentryPending
+	p := m.pendingChip()
 	if p == nil || p.out.Action != reentry.Rewind {
 		t.Fatalf("no rewind chip: %+v", p)
 	}
@@ -135,7 +135,7 @@ func TestRewindCancelledChangesNothing(t *testing.T) {
 
 	m = openCardPage(t, m)
 	m = pump(t, m, m.routeReentry(m.rows[0], "bounce", "the chosen approach cannot work offline"))
-	if m.reentryPending == nil {
+	if m.pendingChip() == nil {
 		t.Fatal("no chip to take back")
 	}
 	// esc is the take-it-back gesture: the chip goes, the line is sent
@@ -143,7 +143,7 @@ func TestRewindCancelledChangesNothing(t *testing.T) {
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
 	m = pump(t, m, m.loadRows)
 
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Error("esc left the chip up")
 	}
 	if !m.cardOpen {
@@ -164,7 +164,7 @@ func TestInPlaceReentryConfirmsOnYNotEnter(t *testing.T) {
 	m = advanceTo(t, m, domain.StageImplement)
 	m = openCardPage(t, m)
 	m = pump(t, m, m.routeReentry(m.rows[0], "run", "the toggle does not do what step 4 describes"))
-	p := m.reentryPending
+	p := m.pendingChip()
 	if p == nil || p.out.Action != reentry.RerunInPlace {
 		t.Fatalf("no re-run chip: %+v", p)
 	}
@@ -172,14 +172,14 @@ func TestInPlaceReentryConfirmsOnYNotEnter(t *testing.T) {
 		t.Fatal("a re-run spends now; it must not go on enter")
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEnter})
-	if m.reentryPending == nil {
+	if m.pendingChip() == nil {
 		t.Fatal("enter took a chip that spends")
 	}
 	if !strings.Contains(m.notice.text, "press y") {
 		t.Errorf("enter on a spend did not say what key goes: %+v", m.notice)
 	}
 	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Error("y did not take the chip")
 	}
 	if got := m.rows[0].F.Stage; got != domain.StageImplement {
@@ -274,7 +274,7 @@ func TestLiveSessionIsNeverRead(t *testing.T) {
 	if got := m.rows[0].F.Stage; got != domain.StagePlan {
 		t.Errorf("a design-chat line moved the card to %s", got)
 	}
-	if m.reentryPending != nil {
+	if m.pendingChip() != nil {
 		t.Error("a line into a live conversation raised a chip")
 	}
 }

@@ -88,6 +88,19 @@ func (st *Stack) HandleKey(key tea.KeyPressMsg) (consumed bool, cmd tea.Cmd) {
 	return true, cmd
 }
 
+// At returns the dialog at index i, bottom first (nil when out of range).
+func (st *Stack) At(i int) Dialog {
+	if i < 0 || i >= len(st.dialogs) {
+		return nil
+	}
+	return st.dialogs[i]
+}
+
+// RemoveAt closes the dialog at index i, leaving anything pushed above it
+// in place. It is how a dialog answered other than by a key press (the
+// web face's intents) is closed without closing what its answer opened.
+func (st *Stack) RemoveAt(i int) { st.removeAt(i) }
+
 // removeAt splices out the dialog at i, leaving anything pushed above it
 // in place.
 func (st *Stack) removeAt(i int) {

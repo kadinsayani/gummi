@@ -6,6 +6,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -88,6 +89,12 @@ func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
 		if sha == "" {
 			return noticeMsg{text: string(f.ID) + " already collapsed, nothing to do"}
 		}
-		return noticeMsg{text: string(f.ID) + " squashed to " + sha + "\n  git push --force-with-lease origin " + f.BranchName(), reload: true}
+		// the push names the remote and branch the card tracks, when it
+		// tracks one, as a replay's does (engine.PushCommandTo)
+		push := engine.PushCommand(f.BranchName())
+		if remote, rb, ok := mgr.Upstream(ctx, &f); ok {
+			push = engine.PushCommandTo(remote, f.BranchName(), rb)
+		}
+		return noticeMsg{text: string(f.ID) + " squashed to " + sha + "\n  " + push, reload: true}
 	})
 }

@@ -42,6 +42,13 @@ func (m *Shell) maybeOfferQuitResume() {
 	}
 	sort.Slice(cards, func(i, j int) bool { return cards[i].Feature.ID < cards[j].Feature.ID })
 	since := compactSince(m.now().Sub(earliestParked(cards))) + " ago"
+	if m.headless {
+		// No screen to open the dialog on: the board holds the question
+		// for the web face, which asks it (WebResume) — still nothing
+		// restarts without a person saying so.
+		m.resumeOffer = &quitResumeOffer{cards: cards, since: since}
+		return
+	}
 	m.Overlay.Push(newQuitResumeDialog(cards, since, func() tea.Cmd {
 		return m.resumeQuitStopped(cards)
 	}))
@@ -191,4 +198,11 @@ func (d *quitResumeDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString(d.buttons.View(s, true) + "\n")
 	b.WriteString("\n" + s.Faint.Render("←/→ choose · enter select · esc not now"))
 	return s.DialogFrame.Render(b.String())
+}
+
+// quitResumeOffer is the quit-resume question held open on a headless
+// board: the cards the last quit stopped, and how long ago.
+type quitResumeOffer struct {
+	cards []engine.QuitStoppedCard
+	since string
 }

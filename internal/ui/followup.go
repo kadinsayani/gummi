@@ -85,6 +85,7 @@ func (m *Shell) bugFromLine(r featureRow, line string) tea.Cmd {
 		"  " + pad("found in") + string(f.ID) + " — " + endingWord(f.Ending(landed)) + "\n" +
 		"  " + pad("carries") + f.ArtifactPath() + " · " + f.BranchName()
 	m.Overlay.Push(&confirmDialog{
+		card:         f.ID,
 		id:           "confirm-bug-from-card",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Open it",

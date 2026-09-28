@@ -64,8 +64,23 @@ func (m *Shell) cardBusy(r featureRow) bool {
 	if m.consultSending[r.F.ID] != "" {
 		return true
 	}
+	if m.freeformTurnBusy(r) {
+		return true
+	}
 	sess := m.sessionFor(r.F.ID)
 	return (sess != nil && sess.Busy()) || (r.DrivenAbroad && r.Foreign.Busy)
+}
+
+// freeformTurnBusy reports a freeform card whose turn is in flight. Its
+// session is the engine's freeform one, not a stage session, so sessionFor
+// does not see it — and a card whose agent is writing is not idle, on the
+// board row, the header's running count or the page.
+func (m *Shell) freeformTurnBusy(r featureRow) bool {
+	if !r.F.IsFreeform() || m.engine == nil {
+		return false
+	}
+	ff := m.engine.Freeform(r.F.ID)
+	return ff != nil && ff.Snapshot().Busy
 }
 
 // scribeSettled decrements a card's in-flight scribe-pass count by one,

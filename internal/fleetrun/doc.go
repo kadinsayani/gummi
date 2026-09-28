@@ -20,13 +20,29 @@
 // therefore auditable: a long pass that spans a boundary belongs
 // entirely to the window it began in, no window double-counts, and no
 // number is apportioned — a fraction of a pass's cost is not a number
-// the record contains. Spend on turns that are not passes (a goal's
-// lead, a one-shot scribe) cannot be windowed at all — the rollup
-// carries no per-sample time — so the window's money is the passes'
-// money, and says so by never claiming to be the total.
+// the record contains.
+//
+// Spend on turns that are not passes (a goal's lead, a one-shot scribe,
+// a backend's helper call) is charged the same way, at the one moment
+// the record holds for it: its rollup row's last sample. Spend the
+// card's counter holds that no row records (a decomposition at ingest)
+// is charged at the card's creation. cardrun itemizes both as the run's
+// Charges, and this package only windows them — so a lane is the card's
+// own spend, sliced by time, and a window that holds a card's whole life
+// holds exactly the total its board row and its run tab print. That is
+// the promise the seam exists for: the tab cannot disagree with the
+// cards it is made of. Before non-pass spend was charged, a goal's lane
+// showed its passes and dropped its lead, and every verified card read
+// two credits short of its own row.
+//
+// The all-time column is the workspace's own counters, the same figure
+// every board row prints, with its stage and model buckets read off the
+// rollup rows plus what the counters hold that no row does
+// (cardrun.Unrecorded) — so the buckets sum to the total they sit under,
+// and a window holding every card's whole life comes to that total too.
 //
 // Tokens follow the credits they were spent with, at both scales: the
-// window's token count covers exactly the passes its credit figure
+// window's token count covers exactly the spend its credit figure
 // covers, and the all-time count comes off the same rollup rows the
 // all-time credits are read from. They are reported beside credits and
 // never converted into them — a report that quietly priced tokens would
@@ -50,6 +66,19 @@
 // block still draws — the window clock subtracts the ask's span from the
 // agent (cardrun.AskSpans, cardrun.WorkingTime), so a lane that reads
 // "on you since 14:02" is never beside a headline that says nobody was
-// waiting. Lane blocks, peak concurrency and the busiest stretch are
-// about what was open and so still count the session.
+// waiting. Lane blocks still draw the whole session — it was open — but
+// peak concurrency and the busiest stretch are about agents working, and
+// are read off the blocks less their asks (cardrun.WorkingSpans): a lane
+// parked on a question does not run at once with another, and an hour
+// in which one card waited on you is not the busiest hour.
+//
+// # What running means
+//
+// "Running" is the board's word, not the record's. A session left open
+// by a process that died reads on the record exactly like one working,
+// and one blocked on its own question is open on the record while the
+// board says the card needs you. The fold therefore takes the board's
+// own set (Input.Busy) — what its header counts — and only reads the
+// record where there is no board to ask: an open pass on a card nobody
+// is being asked about.
 package fleetrun

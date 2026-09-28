@@ -351,12 +351,10 @@ func TestAnAllHistoryRateRunsFromFirstActivity(t *testing.T) {
 
 // TestTokensAreChargedWhereTheCreditsAre pins the token side to the
 // credit side at both scales. The window's tokens must cover exactly
-// the passes its credit figure covers — a pass that started before the
-// window is drawn and charged to neither — while the all-time count is
-// read off the rollup rows, so spend no pass claims (a one-shot's) is
-// in it. The two columns disagreeing is the point: they answer
-// different questions, and each must answer its own the same way its
-// credits do.
+// the spend its credit figure covers — a pass that started before the
+// window is drawn and charged to neither, and a one-shot no pass holds
+// is charged by its row's last sample, tokens and credits alike —
+// while the all-time count is every rollup row.
 func TestTokensAreChargedWhereTheCreditsAre(t *testing.T) {
 	c := wsCard(10, "metered")
 	pre := base.Add(-2 * time.Hour)
@@ -372,8 +370,8 @@ func TestTokensAreChargedWhereTheCreditsAre(t *testing.T) {
 			Credits: 4, InputTokens: 5000, OutputTokens: 900, UpdatedAt: pre},
 		{Stage: domain.StageImplement, Session: "s2", Role: "implementer", Model: "m",
 			Credits: 6, InputTokens: 1000, CachedTokens: 400, OutputTokens: 200, UpdatedAt: inside},
-		// A one-shot: no session key, so no pass holds it. All-time has
-		// it; the window cannot, having nothing to date it by.
+		// A one-shot: no session key, so no pass holds it. Its row's last
+		// sample dates it, inside the window.
 		{Stage: domain.StageImplement, Role: "scribe", Model: "m",
 			Credits: 1, InputTokens: 300, OutputTokens: 50, UpdatedAt: inside},
 	}
@@ -382,14 +380,17 @@ func TestTokensAreChargedWhereTheCreditsAre(t *testing.T) {
 
 	rep := fold([]Card{c}, AllTimeRow{Feature: c.Feature, StageSpend: rows})
 
-	want := Tokens{Input: 1000, Cached: 400, Output: 200}
+	want := Tokens{Input: 1300, Cached: 400, Output: 250}
 	if rep.Tokens != want {
-		t.Errorf("window tokens = %+v, want %+v — only the pass that started inside", rep.Tokens, want)
+		t.Errorf("window tokens = %+v, want %+v — the pass that started inside and the one-shot", rep.Tokens, want)
+	}
+	if rep.Credits != 7 {
+		t.Errorf("window credits = %.2f, want 7 — the same two the tokens cover", rep.Credits)
 	}
 	if l := laneOf(t, rep, c.Feature.ID); l.Tokens != want {
 		t.Errorf("lane tokens = %+v, want the same %+v the report summed", l.Tokens, want)
 	}
-	if got, want := rep.Tokens.CacheReadRatio(), 400.0/1400.0; got != want {
+	if got, want := rep.Tokens.CacheReadRatio(), 400.0/1700.0; got != want {
 		t.Errorf("cache read ratio = %.4f, want %.4f", got, want)
 	}
 	all := Tokens{Input: 6300, Cached: 400, Output: 1150}

@@ -42,6 +42,16 @@ func autopilotModeFor(mode string) string {
 	return domain.GateAttended
 }
 
+// autopilotSwitchTo is the mode the autopilot switch moves a card to from
+// mode: the other side of the binary. The dialog's confirm and the web
+// menu's default both read it, so the two cannot name different moves.
+func autopilotSwitchTo(mode string) string {
+	if autopilotModeFor(mode) == domain.GateAutopilot {
+		return domain.GateAttended
+	}
+	return domain.GateAutopilot
+}
+
 // autopilotPlan is the concrete, card-specific effect of turning
 // autopilot on right now, resolved from f's LIVE state at the moment the
 // overlay opens — never from the mode a user later picks in it, which
@@ -514,6 +524,13 @@ type autopilotDialog struct {
 	// regardless of which button looked focused.
 	buttons  *buttonRow
 	onSubmit func(mode string) tea.Cmd
+	// mode is what the confirm hands over: autopilot for a card that is
+	// not on it, attended — "stop autopilot", as the menu row that opens
+	// this dialog says (gateLabelWhy) — for one that is. The switch is a
+	// binary, so the confirm is always the other side of it; it used to
+	// be autopilot unconditionally, which made stopping autopilot from
+	// the menu re-affirm the very mode it was leaving.
+	mode string
 }
 
 // base is baseBranch with the same fallback Shell.baseBranch and
@@ -530,9 +547,13 @@ func newAutopilotDialog(f domain.Feature, plan autopilotPlan, base string, onSub
 	// the confirm leads: opening this switch is already the intent to
 	// change something, so the row starts on the doing button and ←→ is
 	// the way back out of it.
-	buttons := newButtonRow(button{label: "Cancel"}, button{label: plan.confirmLabel()})
+	mode, label := autopilotSwitchTo(f.GateApproval), plan.confirmLabel()
+	if mode == domain.GateAttended {
+		label = "Stop autopilot"
+	}
+	buttons := newButtonRow(button{label: "Cancel"}, button{label: label})
 	buttons.SetCursor(1)
-	return &autopilotDialog{feature: f, plan: plan, baseBranch: base, buttons: buttons, onSubmit: onSubmit}
+	return &autopilotDialog{feature: f, plan: plan, baseBranch: base, buttons: buttons, onSubmit: onSubmit, mode: mode}
 }
 
 // openAutopilot pushes the overlay for f, computing its plan once so the
@@ -641,11 +662,11 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	case "enter":
 		// enter activates the focused control, with no exceptions
 		// (buttonRow's own contract). There is one thing to confirm now
-		// that the modes are a binary: hand this card to autopilot.
+		// that the modes are a binary: the other side of the switch.
 		if d.buttons.Cursor() == 0 {
 			return true, d.cancelNotice()
 		}
-		return true, d.onSubmit(domain.GateAutopilot)
+		return true, d.onSubmit(d.submitMode())
 	}
 	return false, nil
 }
@@ -662,9 +683,22 @@ func (d *autopilotDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 // created" is the same convention).
 func (d *autopilotDialog) cancelNotice() tea.Cmd {
 	id := d.feature.ID
-	return func() tea.Msg {
-		return noticeMsg{text: string(id) + ": cancelled — nothing started"}
+	text := string(id) + ": cancelled — nothing started"
+	if d.mode == domain.GateAttended {
+		text = string(id) + ": cancelled — it stays on autopilot"
 	}
+	return func() tea.Msg {
+		return noticeMsg{text: text}
+	}
+}
+
+// submitMode is what the confirm hands over; a dialog a test built as a
+// bare struct reads as the hand-over it was before the mode was held.
+func (d *autopilotDialog) submitMode() string {
+	if d.mode == "" {
+		return domain.GateAutopilot
+	}
+	return d.mode
 }
 
 // dashRule renders "── label ────…" filled to width, the same dash-fill
@@ -687,7 +721,7 @@ func (d *autopilotDialog) View(s *theme.Styles, w, h int) string {
 	b.WriteString(s.DialogTitle.Render(title) + "\n\n")
 
 	b.WriteString(s.Faint.Render(dashRule(autopilotHeader(d.feature, d.plan), width)) + "\n")
-	for _, l := range autopilotBody(d.feature, d.plan, domain.GateAutopilot, d.base()) {
+	for _, l := range autopilotBody(d.feature, d.plan, d.submitMode(), d.base()) {
 		for _, wl := range strings.Split(wrapText(l, width), "\n") {
 			b.WriteString(s.Subtle.Render(wl) + "\n")
 		}

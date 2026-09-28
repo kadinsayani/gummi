@@ -166,3 +166,35 @@ func TestPRPullRefusesWithoutALink(t *testing.T) {
 		t.Errorf("notice = %q, want a no-linked-PR refusal", m.notice.text)
 	}
 }
+
+// A headless board (the web face's) has no screen for the diff to open
+// on, so pulling review threads there mounts nothing: a diff surface left
+// mounted would sit on the Shell for the rest of the process, answering
+// the card's annotation events with a git diff reload — and a reload that
+// finds the diff empty or unreadable skips the blocker refresh the board's
+// needs line and the decision's carried comments read. The pull itself —
+// the threads stored, the notice raised — is unchanged.
+func TestPRPullOnAHeadlessBoardMountsNoSurface(t *testing.T) {
+	m := linkFixture(t)
+	m.headless = true
+	hit := pr.ReviewThread{
+		Id: "PRRT_1", Path: "README.md", DiffHunk: "@@ -1,1 +1,2 @@\n+second line",
+		Comments: []pr.ThreadComment{{Id: "c1", AuthorLogin: "reviewer", Body: "nice addition"}},
+	}
+	m.fetchPRReviewThreads = func(context.Context, domain.PullRequestRef) ([]pr.ReviewThread, []pr.TopLevelComment, string, error) {
+		return []pr.ReviewThread{hit}, nil, "", nil
+	}
+	m = runPRPull(t, m)
+	if !strings.Contains(m.notice.text, "1 new review thread(s)") {
+		t.Fatalf("notice = %q, want 1 new thread", m.notice.text)
+	}
+	if anns, err := m.store.ListDiffAnnotations(context.Background(), "FD-001"); err != nil || len(anns) != 1 {
+		t.Fatalf("stored %d annotations (%v), want 1", len(anns), err)
+	}
+	if m.diff != nil {
+		t.Fatal("a headless pull mounted the diff surface")
+	}
+	if tab := m.activeCardTab(); tab != cardTabThread {
+		t.Fatalf("the headless board's surface is %v after a pull, want the thread", tab)
+	}
+}

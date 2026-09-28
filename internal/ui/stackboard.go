@@ -13,6 +13,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -130,14 +131,16 @@ func (m *Shell) stackTick(id domain.StackID) tea.Cmd {
 }
 
 // onStackTick handles a finished tick: report a conflict through the
-// rebase hand-off the package already has, and come back round while
-// there is more to do.
+// rebase hand-off the package already has, come back round while there
+// is more to do, and say what a finished walk moved.
 //
-// A successful replay is deliberately silent. The whole point of the
-// feature is that the reader does not manage their own rebases, and a
-// notice for every automatic one would just be a stream of things they
-// did not ask for and cannot act on. The board's own marker says a card
-// is being replayed while it happens.
+// Each replay step is silent — the board's own marker says a card is
+// being replayed while it happens, and a notice per step would be a
+// stream of things nobody asked for. The walk as a whole is not: every
+// branch it moved now differs from its remote, and gummi prints the push
+// that needs and never runs it (§18.5). So the tick that finds the stack
+// settled after a walk says, once, which cards moved and the push lines
+// for them — the same lines `gummi stack restack` prints.
 func (m *Shell) onStackTick(msg stackTickMsg) tea.Cmd {
 	if msg.err != nil {
 		return func() tea.Msg {
@@ -160,13 +163,46 @@ func (m *Shell) onStackTick(msg stackTickMsg) tea.Cmd {
 			return stackTickDueMsg{stack: id}
 		}))
 	}
+	if w := msg.res.Settled; w != nil && len(w.Cards) > 0 {
+		text := stackReplayNotice(msg.res.Stack, *w)
+		return func() tea.Msg { return noticeMsg{text: text, reload: true} }
+	}
 	if msg.res.Restacked != "" {
 		// A replay changed a branch, so the board's git-derived columns
-		// (diffstat, landed, ahead) are stale. Reload rather than notify:
-		// the reader asked for none of this and needs no telling.
+		// (diffstat, landed, ahead) are stale.
 		return func() tea.Msg { return noticeMsg{reload: true} }
 	}
 	return nil
+}
+
+// stackReplayNotice is what a finished replay walk says: the cards that
+// moved and the push each branch now needs, one per line — the shell
+// shows a notice of several lines in the band above the status bar, so
+// every push line is on screen and not only the sentence before them.
+func stackReplayNotice(id domain.StackID, w engine.StackReplay) string {
+	ids := make([]string, 0, len(w.Cards))
+	for _, c := range w.Cards {
+		ids = append(ids, string(c))
+	}
+	onto, them := " onto their new base", "them"
+	if len(ids) == 1 {
+		onto, them = " onto its new base", "it"
+	}
+	text := "stack " + string(id) + ": replayed " + strings.Join(ids, ", ") + onto
+	var push []string
+	for _, p := range w.Push {
+		if p != "" {
+			push = append(push, p)
+		}
+	}
+	if len(push) == 0 {
+		return text
+	}
+	text += " — gummi never pushes; push " + them + " yourself:"
+	for _, p := range push {
+		text += "\n  " + p
+	}
+	return text
 }
 
 // stackTickDueMsg asks for another tick after a short pause, so a walk
@@ -176,6 +212,9 @@ type stackTickDueMsg struct{ stack domain.StackID }
 // stackRows is the per-card stack annotation the board renders: the
 // position, what the card forks from, and whether it is being replayed.
 type stackRow struct {
+	// ID and Name are the stack the card is in.
+	ID   domain.StackID
+	Name string
 	// Pos is the card's 1-based place, for "2 of 4".
 	Pos, Of int
 	// Below names the card this one forks from, empty at the bottom.
@@ -221,6 +260,7 @@ func (m *Shell) stackRowsForFeatures(ctx context.Context, feats []domain.Feature
 			// rather than this instant's git state.
 			below, _ := stack.BelowDeclared(snap, mem.ID)
 			out[mem.ID] = stackRow{
+				ID: snap.ID, Name: snap.Name,
 				Pos: mem.Pos + 1, Of: len(snap.Members),
 				Below: below, Base: snap.Base,
 				Stale: mem.Stale, Landed: mem.Landed,

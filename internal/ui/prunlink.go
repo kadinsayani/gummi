@@ -20,6 +20,7 @@ func (m *Shell) confirmPRUnlink(f domain.Feature) tea.Cmd {
 	}
 	ref := f.PullRequest
 	m.Overlay.Push(&confirmDialog{
+		card:         f.ID,
 		id:           "confirm-prunlink",
 		cancelLabel:  "Cancel",
 		confirmLabel: "Unlink",

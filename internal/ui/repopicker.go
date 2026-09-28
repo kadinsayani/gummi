@@ -40,6 +40,12 @@ func newRepoPickerDialog(f domain.Feature, names []string, onSubmit func(string)
 // ID implements overlay.Dialog.
 func (d *repoPickerDialog) ID() string { return "repo" }
 
+// submit picks candidate i — enter's body, and the web face's.
+func (d *repoPickerDialog) submit(i int) tea.Cmd {
+	d.idx = i
+	return d.onSubmit(d.candidates[i])
+}
+
 // HandleKey implements overlay.Dialog.
 func (d *repoPickerDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch key.String() {
@@ -49,7 +55,7 @@ func (d *repoPickerDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 		if len(d.candidates) == 0 {
 			return true, nil
 		}
-		return true, d.onSubmit(d.candidates[d.idx])
+		return true, d.submit(d.idx)
 	case "left", "h":
 		d.idx--
 		if d.idx < 0 {

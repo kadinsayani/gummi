@@ -27,6 +27,7 @@ import (
 	"github.com/morphis/gummi/internal/ui/overlay"
 	"github.com/morphis/gummi/internal/ui/statusbar"
 	"github.com/morphis/gummi/internal/ui/theme"
+	"github.com/morphis/gummi/internal/webapi"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -171,8 +172,8 @@ type Shell struct {
 	bugIngest    *bugIngestView // non-nil while the bug-import review surface is open
 	bugIngesting bool           // a bug import is fetching (one at a time)
 
-	mergePrep  bool // a squash merge's preconditions are being checked (one at a time)
-	squashPrep bool // a squash-in-place's preconditions are being checked (one at a time)
+	mergePrep  map[domain.FeatureID]bool // cards whose landing preconditions are being checked (one landing per card at a time)
+	squashPrep bool                      // a squash-in-place's preconditions are being checked (one at a time)
 
 	// The dashboard's action list is the second focus region on the board:
 	// → moves into it, ← back to the cards. Only the cursor and the focus
@@ -300,6 +301,13 @@ type Shell struct {
 	// reload that picks up what another process wrote to the store
 	// (follow.go).
 	foreignTicks int
+	// webActor is who a web request that runs outside an intent (a goal's
+	// verb, run by Bridge.Await) acts as, for the length of its call on
+	// the loop: humanActor reads it, so the record names the person.
+	webActor string
+	// storeVersion is the store's data_version as last seen (foreignMsg):
+	// a change is another process's commit, and the board re-reads.
+	storeVersion int64
 	// locks is the board's per-card lock registry, shared with the engine
 	// (AttachCardLocks). Nil leaves the board's git verbs unlocked.
 	locks *state.CardLocks
@@ -417,11 +425,13 @@ type Shell struct {
 	// (thread.go's anchorTo makes the same argument for the third).
 	specJump string
 	diffJump diffTarget
-	// reentryPending is the chip: a typed line the card has read whose
-	// reading is an act, waiting for the reader to take it or take the
-	// line back (chip.go). Nil when no chip is up. Withdrawn by esc, by
-	// any edit to the composer, and by the card moving under it.
-	reentryPending *reentryReading
+	// chips are the chips up, one per card: a typed line the card has read
+	// whose reading is an act, waiting for the reader to take it or take
+	// the line back (chip.go). Withdrawn by esc, by any edit to the
+	// composer, and by the card moving under it. Per card, because a web
+	// board is answering several cards at once and one card's chip is
+	// never another's to take or lose.
+	chips map[domain.FeatureID]*reentryReading
 	// reentryRead is the moment before that one: a line that has been
 	// sent out to be read and has not come back yet (reentry.go). It
 	// holds the chip's own slot while it waits, so the seconds a model
@@ -453,6 +463,27 @@ type Shell struct {
 	remoteOrigin func(dir string) string
 	envelope     int              // default spend-plan envelope for new features (0 = none)
 	notifier     *notify.Notifier // bell/desktop hook for needs-attention events
+	// attention hears the same transitions the bell does, with the card
+	// and its question apart: the web face's push notifications
+	// (AddAttentionNotifier).
+	attention []AttentionNotifier
+	// pausing marks a pause asked for and not yet taken (pauseRun).
+	pausing map[domain.FeatureID]bool
+	// headless is a Shell hosted by a Bridge (bridge.go): no screen, so a
+	// dialog nobody is answering is never seen, and what the TUI would
+	// have asked in one is asked of the web face instead (webintent.go).
+	headless bool
+	// resumeOffer is the quit-resume question a headless board holds for
+	// the web face instead of opening its dialog (quitresume.go).
+	resumeOffer *quitResumeOffer
+	// today is the board's spend since local midnight, measured off the
+	// loop after a row load (webboard.go) for the web face's header.
+	today todaySpend
+	// intent is the web intent whose commands are being handled right now
+	// (webintent.go), nil between them.
+	intent *webIntent
+	// liveIntents are the web intents still being followed.
+	liveIntents map[*webIntent]bool
 
 	// Copilot quota hint (copilotquota.go): the latest reading shown as
 	// a status-bar pill, its enable flag, and the gh seam for tests.
@@ -490,6 +521,17 @@ type Shell struct {
 
 	// now is injectable for deterministic tests.
 	now func() time.Time
+
+	// changeHook is told what a message may have changed, for a host
+	// without a screen (bridge.go's SetChangeHook). Nil under the TUI.
+	changeHook func(webapi.Change)
+	// webBusy is whether each card was working the last time an engine
+	// update was mapped for the web (bridge.go's emitEngineChange): a
+	// streaming update moves only the live block, until the one that ends
+	// or starts a turn — that one moves the card's head and decision too.
+	webBusy map[domain.FeatureID]bool
+	// webIngest is the ingest run as the web face names it (webingest.go).
+	webIngest webIngestState
 }
 
 // roundKey is the fast-path round-counter map's key: one entry per
@@ -770,6 +812,31 @@ func (m *Shell) envelopePrefill() int {
 // SetNotifier wires the needs-attention notification hook (bell/desktop).
 func (m *Shell) SetNotifier(n *notify.Notifier) { m.notifier = n }
 
+// AttentionNotifier hears every needs-you transition: a card that just
+// started waiting on a person, and the one line the inbox shows for it.
+// It is called on the Update goroutine, so it must not block — hand the
+// message to a goroutine and return.
+type AttentionNotifier interface {
+	NeedsYou(id domain.FeatureID, text string)
+}
+
+// AddAttentionNotifier attaches a notifier beside the bell (or instead of
+// it, when the bell is off). Attach before the program runs.
+func (m *Shell) AddAttentionNotifier(n AttentionNotifier) {
+	if n != nil {
+		m.attention = append(m.attention, n)
+	}
+}
+
+// alert signals a needs-you transition to the bell and to every attached
+// notifier.
+func (m *Shell) alert(id domain.FeatureID, text string) {
+	m.notifier.Alert(string(id) + ": " + text)
+	for _, n := range m.attention {
+		n.NeedsYou(id, text)
+	}
+}
+
 // SetPRResolver wires prlink's head-branch-resolution and submit path to a
 // real gh lookup. Without it (a test scaffold, or a shell nobody has wired
 // yet) prlink's probe and submit both report that linking is unavailable
@@ -950,7 +1017,7 @@ func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
 		return
 	}
 	if m.inbox.addEscalated(id, attnGate, text) {
-		m.notifier.Alert(string(id) + ": " + text)
+		m.alert(id, text)
 		m.logPark(id, reason, text)
 		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
 	}
@@ -988,7 +1055,7 @@ func (m *Shell) parkAttentionItem(id domain.FeatureID, kind attnKind, text strin
 	if !m.inbox.add(id, kind, text) {
 		return false
 	}
-	m.notifier.Alert(string(id) + ": " + text)
+	m.alert(id, text)
 	m.logPark(id, state.ParkReasonNeedsYou, text)
 	return true
 }
@@ -1610,7 +1677,23 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.frame++
 		return m, spinnerTick()
 	}
-	model, cmd := m.update(msg)
+	var (
+		model tea.Model = m
+		cmd   tea.Cmd
+	)
+	if tm, ok := msg.(webTrackedMsg); ok {
+		// a message a web intent's command produced (webintent.go): it is
+		// handled like any other, on the intent's behalf.
+		return m.updateTracked(tm)
+	}
+	if req, ok := msg.(*bridgeMsg); ok {
+		// a web request's read or intent (bridge.go), run between two
+		// messages like any other; it reports its own changes.
+		cmd = req.run(m)
+	} else {
+		model, cmd = m.update(msg)
+		m.emitChanges(msg)
+	}
 	if tick := m.drainGoalTicks(); tick != nil {
 		cmd = tea.Batch(cmd, tick)
 	}
@@ -1621,6 +1704,7 @@ func (m *Shell) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinning = true
 		cmd = tea.Batch(cmd, spinnerTick())
 	}
+	m.sweepOrphanDialogs()
 	return model, cmd
 }
 
@@ -1709,7 +1793,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// failed to appear must not have every later reload yank the
 			// cursor off whatever the reader has since selected.
 			m.openOnLoad = ""
-			jump, _ = m.jumpToCard(id)
+			if !m.headless {
+				// a headless board has no page to land on: the web face's
+				// pages open their own cards
+				jump, _ = m.jumpToCard(id)
+			}
 		}
 		// the action cursor belongs to whichever card is selected, so it
 		// resyncs whether or not the selection survived.
@@ -1732,6 +1820,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok {
 			cmds = append(cmds, m.ensureNarration(r))
 		}
+		cmds = append(cmds, m.measureToday())
 		return m, tea.Batch(cmds...)
 
 	case openDecisionsMsg:
@@ -1744,6 +1833,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.notice = noticeMsg{text: "needs-you queue: " + sanitize(msg.err.Error()), isErr: true}
 			m.reconstructInbox()
+			return m, nil
+		}
+		if msg.refresh {
+			m.refreshInboxFromDecisions(msg.decisions)
 			return m, nil
 		}
 		m.seedInboxFromDecisions(msg.decisions)
@@ -1796,7 +1889,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetchCopilotQuota()
 
 	case mergeReadyMsg:
-		m.mergePrep = false
+		delete(m.mergePrep, msg.f.ID)
 		if msg.err != nil {
 			m.notice = noticeMsg{text: sanitize(msg.err.Error()), isErr: true}
 			return m, nil
@@ -1856,6 +1949,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				detail = detail + " — " + msg.prURL
 			}
 			m.Overlay.Push(&confirmDialog{
+				card:     f.ID,
 				id:       "confirm-squash",
 				question: "squash " + string(f.ID) + "?",
 				detail:   detail,
@@ -1877,17 +1971,25 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case prPullDoneMsg:
 		m.notice = msg.notice
 		cmds := []tea.Cmd{m.loadRows}
-		if msg.newlyWritten {
+		if msg.newlyWritten && !m.headless {
 			// the comments just pulled land on screen, not merely counted.
+			// A headless board has no screen: the web face's diff tab is
+			// its own, and a surface mounted here would stay mounted for
+			// the life of the process (openOnLoad's rule, the same reason).
 			cmds = append(cmds, m.openDiff(msg.f))
 		}
 		return m, tea.Batch(cmds...)
 
 	case commitDraftMsg:
 		// a late reply from a closed dialog (esc) or a stale pass (ctrl+r
-		// regenerated) is dropped; apply only while the dialog is live.
-		if d, ok := m.Overlay.Top().(*commitMsgDialog); ok && d.feature == msg.f {
-			d.apply(msg)
+		// regenerated) is dropped; apply only while the dialog is live —
+		// wherever it stands: on a web board two landings can be drafting
+		// at once, and the one opened second is on top.
+		for i := m.Overlay.Len() - 1; i >= 0; i-- {
+			if d, ok := m.Overlay.At(i).(*commitMsgDialog); ok && d.feature == msg.f {
+				d.apply(msg)
+				break
+			}
 		}
 		// Record the outcome durably on the feature so a failed draft
 		// survives the dialog and later inspection still sees it: the
@@ -1971,6 +2073,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		f := msg.f
 		m.Overlay.Push(&confirmDialog{
+			card:         f.ID,
 			id:           "confirm-handoff",
 			cancelLabel:  "Cancel",
 			confirmLabel: "Hand off",
@@ -1990,11 +2093,11 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// was also the reason the `m` key had no removal at all, since the
 		// removal lived on this path rather than on the landing. It is
 		// cleared on the merge's own success now (squashMergeFeature).
-		if m.mergePrep {
-			m.notice = noticeMsg{text: "already preparing a merge — wait for it", isErr: true}
+		if m.mergePrep[msg.f.ID] {
+			m.notice = noticeMsg{text: "already preparing " + string(msg.f.ID) + "'s merge — wait for it", isErr: true}
 			return m, nil
 		}
-		m.mergePrep = true
+		m.markMergePrep(msg.f.ID)
 		m.notice = noticeMsg{text: string(msg.f.ID) + ": landing on main…"}
 		return m, m.prepareMerge(msg.f, true)
 
@@ -2326,6 +2429,16 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case foreignMsg:
 		changed := m.applyForeign(msg.drives)
+		if moved := msg.storeVersion != 0 && m.storeVersion != 0 && msg.storeVersion != m.storeVersion; msg.storeVersion != 0 && (moved || m.storeVersion == 0) {
+			m.storeVersion = msg.storeVersion
+			if moved {
+				// another process committed — a card minted from the CLI,
+				// a run beside the board that stopped at a gate: read the
+				// rows and the open decisions again, so neither face shows
+				// the board as it stood before
+				return m, tea.Batch(m.loadRows, m.refetchOpenDecisions)
+			}
+		}
 		if changed || msg.reload {
 			// a drive that just started or ended moved the store too, and a
 			// long-running one keeps moving it; reload so the badges are not
@@ -2342,13 +2455,25 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Nothing to do: the pane, if still open, keeps its last view.
 		return m, nil
 
+	case todaySpentMsg:
+		m.todaySpent(msg)
+		return m, nil
+
+	case todayDueMsg:
+		m.today.due = false
+		return m, m.measureToday()
+
+	case pausedMsg:
+		delete(m.pausing, msg.id)
+		return m.update(msg.inner)
+
 	case engineEventMsg:
 		cmd := m.handleEngineEvent(msg.ev)
 		// engine events otherwise carry no payload the view needs — they
 		// just signal "re-render from Snapshot" — so keep listening, plus
 		// any automatic review-loop follow-up and, when the event means
 		// the open card's event log grew, a reload of it.
-		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev))
+		return m, tea.Batch(m.listenEngineCmd(), cmd, m.refreshOpenCardEvents(msg.ev), m.measureToday())
 
 	case engineClosedMsg:
 		// the agent backend shut down unexpectedly. There is no pane left
@@ -3242,11 +3367,11 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				m.notice = noticeMsg{text: string(r.F.ID) + " already landed on main — " + cleanUpNudge, isErr: true}
 				return nil
 			}
-			if m.mergePrep {
-				m.notice = noticeMsg{text: "already preparing a merge — wait for it", isErr: true}
+			if m.mergePrep[r.F.ID] {
+				m.notice = noticeMsg{text: "already preparing " + string(r.F.ID) + "'s merge — wait for it", isErr: true}
 				return nil
 			}
-			m.mergePrep = true
+			m.markMergePrep(r.F.ID)
 			m.notice = noticeMsg{text: string(r.F.ID) + ": preparing merge…"}
 			// m and the verify gate land the same branch the same way, so
 			// they must leave the card in the same state: a card AT verify
@@ -3301,6 +3426,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 			}
 			f := r.F
 			m.Overlay.Push(&confirmDialog{
+				card:         f.ID,
 				id:           "confirm-cleanup",
 				cancelLabel:  "Keep",
 				confirmLabel: "Clean up",
@@ -3324,6 +3450,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 				detail += ", and the same for its " + itoa(n) + " card" + plural(n)
 			}
 			m.Overlay.Push(&confirmDialog{
+				card:         f.ID,
 				id:           "confirm-delete",
 				cancelLabel:  "Keep",
 				confirmLabel: "Delete",
@@ -3620,9 +3747,10 @@ func (m *Shell) draw(scr uv.Screen) {
 	l := m.layout
 
 	uv.NewStyledString(m.tabBarView(l.Tabs.Dx())).Draw(scr, l.Tabs)
-	// a long error/remedy is wrapped into a band above the status bar
-	// rather than truncated into a one-line pill ("set permiss…"); it
-	// borrows the bottom rows of the main pane. Short notices stay pills.
+	// a long error/remedy, or any notice of several lines, is wrapped
+	// into a band above the status bar rather than truncated into a
+	// one-line pill ("set permiss…"); it borrows the bottom rows of the
+	// main pane. Short notices stay pills.
 	// Every surface goes through mainView below. There used to be a
 	// branch above it for the agent tab, which painted a hosted pty's
 	// cells straight into scr so its truecolor survived; the tab hosts an
@@ -3652,18 +3780,31 @@ func (m *Shell) draw(scr uv.Screen) {
 // tail of a multi-step remedy, e.g. "set permissions: allow-all in …").
 const noticeThreshold = 48
 
-// noticeBand renders a long error notice as wrapped lines for the band
-// above the status bar, or nil when the notice is short enough to ride as
-// a status pill. Only error/remedy notices get the band — routine status
-// stays a quiet pill.
+// noticeBand renders a notice that does not fit a status pill as wrapped
+// lines for the band above the status bar, or nil when the notice is
+// short enough to ride as one. Two kinds go there: a long error/remedy,
+// in the error colour, and any notice of more than one line — a pill is
+// one row, so a notice that says what happened and then the commands to
+// run about it (an automatic stack replay's pushes) would lose every line
+// but its first. Routine one-line status stays a quiet pill.
 func (m *Shell) noticeBand(w int) []string {
-	if m.notice.text == "" || !m.notice.isErr || len(m.notice.text) <= noticeThreshold || w < 8 {
+	if !m.noticeInBand() || w < 8 {
 		return nil
 	}
-	wrapped := wrapText(sanitize(m.notice.text), w)
+	style := m.styles.Base
+	if m.notice.isErr {
+		style = m.styles.Error
+	}
 	var out []string
-	for _, l := range strings.Split(wrapped, "\n") {
-		out = append(out, m.styles.Error.Render(l))
+	for _, para := range strings.Split(sanitize(m.notice.text), "\n") {
+		// wrapText folds runs of spaces, which would flatten the indent
+		// that sets a command apart from the sentence introducing it: keep
+		// each line's own indent and wrap what follows it.
+		body := strings.TrimLeft(para, " \t")
+		indent := strings.Repeat(" ", min(len(para)-len(body), w/2))
+		for _, l := range strings.Split(wrapText(body, max(w-len(indent), 1)), "\n") {
+			out = append(out, style.Render(indent+l))
+		}
 	}
 	return out
 }
@@ -3671,7 +3812,10 @@ func (m *Shell) noticeBand(w int) []string {
 // noticeInBand reports whether the current notice is being shown in the
 // band (so statusView omits its pill and doesn't double it).
 func (m *Shell) noticeInBand() bool {
-	return m.notice.text != "" && m.notice.isErr && len(m.notice.text) > noticeThreshold
+	if m.notice.text == "" {
+		return false
+	}
+	return strings.Contains(m.notice.text, "\n") || (m.notice.isErr && len(m.notice.text) > noticeThreshold)
 }
 
 // attachOrRun handles `enter`: it starts (or watches) the stage's run.
@@ -3866,10 +4010,17 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 	if s == nil || s.Interactive {
 		return nil
 	}
-	// Pause interrupts the agent (IPC/network); run it in a command.
+	// Pause interrupts the agent (IPC/network); run it in a command. Until
+	// it lands the card is pausing — asked, not yet taken — which the web
+	// face's rail says (pausingMsg settles it either way).
+	if m.pausing == nil {
+		m.pausing = map[domain.FeatureID]bool{}
+	}
+	m.pausing[f.ID] = true
+	id := f.ID
 	return func() tea.Msg {
 		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+			return pausedMsg{id: id, inner: noticeMsg{text: sanitize(err.Error()), isErr: true}}
 		}
 		// Taking a running card back by hand is one of the two ways a
 		// period of autopilot ends without writing anything a reader could
@@ -3896,8 +4047,16 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		if it, ok := m.inbox.get(f.ID); ok && it.Kind == attnQuestion {
 			clear = f.ID
 		}
-		return noticeMsg{text: string(f.ID) + " paused", clearInbox: clear}
+		return pausedMsg{id: id, inner: noticeMsg{text: string(f.ID) + " paused", clearInbox: clear}}
 	}
+}
+
+// pausedMsg settles a pause: whatever the pause came back as, the card is
+// no longer pausing, and the inner message is handled as if it had come
+// on its own.
+type pausedMsg struct {
+	id    domain.FeatureID
+	inner tea.Msg
 }
 
 // parkVerb is fireVerb's landing spot for the composer's "park" verb
@@ -4260,7 +4419,7 @@ func (m *Shell) statusView(w int) string {
 	if m.ingestRun != nil {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " ingest", Kind: statusbar.KindNeutral})
 	}
-	if m.mergePrep {
+	if len(m.mergePrep) > 0 {
 		pills = append(pills, statusbar.Pill{Text: m.spinner() + " merging", Kind: statusbar.KindNeutral})
 	}
 	if m.squashPrep {
@@ -4305,13 +4464,21 @@ func (m *Shell) runCounts() string {
 	if m.engine == nil {
 		return ""
 	}
+	// counted the way the board row and the web header count a running
+	// card (webRow): needs-you outranks busy, a queued session is queued,
+	// and anything else at work — a freeform turn, a check, a scribe pass
+	// — is running, so the status bar and the stats tab say one number
 	var running, queued int
-	for _, s := range m.engine.Sessions() {
-		switch s.State() {
-		case engine.StateRunning:
-			running++
-		case engine.StateQueued:
+	for _, r := range m.rows {
+		if _, needs := m.inbox.get(r.F.ID); needs {
+			continue
+		}
+		if s := m.sessionFor(r.F.ID); s != nil && s.State() == engine.StateQueued {
 			queued++
+			continue
+		}
+		if m.cardBusy(r) {
+			running++
 		}
 	}
 	var parts []string
@@ -4322,4 +4489,13 @@ func (m *Shell) runCounts() string {
 		parts = append(parts, "◔ "+strconv.Itoa(queued)+" queued")
 	}
 	return strings.Join(parts, " · ")
+}
+
+// markMergePrep notes that a card's landing preconditions are being
+// checked, so a second press on the same card waits for the first.
+func (m *Shell) markMergePrep(id domain.FeatureID) {
+	if m.mergePrep == nil {
+		m.mergePrep = map[domain.FeatureID]bool{}
+	}
+	m.mergePrep[id] = true
 }

@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -107,8 +108,11 @@ func TestTheStatsTabDrawsTheTimeline(t *testing.T) {
 			t.Errorf("rendered page lacks %q:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(out, "1 running") {
-		t.Errorf("headline should count the one open session:\n%s", out)
+	// The parked lane's session is open on the record, but the card is
+	// waiting on you — the board says it needs you, not that it runs, and
+	// the headline counts the way the board's header does.
+	if strings.Contains(out, "⬤ 1 running") {
+		t.Errorf("headline counts a lane parked on you as running:\n%s", out)
 	}
 	// The legend only lists what survived the raster: the parked lane's
 	// wait sits under its open session's block, so no ▒ is visible and
@@ -258,6 +262,56 @@ func TestTheStatsTabReadsTheRecord(t *testing.T) {
 	}
 	if empty.AllTime.Cards != 1 {
 		t.Errorf("all-time lost the quiet card: %d cards", empty.AllTime.Cards)
+	}
+}
+
+// TestTheStatsTabCountsSpendThatLogsNoEvent walks the real path for a
+// card that spends without logging an event — a freeform card logs none
+// (DESIGN §19.3a), and a goal's lead books spend beside no session. The
+// card used to have no lane at all, so the window never came to the
+// board's total; now its lane is its counter, and running is the
+// board's set (boardBusy), not the record's.
+func TestTheStatsTabCountsSpendThatLogsNoEvent(t *testing.T) {
+	_, store, _ := uiRepo(t)
+	ctx := context.Background()
+
+	f := mkFeature(t, store, 1, "no events", domain.StageImplement)
+	quiet := mkFeature(t, store, 2, "quiet", domain.StageImplement)
+	for _, credits := range []float64{36, 12} {
+		if err := store.AddSpend(ctx, f.ID, credits, 0, 100, 10); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.RecordStageSpend(ctx, f.ID, state.SpendSample{
+			Stage: domain.StageImplement, Session: "gen-" + strconv.FormatFloat(credits, 'f', 0, 64),
+			Role: "implementer", Model: "m", Credits: credits, InputTokens: 100, OutputTokens: 10,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f, err := store.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bd, err := store.StageBreakdown(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := []featureRow{{F: f, StageSpend: bd}, {F: quiet}}
+	now := time.Now()
+	w := fleetrun.Window{From: now.Add(-time.Hour), To: now.Add(time.Hour)}
+	rep, err := buildFleetReport(ctx, store, rows, w, now, map[domain.FeatureID]bool{f.ID: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Lanes) != 1 || rep.Lanes[0].ID != f.ID {
+		t.Fatalf("lanes = %+v, want the card that spent", rep.Lanes)
+	}
+	if l := rep.Lanes[0]; l.Credits != 48 || !l.Running {
+		t.Errorf("lane = %.2f credits, running %v; want its counter's 48, running by the board's word", l.Credits, l.Running)
+	}
+	if rep.Credits != rep.AllTime.Credits || rep.Running != 1 {
+		t.Errorf("window %.2f, all-time %.2f, running %d; want the two totals equal and one running",
+			rep.Credits, rep.AllTime.Credits, rep.Running)
 	}
 }
 

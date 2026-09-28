@@ -220,7 +220,7 @@ func (m *Shell) applyReentry(msg reentryClassifiedMsg) tea.Cmd {
 	if out.Confirm {
 		// An act, not an answer: it waits. The chip takes the picker's
 		// place and the line stays in the composer (chip.go).
-		m.reentryPending = &reentryReading{line: msg.note, out: out, forward: label, goOnEnter: goOnEnter(out)}
+		m.setChip(&reentryReading{id: r.F.ID, line: msg.note, out: out, forward: label, goOnEnter: goOnEnter(out)})
 		m.clearTransientNotice()
 		return nil
 	}
@@ -357,10 +357,11 @@ func (m *Shell) commitRewind(f domain.Feature, out reentry.Outcome) tea.Cmd {
 	m.dropSession(f.ID)
 	store, path, id := m.store, out.Path, f.ID
 	target, edited := out.Target, !out.Edit.Empty()
+	actor := m.humanActor()
 	return func() tea.Msg {
 		ctx := context.Background()
 		for _, to := range path {
-			if _, err := store.Transition(ctx, id, to, "user"); err != nil {
+			if _, err := store.Transition(ctx, id, to, actor); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 			}
 		}

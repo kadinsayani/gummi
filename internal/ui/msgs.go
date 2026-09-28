@@ -55,6 +55,9 @@ type featureRow struct {
 	// snapshot resolved against the live dependency store (never a
 	// persisted flag, so it cannot go stale and diverge from the gate).
 	DepBlocked bool
+	// DepBlockers names the unmet dependencies behind DepBlocked, in the
+	// order the engine reports them — the "waits on" a row can print.
+	DepBlockers []domain.FeatureID
 	// Exited reports that the card's CURRENT stage has already finished a
 	// run — a stage_exit event for it sits in the log, newer than the
 	// transition that entered the stage — and ExitVerdict is what that
@@ -242,6 +245,14 @@ type blockersMsg struct {
 // One card, not all of them: this runs on artifact loads and on every
 // turn end, where walking the whole board would be a file read and a
 // query per card for one card's change.
+// RefreshBlockers re-reads one card's gate blockers (open spec questions,
+// unresolved diff comments, undrafted sections) into its row. A web write
+// to a card's documents is made off the loop, so nothing the loop sees
+// would recount them: without this a comment added from the page would
+// not reach the decision it rides on until something else reloaded the
+// board.
+func (m *Shell) RefreshBlockers(id string) tea.Cmd { return m.refreshBlockers(webID(id)) }
+
 func (m *Shell) refreshBlockers(id domain.FeatureID) tea.Cmd {
 	if !m.attached() {
 		return nil
@@ -314,7 +325,10 @@ func (m *Shell) loadRows() tea.Msg {
 				}
 			}
 		}
-		row.DepBlocked = len(m.dependencyBlockers(ctx, f.ID)) > 0
+		for _, b := range m.dependencyBlockers(ctx, f.ID) {
+			row.DepBlockers = append(row.DepBlockers, b.ID)
+		}
+		row.DepBlocked = len(row.DepBlockers) > 0
 		row.Foreign, row.DrivenAbroad = state.ForeignDriver(m.ws, f.ID)
 		if events, err := m.store.Events(ctx, f.ID); err == nil {
 			row.AutopilotDriving = threadfold.Driving(threadfold.LiveStretches(f, events, m.ws))
@@ -562,12 +576,27 @@ func (m *Shell) duplicateFeature(id domain.FeatureID) tea.Cmd {
 }
 
 // advanceStage moves the feature along its primary forward edge as the
-// user — advanceStageAs(id, "user"). Every hand-driven call site (the
-// board's own g, the spec view's approve) goes through this name
-// unchanged; autopilot's own crossing (autopilot.go) calls advanceStageAs
-// directly with state.ActorAutopilot instead.
+// person acting — advanceStageAs(id, m.humanActor()), which is "user" at
+// the terminal and the named person on the web face. Every hand-driven
+// call site (the board's own g, the spec view's approve) goes through
+// this name unchanged; autopilot's own crossing (autopilot.go) calls
+// advanceStageAs directly with state.ActorAutopilot instead.
 func (m *Shell) advanceStage(id domain.FeatureID) tea.Cmd {
-	return m.advanceStageAs(id, "user")
+	return m.advanceStageAs(id, m.humanActor())
+}
+
+// humanActor is who a hand-driven act is recorded as: the person a web
+// intent carries (state.PersonActor), or the terminal's "user". It is read
+// on the Update goroutine, when the act is set up — a command that runs
+// later captures it rather than asking again.
+func (m *Shell) humanActor() string {
+	if m.intent != nil && m.intent.in.actor != "" {
+		return m.intent.in.actor
+	}
+	if m.webActor != "" {
+		return m.webActor
+	}
+	return state.ActorUser
 }
 
 // autopilotGateBlockedMsg reports that actor state.ActorAutopilot's own
@@ -1087,7 +1116,13 @@ func (m *Shell) migrateDraft(f *domain.Feature) error {
 // worktree copy of an item mid-flight from the committed-artifact era.
 // Empty when none exists yet.
 func (m *Shell) artifactFile(f *domain.Feature) string {
-	home, ok := f.ArtifactFile(m.wt.Root())
+	return artifactFileIn(m.wt.Root(), m.ws.DraftsDir(), f)
+}
+
+// artifactFileIn is artifactFile for a workspace root and drafts
+// directory in hand, for a reader running off the Update loop.
+func artifactFileIn(root, drafts string, f *domain.Feature) string {
+	home, ok := f.ArtifactFile(root)
 	if !ok {
 		// No artifact, so no candidate: without this the bare join below
 		// named the workspace ROOT, which Stat happily confirms exists —
@@ -1097,8 +1132,8 @@ func (m *Shell) artifactFile(f *domain.Feature) string {
 	}
 	for _, p := range []string{
 		home,
-		filepath.Join(m.ws.DraftsDir(), spec.DraftFilename(f)),
-		filepath.Join(m.wt.Root(), f.WorktreePath(), f.ArtifactPath()),
+		filepath.Join(drafts, spec.DraftFilename(f)),
+		filepath.Join(root, f.WorktreePath(), f.ArtifactPath()),
 	} {
 		if _, err := os.Stat(p); err == nil {
 			return p
@@ -1204,8 +1239,9 @@ func (m *Shell) bounceStage(id domain.FeatureID, note string) tea.Cmd {
 		m.bounceNotes[id] = note
 	}
 	m.dropSession(id)
+	actor := m.humanActor()
 	return func() tea.Msg {
-		if _, err := m.store.Transition(ctx, id, back, "user"); err != nil {
+		if _, err := m.store.Transition(ctx, id, back, actor); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		text := fmt.Sprintf("%s bounced back to %s", id, back)

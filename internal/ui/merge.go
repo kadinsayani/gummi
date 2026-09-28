@@ -37,6 +37,42 @@ type mergeReadyMsg struct {
 	err  error
 }
 
+// landingRefusal is why f may not land right now, or "" when it may. The
+// floors are the workflow's (AGENTS.md; domain.Feature.MayLand): a card
+// lands from verify — verified, or overruled there by a person, which is
+// an answer that stop offers — and never from before it, whatever key or
+// request asks. A freeform card lands on a person's read of its diff, so
+// not while its agent is still writing it, nor over the person's own open
+// comments on it. A handed-off card may still be landed after all.
+func (m *Shell) landingRefusal(f domain.Feature) string {
+	if f.IsFreeform() {
+		r, ok := m.rowByID(f.ID)
+		if !ok {
+			return ""
+		}
+		if m.freeformTurnBusy(r) {
+			return string(f.ID) + ": a turn is in flight — stop it, or let it finish, before landing"
+		}
+		if n := r.OpenDiffComments; n > 0 {
+			return fmt.Sprintf("%s: %d open diff comment%s — resolve %s or send %s back before landing", f.ID, n, plural(n), them(n), them(n))
+		}
+		return ""
+	}
+	switch {
+	case f.Stage == domain.StageVerify, f.HandedOff():
+		return ""
+	}
+	return string(f.ID) + " is at " + string(f.Stage) + " — it lands from verify, once the branch has been verified"
+}
+
+// them is "it" or "them" for a count.
+func them(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
+}
+
 // prepareMerge checks the merge preconditions off the render loop. On
 // success it opens the commit-message dialog, which drafts a suggested
 // landing message from the spec and the branch — the user still approves
@@ -46,6 +82,9 @@ type mergeReadyMsg struct {
 // checkpoint first: gummi owns the branch's commits, and only committed
 // work merges.
 func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
+	if why := m.landingRefusal(f); why != "" {
+		return func() tea.Msg { return mergeReadyMsg{f: f, err: errors.New(why)} }
+	}
 	return func() tea.Msg {
 		ctx := context.Background()
 		// A card lands either via its linked PR or locally, never both.
@@ -57,7 +96,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		// end the card here and let the PR carry it — because a reader who
 		// opened a PR is usually done with gummi, not stuck.
 		if !f.PullRequest.Empty() {
-			return mergeReadyMsg{err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or press h to close the card and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
+			return mergeReadyMsg{f: f, err: fmt.Errorf("%s is linked to %s#%d (%s) — merge it there and pull %s, or press h to close the card and let the PR carry it (`gummi pr unlink %s` to land it locally instead)",
 				f.ID, f.PullRequest.Repo, f.PullRequest.Number, f.PullRequest.URL, m.baseBranch(f), f.ID)}
 		}
 		// A stacked card's branch contains the commits of every card
@@ -68,23 +107,23 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 		if eng, release := m.stackEngine(); eng != nil {
 			defer release()
 			if blocker, blocked := eng.StackLandBlocker(ctx, &f); blocked {
-				return mergeReadyMsg{err: fmt.Errorf("%s sits on %s in its stack — %s has to land first, or its commits would ride in under this card",
+				return mergeReadyMsg{f: f, err: fmt.Errorf("%s sits on %s in its stack — %s has to land first, or its commits would ride in under this card",
 					f.ID, blocker, blocker)}
 			}
 		}
 		if _, err := m.wt.CommitAll(ctx, &f, string(f.ID)+": final checkpoint"); err != nil {
-			return mergeReadyMsg{err: err}
+			return mergeReadyMsg{f: f, err: err}
 		}
 		if dirty, err := m.wt.MainTrackedDirty(ctx, &f); err != nil {
-			return mergeReadyMsg{err: err}
+			return mergeReadyMsg{f: f, err: err}
 		} else if dirty {
-			return mergeReadyMsg{err: errors.New(m.baseBranch(f) + " checkout has uncommitted changes — commit or stash them before merging")}
+			return mergeReadyMsg{f: f, err: errors.New(m.baseBranch(f) + " checkout has uncommitted changes — commit or stash them before merging")}
 		}
 		// stale-row safety: the board flag may predate an outside merge
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
-			return mergeReadyMsg{err: err}
+			return mergeReadyMsg{f: f, err: err}
 		} else if landed {
-			return mergeReadyMsg{err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
+			return mergeReadyMsg{f: f, err: errors.New(string(f.ID) + " already landed on " + m.baseBranch(f) + " — " + cleanUpNudge)}
 		}
 		// pre-land provenance scan: warn (never block) when branch commits
 		// carry agent attribution — the squash discards their messages, but
@@ -113,6 +152,7 @@ func (m *Shell) prepareMerge(f domain.Feature, thenDone bool) tea.Cmd {
 // merge is refused or conflicts — the thing still has not been attended
 // to — and leaves no second place for a future caller to forget.
 func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bool) tea.Cmd {
+	actor := m.humanActor()
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if landed, err := m.wt.Landed(ctx, &f); err != nil {
@@ -144,8 +184,10 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 				return noticeMsg{text: sanitize(string(f.ID) + " squash-merged into " + base + ", but clearing its hand-off mark failed: " + err.Error()), isErr: true, reload: true, clearInbox: f.ID}
 			}
 		}
-		if thenDone {
-			if err := m.closeLandedCard(ctx, f); err != nil {
+		// a handed-off card is already closed (done): landing it after all
+		// retracts the hand-off above and leaves it where it stands
+		if thenDone && f.Stage != domain.StageDone {
+			if err := m.closeLandedCard(ctx, f, actor); err != nil {
 				// the branch IS on the base; the card just did not move. That
 				// is still the state the inbox item was asking about, so it is
 				// cleared here too — leaving it up would keep inviting a
@@ -163,12 +205,12 @@ func (m *Shell) squashMergeFeature(f domain.Feature, message string, thenDone bo
 // crosses its verify→done edge; a freeform card has no edge to cross (its
 // stage has none at all, DESIGN §19), so it closes through the store method
 // that exists for exactly that and refuses every other kind.
-func (m *Shell) closeLandedCard(ctx context.Context, f domain.Feature) error {
+func (m *Shell) closeLandedCard(ctx context.Context, f domain.Feature, actor string) error {
 	if f.IsFreeform() {
-		_, err := m.store.CloseFreeform(ctx, f.ID, "user")
+		_, err := m.store.CloseFreeform(ctx, f.ID, actor)
 		return err
 	}
-	_, err := m.store.Transition(ctx, f.ID, domain.StageDone, "user")
+	_, err := m.store.Transition(ctx, f.ID, domain.StageDone, actor)
 	return err
 }
 

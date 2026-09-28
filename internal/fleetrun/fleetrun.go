@@ -63,6 +63,15 @@ type Input struct {
 	Cards []Card
 	// Rows is every card on the board, for the all-time ledger.
 	Rows []AllTimeRow
+	// Busy is the board's own reading of which cards are running at Now:
+	// the set its header counts, which is what a person reads as
+	// running. A card's record cannot say it — a session left open by a
+	// process that died looks exactly like one working, and one blocked
+	// on its own question is open on the record while the board says it
+	// needs you. Nil when the reader has no live board (a cold CLI, a
+	// test); the fold then reads it off the record as best the record
+	// can: an open pass on a card with no decision standing open.
+	Busy map[domain.FeatureID]bool
 }
 
 // Block is one session on a timeline lane, already clipped to the
@@ -99,19 +108,29 @@ type Lane struct {
 	// on you since 14:02"). Zero when nothing is.
 	OpenWaitFrom time.Time
 
-	// Credits is what this card's passes started in the window cost, and
-	// Redo the subset of that spent doing work the card had already
-	// done. Both are window figures; the card's whole-life total lives
-	// on its own run tab.
-	Credits, Redo float64
+	// Credits is what this card spent in the window — the passes it
+	// started there, and the spend no pass holds whose moment
+	// (cardrun.Charge.At) fell there — Estimated the subset a provider
+	// may still settle differently, and Redo the subset spent doing
+	// work the card had already done. All are window figures; over a
+	// window holding the card's whole life, Credits is the card's own
+	// total (cardrun.Money.Credits), the figure its board row prints.
+	Credits, Estimated, Redo float64
 
 	// Tokens is what those same passes spent in tokens. It is charged by
 	// the lane and on the same condition as Credits, so the two can
 	// never come to cover different passes.
 	Tokens Tokens
 
-	// Running is whether a session is still live at the right edge.
+	// Running is whether the card is running at the right edge, by the
+	// board's reading when the fold was given one (Input.Busy).
 	Running bool
+
+	// working is the stretches of Blocks an agent was actually working —
+	// each block less the time it stood blocked on its own question
+	// (cardrun.WorkingSpans). Concurrency and the busiest stretch are
+	// read off these, not off the blocks the lane draws.
+	working []Span
 
 	// Last is the lane's newest moment inside the window — the ordering
 	// key. Zero on a lane with nothing in the window, which the fold
@@ -163,7 +182,9 @@ func (t *Tokens) add(o Tokens) {
 // AllTime is the ledger the window sits beside: the workspace's own
 // counters, folded over every card the board holds. Unlike the window
 // figures it needs no attribution rule — the counters are already
-// totals — which is exactly why the two columns never try to agree.
+// totals — and a window that holds every card's whole life comes to the
+// same figure, because the window charges every credit a card's counter
+// holds somewhere (the package doc owns the rule).
 type AllTime struct {
 	Cards, Settled, Landed int
 	ByEnding               map[domain.Ending]int
@@ -185,7 +206,9 @@ type Report struct {
 	// a rate is never divided by a span nothing ran in.
 	RateSpan time.Duration
 
-	// Credits is what the window's passes cost, Estimated the subset a
+	// Credits is what the window's cards spent in it, summed off the
+	// lanes — passes by where they started, other spend by its one
+	// moment (the package doc owns the rule). Estimated is the subset a
 	// provider may still settle differently, and Rework the subset spent
 	// doing work the card had already done — Corrected after a verdict,
 	// Reproved over a new base.
@@ -193,10 +216,8 @@ type Report struct {
 	Rework, Corrected, Reproved float64
 	ByStage, ByModel            []cardrun.Bucket
 
-	// Tokens is what the window's passes spent in tokens, summed off the
-	// lanes. It covers the passes Credits covers and nothing else, which
-	// is why it may read lower than the all-time column's token figure
-	// on a board whose spend is not all passes.
+	// Tokens is what the window's spend came to in tokens, summed off the
+	// lanes. It covers exactly the spend Credits covers.
 	Tokens Tokens
 
 	// The window clock, summed across the window's cards: agent working,
@@ -204,16 +225,19 @@ type Report struct {
 	// summed card lives the two shares are read against.
 	Agent, OnYou, Idle, Elapsed time.Duration
 
-	// Running is how many lanes have a session live at the right edge —
-	// the headline's "3 running". A field of the fold rather than
+	// Running is how many lanes are running at the right edge — the
+	// headline's "3 running", by the board's reading (Input.Busy). A field of the fold rather than
 	// something the caller counts, so a surface reading the report
 	// cannot disagree with the lanes it was drawn from.
 	Running int
 
-	// PeakLanes is how many cards ran at once at the busiest moment, and
-	// Busiest the start of the stretch with the most agent time — an
-	// hour on a window short enough to read in hours, a day on a longer
-	// one. Both zero when nothing ran.
+	// PeakLanes is how many cards had an agent working at once at the
+	// busiest moment, and Busiest the start of the stretch with the most
+	// agent time — an hour on a window short enough to read in hours, a
+	// day on a longer one. Both are read off the lanes' working time,
+	// never the time a session stood blocked on its own question, so
+	// the busiest stretch is a part of the same agent time Agent sums.
+	// Both zero when nothing ran.
 	PeakLanes    int
 	Busiest      time.Time
 	BusiestLen   time.Duration
@@ -241,7 +265,7 @@ func Fold(in Input) Report {
 	rep := Report{Window: in.Window, AllTime: AllTime{ByEnding: map[domain.Ending]int{}}}
 	rep.RateSpan = rateSpan(in)
 	for _, c := range in.Cards {
-		if lane, ok := buildLane(c, in.Window, in.Now); ok {
+		if lane, ok := buildLane(c, in.Window, in.Now, in.Busy); ok {
 			rep.Lanes = append(rep.Lanes, lane)
 		}
 		cl := windowClock(c, in.Window, in.Now)
@@ -253,6 +277,7 @@ func Fold(in Input) Report {
 	sort.SliceStable(rep.Lanes, func(i, j int) bool { return rep.Lanes[i].Last.After(rep.Lanes[j].Last) })
 	for _, l := range rep.Lanes {
 		rep.Credits += l.Credits
+		rep.Estimated += l.Estimated
 		rep.Rework += l.Redo
 		rep.Tokens.add(l.Tokens)
 		if l.Running {
@@ -293,14 +318,17 @@ func rateSpan(in Input) time.Duration {
 		return w.To.Sub(w.From)
 	}
 	earliest := time.Time{}
+	note := func(t time.Time) {
+		if !t.IsZero() && (earliest.IsZero() || t.Before(earliest)) {
+			earliest = t
+		}
+	}
 	for _, c := range in.Cards {
 		for _, s := range c.Run.Sessions {
-			if s.Started.IsZero() {
-				continue
-			}
-			if earliest.IsZero() || s.Started.Before(earliest) {
-				earliest = s.Started
-			}
+			note(s.Started)
+		}
+		for _, ch := range c.Run.Money.Charges {
+			note(ch.At)
 		}
 	}
 	if earliest.IsZero() || !earliest.Before(w.To) {
@@ -312,7 +340,7 @@ func rateSpan(in Input) time.Duration {
 // buildLane builds one card's timeline lane. The bool reports whether
 // the card has anything in the window at all — a card whose whole life
 // falls outside it contributes nothing, not even an empty row.
-func buildLane(c Card, w Window, now time.Time) (Lane, bool) {
+func buildLane(c Card, w Window, now time.Time, busy map[domain.FeatureID]bool) (Lane, bool) {
 	l := Lane{
 		ID:      c.Feature.ID,
 		Title:   c.Feature.Title,
@@ -323,12 +351,14 @@ func buildLane(c Card, w Window, now time.Time) (Lane, bool) {
 
 	// Blocks: every pass, clipped to the window; an open pass runs to
 	// now and then to the right edge.
+	asks := cardrun.AskSpans(c.Events)
+	open := false
 	for _, s := range c.Run.Sessions {
 		if s.Started.IsZero() {
 			continue
 		}
-		from, to, open := s.Started, s.Ended, !s.Closed
-		if open {
+		from, to, isOpen := s.Started, s.Ended, !s.Closed
+		if isOpen {
 			to = now
 		}
 		if from.Before(w.From) {
@@ -338,21 +368,34 @@ func buildLane(c Card, w Window, now time.Time) (Lane, bool) {
 			to = w.To
 		}
 		if to.After(from) {
-			l.Blocks = append(l.Blocks, Block{From: from, To: to, Stage: s.Stage, Open: open})
+			l.Blocks = append(l.Blocks, Block{From: from, To: to, Stage: s.Stage, Open: isOpen})
+			l.working = append(l.working, cardrun.WorkingSpans(from, to, asks)...)
 			l.Last = later(l.Last, to)
 		}
-		if open {
-			l.Running = true
+		if isOpen {
+			open = true
 		}
 		// The window charges a pass to the window it started in (the
 		// package doc owns the rule), and the lane keeps its own share.
 		if w.Contains(s.Started) {
 			l.Credits += s.Credits
+			l.Estimated += s.Estimated
 			l.Tokens.add(Tokens{Input: s.InputTokens, Cached: s.CachedTokens, Output: s.OutputTokens})
 			if s.Redo {
 				l.Redo += s.Credits
 			}
 		}
+	}
+	// ...and the spend no pass holds to the window its one moment fell in
+	// (cardrun.Charge), so the lane adds up to the card.
+	for _, ch := range c.Run.Money.Charges {
+		if !w.Contains(ch.At) {
+			continue
+		}
+		l.Credits += ch.Credits
+		l.Estimated += ch.Estimated
+		l.Tokens.add(Tokens{Input: ch.InputTokens, Cached: ch.CachedTokens, Output: ch.OutputTokens})
+		l.Last = later(l.Last, ch.At)
 	}
 
 	// Waits: the same spans the card's own clock sums, clipped to the
@@ -363,10 +406,12 @@ func buildLane(c Card, w Window, now time.Time) (Lane, bool) {
 	for _, sp := range l.Waits {
 		l.Last = later(l.Last, sp.To)
 	}
+	waiting := false
 	for _, sp := range cardrun.DecisionSpans(c.Events) {
 		if !sp.To.IsZero() {
 			continue
 		}
+		waiting = true
 		from := sp.From
 		if from.Before(w.From) {
 			from = w.From
@@ -388,8 +433,18 @@ func buildLane(c Card, w Window, now time.Time) (Lane, bool) {
 		l.Last = later(l.Last, c.LandedAt)
 	}
 
+	// Running is the board's word where there is a board. Without one,
+	// it is an open pass on a card nobody is being asked about — the
+	// board's own precedence, where needing you outranks being busy.
+	if busy != nil {
+		l.Running = busy[c.Feature.ID]
+	} else {
+		l.Running = open && !waiting
+	}
+
 	l.Note = laneNote(c, w)
-	if len(l.Blocks) == 0 && len(l.Waits) == 0 && len(l.Gates) == 0 && l.LandedAt.IsZero() {
+	if len(l.Blocks) == 0 && len(l.Waits) == 0 && len(l.Gates) == 0 && l.LandedAt.IsZero() &&
+		l.Credits == 0 && !l.Running {
 		return Lane{}, false
 	}
 	return l, true
@@ -535,6 +590,17 @@ func windowBuckets(in Input) (stage, model []cardrun.Bucket) {
 			}
 			bm[m] += s.Credits
 		}
+		for _, ch := range c.Run.Money.Charges {
+			if !in.Window.Contains(ch.At) {
+				continue
+			}
+			bs[ch.Bucket()] += ch.Credits
+			m := ch.Model
+			if m == "" {
+				m = "unknown"
+			}
+			bm[m] += ch.Credits
+		}
 	}
 	return cardrun.Buckets(bs), cardrun.Buckets(bm)
 }
@@ -551,7 +617,7 @@ func concurrency(lanes []Lane, w Window, bucket time.Duration) (peak int, busies
 	}
 	var evs []ev
 	for _, l := range lanes {
-		for _, b := range l.Blocks {
+		for _, b := range l.working {
 			evs = append(evs, ev{b.From, true}, ev{b.To, false})
 		}
 	}
@@ -584,7 +650,7 @@ func concurrency(lanes []Lane, w Window, bucket time.Duration) (peak int, busies
 		}
 		var agent time.Duration
 		for _, l := range lanes {
-			for _, b := range l.Blocks {
+			for _, b := range l.working {
 				agent += overlap(b.From, b.To, from, to)
 			}
 		}
@@ -673,10 +739,19 @@ func allTime(rows []AllTimeRow) AllTime {
 		// three numbers beats a total and a cache share that were
 		// measured differently. The rows are written beside every
 		// AddSpend, so the two agree on what they both hold.
+		var rows float64
 		for _, s := range r.StageSpend {
 			bs[string(s.Stage)] += s.Credits
 			bm[s.Model] += s.Credits
+			rows += s.Credits
 			a.Tokens.add(Tokens{Input: s.InputTokens, Cached: s.CachedTokens, Output: s.OutputTokens})
+		}
+		// What the counter holds and no row does is named, not dropped,
+		// by the same derivation the card's own report uses — so the
+		// buckets add up to the total they sit under.
+		for _, ch := range cardrun.Unrecorded(r.Feature, rows) {
+			bs[ch.Bucket()] += ch.Credits
+			bm[ch.Model] += ch.Credits
 		}
 	}
 	a.ByStage, a.ByModel = cardrun.Buckets(bs), cardrun.Buckets(bm)

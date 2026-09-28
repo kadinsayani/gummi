@@ -35,6 +35,9 @@ import (
 // reentryReading is the chip's state: the line it was read from, what
 // the card would do, and whether enter does it.
 type reentryReading struct {
+	// id is the card the reading is of: the chip belongs to that card's
+	// page, and the web face pins it only there.
+	id        domain.FeatureID
 	line      string
 	out       reentry.Outcome
 	forward   string // the forward row's own label, for an Advance
@@ -332,7 +335,7 @@ func chipKeys(s *theme.Styles, goOnEnter bool) string {
 // on to the composer — after withdrawing the chip, because a key that
 // types is an edit to the line the chip was read from.
 func (m *Shell) chipKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
-	p := m.reentryPending
+	p := m.chip(r.F.ID)
 	if p == nil {
 		return nil, false
 	}
@@ -349,24 +352,35 @@ func (m *Shell) chipKey(r featureRow, msg tea.KeyPressMsg) (tea.Cmd, bool) {
 		// the take-it-back gesture, and it never leaves the page: the
 		// line goes where a bare composer would have sent it — and that
 		// starts a conversation the next line continues (chat.go)
-		m.reentryPending = nil
-		if s := m.sessionFor(r.F.ID); s == nil || !s.Live() {
-			m.startChat(r.F.ID)
-		}
-		return m.sendThreadMessage(r.F, p.line), true
+		return m.declineReading(r), true
 	case "up", "down", "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		// the picker is not on screen, so its keys do nothing rather than
 		// selecting a row the reader cannot see
 		return nil, true
 	}
-	m.reentryPending = nil
+	m.dropChip(r.F.ID)
 	return nil, false
 }
 
 // takeReading performs the chip's act.
+// declineReading is the chip's esc: withdraw the reading and send the line
+// as a plain message instead — the key's body, and the web face's "keep
+// it here".
+func (m *Shell) declineReading(r featureRow) tea.Cmd {
+	p := m.chip(r.F.ID)
+	m.dropChip(r.F.ID)
+	if p == nil {
+		return nil
+	}
+	if s := m.sessionFor(r.F.ID); s == nil || !s.Live() {
+		m.startChat(r.F.ID)
+	}
+	return m.sendThreadMessage(r.F, p.line)
+}
+
 func (m *Shell) takeReading(r featureRow) tea.Cmd {
-	p := m.reentryPending
-	m.reentryPending = nil
+	p := m.chip(r.F.ID)
+	m.dropChip(r.F.ID)
 	if p == nil {
 		return nil
 	}
@@ -390,3 +404,17 @@ func (m *Shell) chipBindings(p *reentryReading) []binding {
 		binding{key: "esc", label: "keep it here", help: "withdraw the reading and send your line as a plain message", bar: true},
 	))
 }
+
+// chip is the card's chip, or nil.
+func (m *Shell) chip(id domain.FeatureID) *reentryReading { return m.chips[id] }
+
+// setChip raises p's chip on its card, replacing that card's own only.
+func (m *Shell) setChip(p *reentryReading) {
+	if m.chips == nil {
+		m.chips = map[domain.FeatureID]*reentryReading{}
+	}
+	m.chips[p.id] = p
+}
+
+// dropChip withdraws the card's chip.
+func (m *Shell) dropChip(id domain.FeatureID) { delete(m.chips, id) }

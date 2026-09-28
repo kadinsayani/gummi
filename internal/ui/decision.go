@@ -11,7 +11,6 @@ import (
 	"github.com/morphis/gummi/internal/decisions"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -35,6 +34,8 @@ const (
 // Step 4 makes open decisions durable; until then asks come from the live
 // session and workflow options are regenerated from nextActions.
 type threadDecision struct {
+	// card is the card the decision is about.
+	card     domain.FeatureID
 	key      string
 	kind     decisionKind
 	question string
@@ -72,7 +73,7 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		snap := sess.Snapshot()
 		if ask := snap.PendingAsk; ask != nil {
 			key := "ask|" + string(r.F.ID) + "|" + ask.CallID + "|" + ask.Question
-			return &threadDecision{key: key, kind: decisionAsk, question: ask.Question, ask: ask}
+			return &threadDecision{card: r.F.ID, key: key, kind: decisionAsk, question: ask.Question, ask: ask}
 		}
 		if sess.Interactive && snap.Busy {
 			// the architect is mid-turn in this very thread: the composer
@@ -123,7 +124,7 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 		ids = append(ids, action.id)
 	}
 	key := strings.Join([]string{string(kind), string(r.F.ID), string(r.F.Stage), strings.Join(ids, ",")}, "|")
-	return &threadDecision{key: key, kind: kind, question: question, actions: actions}
+	return &threadDecision{card: r.F.ID, key: key, kind: kind, question: question, actions: actions}
 }
 
 // visibleDecision is openDecision narrowed to a decision that is also
@@ -459,6 +460,12 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			// (talkAction), where enter's own label already says so.
 			return "no agent attached — choose what happens next."
 		}
+		if in.freeformBusy {
+			// a freeform card's turn is in flight: its only answer is to
+			// stop it (stageActions), and the idle sentence would say
+			// nothing is running one line above the turn that is
+			return "the agent is working on a turn — let it finish, or stop it here."
+		}
 		if r.F.IsGoal() && r.F.Stage == domain.StageImplement {
 			// a goal's implement stage has no session of its own: its cards
 			// run, and the goal comes back to you when they are done
@@ -523,7 +530,9 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		m.decisionKey, m.decisionCursor, m.decisionPicked = "", 0, nil
 		m.decisionAimed = false
 		m.threadFreeForm = false
-		m.reentryPending = nil
+		if r, ok := m.selected(); ok {
+			m.dropChip(r.F.ID)
+		}
 		return
 	}
 	if d.key != m.decisionKey {
@@ -534,9 +543,14 @@ func (m *Shell) syncDecision(d *threadDecision) {
 		// and so has the conversation the stop was in. A read still out is
 		// withdrawn for the same reason, and cancelled with it: it would
 		// come back a reading of a stop nobody is looking at any more.
-		m.reentryPending = nil
-		m.withdrawRead()
-		m.chatting = nil
+		// Only this card's: a web board answers several cards at once, and
+		// a line sent on one must not take another card's chip, read or
+		// conversation with it.
+		m.dropChip(d.card)
+		if p := m.reentryRead; p != nil && p.id == d.card {
+			m.withdrawRead()
+		}
+		delete(m.chatting, d.card)
 		m.decisionAimed = false
 		// a different question invalidates the armed free-form channel —
 		// it belonged to the answer that is gone
@@ -584,7 +598,7 @@ func (m *Shell) openDecisionBlock(s *theme.Styles, r featureRow, w, maxRows int)
 		// through a verb while one is up has not answered it.
 		return nil
 	}
-	if p := m.reentryPending; p != nil && d.ask == nil {
+	if p := m.chip(r.F.ID); p != nil && d.ask == nil {
 		// the chip stands where the picker stood, under the same
 		// narration; the picker comes back the moment the chip goes
 		width := max(w-2, 10)
@@ -883,12 +897,12 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 	}
 	m.threadInput.Reset()
 	m.threadFreeForm = false
-	eng := m.engine
+	eng, actor := m.engine, m.humanActor()
 	return func() tea.Msg {
 		if eng.Get(r.F.ID) != sess {
 			return noticeMsg{text: "session is no longer active", isErr: true}
 		}
-		if err := eng.Answer(context.Background(), r.F.ID, text); err != nil {
+		if err := eng.AnswerAs(context.Background(), r.F.ID, text, actor); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		// the question is answered: it is no longer something that needs
@@ -899,8 +913,16 @@ func (m *Shell) answerAskWith(r featureRow, text string) tea.Cmd {
 }
 
 func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
+	return m.answerDecisionAt(r, d, m.decisionCursor, m.decisionPicked)
+}
+
+// answerDecisionAt answers d with the option at cursor (and, for a
+// multi-pick ask, the picked set) — enter's body on the card page, and
+// the web face's answer. The answer is recorded as the person acting
+// (humanActor).
+func (m *Shell) answerDecisionAt(r featureRow, d *threadDecision, cursor int, picked map[int]bool) tea.Cmd {
 	if d.ask != nil {
-		if m.decisionCursor == len(d.ask.Options) {
+		if cursor == len(d.ask.Options) {
 			// the synthetic "Chat about this" row is selected: there is no
 			// entry in ask.Options at this index for decisions.AnswerText to
 			// resolve, so enter arms the free-form channel instead of
@@ -908,7 +930,7 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 			m.threadFreeForm = true
 			return nil
 		}
-		answer := decisions.AnswerText(d.ask, m.decisionCursor, m.decisionPicked)
+		answer := decisions.AnswerText(d.ask, cursor, picked)
 		// A gate ask IS the crossing: answering it with the advance option
 		// has to move the card, or the question would be a control that
 		// looks like a decision and does nothing. Everything else about it
@@ -928,12 +950,12 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 			}
 		}
 		sess := m.sessionFor(r.F.ID)
-		eng := m.engine
+		eng, actor := m.engine, m.humanActor()
 		answerCmd := func() tea.Msg {
 			if sess == nil || eng.Get(r.F.ID) != sess {
 				return noticeMsg{text: "session is no longer active", isErr: true}
 			}
-			if err := eng.Answer(context.Background(), r.F.ID, answer); err != nil {
+			if err := eng.AnswerAs(context.Background(), r.F.ID, answer, actor); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 			return noticeMsg{clearInbox: r.F.ID}
@@ -945,12 +967,12 @@ func (m *Shell) answerDecision(r featureRow, d *threadDecision) tea.Cmd {
 		// recorded, and the gate's own blocker checks (open threads, the
 		// undrafted floor) still run inside Advance — answering a gate
 		// asks for the crossing, it does not force one.
-		return tea.Sequence(answerCmd, m.advanceStageAs(r.F.ID, state.ActorUser))
+		return tea.Sequence(answerCmd, m.advanceStageAs(r.F.ID, actor))
 	}
-	if m.decisionCursor < 0 || m.decisionCursor >= len(d.actions) {
+	if cursor < 0 || cursor >= len(d.actions) {
 		return nil
 	}
-	action := d.actions[m.decisionCursor]
+	action := d.actions[cursor]
 	m.clearTransientNotice()
 	m.endChat(r.F.ID) // a row picked is the way out of a conversation
 	return m.runCardAction(cardAction{

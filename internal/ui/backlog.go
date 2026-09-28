@@ -292,6 +292,7 @@ func (m *Shell) askDesignGate() bool {
 	f := r.F
 	to := forwardEdge(f)
 	m.Overlay.Push(&confirmDialog{
+		card:         f.ID,
 		id:           "confirm-design-gate",
 		cancelLabel:  "Stay",
 		confirmLabel: "Advance",

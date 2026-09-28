@@ -83,11 +83,15 @@ func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 	if m.engine == nil {
 		return 0
 	}
-	s := m.engine.Get(id)
-	if s == nil {
-		return 0
+	if s := m.engine.Get(id); s != nil {
+		return s.CardSpent()
 	}
-	return s.CardSpent()
+	// a freeform card's session is not a stage session: without this its
+	// row kept the spend of its last reload while its agent kept working
+	if ff := m.engine.Freeform(id); ff != nil {
+		return ff.CardSpent()
+	}
+	return 0
 }
 
 // budgetSummary formats the budget: what the card has spent against what

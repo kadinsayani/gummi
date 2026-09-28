@@ -389,10 +389,8 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			"rebase", "r", "rebase", "rebase branch onto " + r.baseBranch() + " (conflicts go to an agent)", false,
 			needsWT,
 		},
-		// The third ending, and the reason it is offered only at verify
-		// while merge is offered at any stage: `m` lands a branch, which
-		// is a thing you might do at any point, but hand-off CLOSES the
-		// card. There is nothing to close before the work is finished —
+		// The third ending, offered only at verify like merge: hand-off
+		// CLOSES the card. There is nothing to close before the work is finished —
 		// an unfinished card that nobody wants is a `D`, not an ending.
 		{
 			// Offered at verify, and on a freeform card at any time: the
@@ -400,15 +398,19 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 			// finished", and on a freeform card only the person can say
 			// when that is — there is no verify to have passed.
 			"handoff", "h", "hand off", handOffHelp, false,
-			needsWT && r.HasWorktree && !r.Landed && (in.stage == domain.StageVerify || freeform),
+			// never while a freeform turn is writing the branch it keeps
+			needsWT && r.HasWorktree && !r.Landed && (in.stage == domain.StageVerify || freeform) && !in.freeformBusy,
 		},
 		{
+			// offered where a landing may happen (merge.go's
+			// landingRefusal): at verify, on a freeform card, and after
+			// a hand-off — never before the branch has been verified
 			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch()), false,
-			needsWT && r.HasWorktree && !r.Landed,
+			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy && (in.stage == domain.StageVerify || freeform || r.F.HandedOff()),
 		},
 		{
 			"squash", "z", "squash", "collapse the branch to one commit in place (review & approve the drafted message)", false,
-			needsWT && r.HasWorktree && !r.Landed,
+			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy,
 		},
 		{
 			"clean", "c", "clean up", "branch landed on " + r.baseBranch() + " — remove the worktree and branch", true,

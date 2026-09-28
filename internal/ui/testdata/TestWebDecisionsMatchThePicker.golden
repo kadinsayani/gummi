@@ -1,0 +1,150 @@
+[
+  {
+    "card": "FD-051",
+    "kind": "idle",
+    "question": "nothing is running — choose what happens next.",
+    "anchor": "thread",
+    "options": [
+      {
+        "id": "advance",
+        "label": "open the plan stage",
+        "detail": "moves the card into plan — start the agent there to have it read the card, and any comments on it",
+        "words": false
+      }
+    ]
+  },
+  {
+    "card": "FD-042",
+    "kind": "failure",
+    "question": "implement failed — choose what happens next.",
+    "anchor": "thread",
+    "options": [
+      {
+        "id": "run",
+        "label": "try again",
+        "detail": "the session errored — a fresh run retries implement",
+        "words": true,
+        "relabel": "try again with your words"
+      }
+    ]
+  },
+  {
+    "card": "FD-047",
+    "kind": "gate",
+    "question": "plan is ready for your decision.",
+    "anchor": "spec",
+    "options": [
+      {
+        "id": "advance",
+        "label": "approve",
+        "detail": "moves the card into implement — start the implementer there to begin",
+        "words": false
+      },
+      {
+        "id": "run",
+        "label": "start the architect",
+        "detail": "shape the spec until it convinces you",
+        "words": true,
+        "relabel": "start the architect with your words"
+      }
+    ]
+  },
+  {
+    "card": "FD-049",
+    "kind": "gate",
+    "question": "plan critique gave no clear verdict — choose what happens next.",
+    "anchor": "spec",
+    "options": [
+      {
+        "id": "run",
+        "label": "start the architect",
+        "detail": "the findings are in the spec — your line goes with them",
+        "words": true,
+        "relabel": "start the architect with your words"
+      },
+      {
+        "id": "advance",
+        "label": "approve anyway",
+        "detail": "overrules the critique — moves the card into implement",
+        "words": false
+      }
+    ]
+  },
+  {
+    "card": "FD-044",
+    "kind": "verify",
+    "question": "verification stopped here — choose what happens next.",
+    "anchor": "diff",
+    "options": [
+      {
+        "id": "bounce",
+        "label": "send it back",
+        "detail": "send the failures back as rework — your line goes with them",
+        "words": true,
+        "relabel": "send it back with your words"
+      },
+      {
+        "id": "advance",
+        "label": "land anyway",
+        "detail": "overrule if the failures do not hold up",
+        "words": false
+      }
+    ]
+  },
+  {
+    "card": "FD-039",
+    "kind": "closed",
+    "question": "FD-039 is closed — nothing landed.",
+    "anchor": "thread",
+    "options": [
+      {
+        "id": "newbug",
+        "label": "open a bug from this",
+        "detail": "a fresh bug card carrying this card's spec, branch and thread",
+        "words": true,
+        "relabel": "open a bug from this with your words"
+      }
+    ]
+  },
+  {
+    "card": "FD-046",
+    "kind": "budget",
+    "question": "implement ran out of budget.",
+    "anchor": "thread",
+    "options": [
+      {
+        "id": "topup",
+        "label": "top up and go on",
+        "detail": "raise the budget — implement picks up where it stopped",
+        "words": false
+      }
+    ]
+  },
+  {
+    "card": "ask",
+    "kind": "ask",
+    "question": "Persist where?",
+    "anchor": "spec",
+    "options": [
+      {
+        "id": "0",
+        "label": "per-device",
+        "detail": "localStorage",
+        "words": false
+      },
+      {
+        "id": "1",
+        "label": "synced",
+        "detail": "account",
+        "words": false
+      },
+      {
+        "id": "chat",
+        "label": "Chat about this",
+        "detail": "reply with your own words instead of picking an option",
+        "words": true,
+        "chat": true
+      }
+    ]
+  }
+]

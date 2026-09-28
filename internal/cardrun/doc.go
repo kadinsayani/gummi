@@ -49,6 +49,28 @@
 // fleetrun's window clock applies the same two helpers, so the card's
 // run tab, the stats tab and the timeline cannot disagree about it.
 //
+// A question holds only the pass that asked it. One nobody answered —
+// the session was stopped mid-question, the card was moved on by hand —
+// stops taking time from the agent when that pass ends, and stops being
+// time on you when the card leaves the stage it was asked in: the rule
+// state.OpenDecisions applies, under which a decision whose stage has
+// moved on is dead rather than waiting. Every decision span obeys the
+// second half, so no wait outlives the stage that could have answered
+// it.
+//
+// # Where a credit is counted
+//
+// The card's counter (Feature.Spend) is the one total: the figure its
+// board row prints, the envelope is drawn against, and Money.Credits
+// reports. The session-keyed rollup is how that total is attributed,
+// and every credit of it lands in exactly one place — a pass, matched
+// to its rows by the session key its own start stamps (attachSpend), or
+// a Charge: a row no pass claims, or counter spend no row records
+// (Unrecorded). A charge carries the one moment the record holds for
+// it, which is what lets the workspace fold window it; a lane there is
+// therefore this card's spend sliced by time, and adds up to this
+// total over a window that holds the card's life.
+//
 // # What a pass is
 //
 // A session is one run of one stage by one role in one flavour — a plan
