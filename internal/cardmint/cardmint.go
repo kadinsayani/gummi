@@ -271,6 +271,16 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 	if err != nil {
 		return domain.Feature{}, err
 	}
+	// A research card's names already say research — its id is RS-,
+	// its document lives under research/ — and people title one
+	// "Research: …", which made every name it carries say it twice
+	// (research/research-compare-…). The title keeps the word; the slug
+	// drops it.
+	if in.Kind == domain.KindResearch {
+		if rest, ok := strings.CutPrefix(slug, "research-"); ok && rest != "" {
+			slug = rest
+		}
+	}
 	if err := requireRepo(in.RequireRepo, in.Repo); err != nil {
 		return domain.Feature{}, err
 	}

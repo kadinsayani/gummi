@@ -181,6 +181,32 @@ func TestMintResearch(t *testing.T) {
 	}
 }
 
+// A research card titled "Research: …" does not say research twice in
+// every name it carries (research/research-compare-…); the title keeps
+// the word. A title that is only the word keeps it as its slug.
+func TestMintResearchDoesNotDoubleTheWord(t *testing.T) {
+	store, ws := newTestWorkspace(t)
+	f, err := Mint(context.Background(), store, ws, Input{
+		Kind: domain.KindResearch, Description: "Research: compare greeting libraries", Envelope: 2400,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Slug != "compare-greeting-libraries" || f.Title != "Research: compare greeting libraries" {
+		t.Errorf("slug = %q, title = %q", f.Slug, f.Title)
+	}
+	if b := f.BranchName(); strings.Contains(b, "research-research") || strings.Contains(b, "research/research") {
+		t.Errorf("branch name doubles the word: %s", b)
+	}
+	g, err := Mint(context.Background(), store, ws, Input{Kind: domain.KindResearch, Description: "Research", Envelope: 2400})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.Slug != "research" {
+		t.Errorf("a title that is only the word slugs to %q", g.Slug)
+	}
+}
+
 // TestMintRejectsUnknownRepoBeforeMinting: an unconfigured repo fails, and
 // fails before a sequence number is consumed — matching both prior
 // duplicates' behavior (createFeature, Materialize's requireRepo).
