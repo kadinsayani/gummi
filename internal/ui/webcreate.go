@@ -200,7 +200,7 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 	// opens; a plain create leaves any such dialog for a person
 	in := webInput{actor: state.PersonActor(person)}
 	if req.Autopilot {
-		in.mode, in.autopilot = domain.GateAutopilot, true
+		in.mode, in.autopilot, in.handoverAsked = domain.GateAutopilot, true, true
 	}
 	out, werr := b.intent(ctx, "", in, webWait, func(m *Shell, _ featureRow) (tea.Cmd, error) {
 		d := m.openCardForm(ct)

@@ -142,6 +142,13 @@ func (d *envelopeDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 
 // The autopilot switch takes the mode the request names, or the one the
 // dialog's own confirm hands over (the other side of the switch).
+//
+// Handing a card to autopilot loosens control, so the menu's hand-over
+// asks first, as the TUI's overlay does: the question is the overlay's
+// own account of what autopilot will do with this card, and only a yes
+// to those words hands it over. Stopping autopilot tightens control and
+// goes at once. A card created on autopilot was already asked, on the
+// new-card form's own button (webInput.handoverAsked).
 func (d *autopilotDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if in.mode == "" && !in.autopilot {
 		return webAnswer{dismiss: true}
@@ -149,6 +156,13 @@ func (d *autopilotDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	mode := in.mode
 	if mode == "" {
 		mode = d.submitMode()
+	}
+	if !in.handoverAsked && mode == domain.GateAutopilot {
+		q := "Hand " + string(d.feature.ID) + " to autopilot?\n" +
+			strings.Join(autopilotBody(d.feature, d.plan, mode, d.base()), "\n")
+		if !in.takeConfirm(webConfirmToken(d.ID(), in.card, q)) {
+			return confirmAsk(d.ID(), in.card, q)
+		}
 	}
 	return webAnswer{cmd: d.onSubmit(mode)}
 }

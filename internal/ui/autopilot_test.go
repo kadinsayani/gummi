@@ -14,6 +14,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/ui/theme"
 	"github.com/morphis/gummi/internal/verdict"
+	"github.com/morphis/gummi/internal/webapi"
 )
 
 // --- pure logic: cursor, forward edges, confirm label, body text ---
@@ -531,10 +532,16 @@ func TestAutopilotDialogOnAnAutopilotCardStopsIt(t *testing.T) {
 	if res := d.webAnswer(nil, &webInput{}); !res.dismiss || got != "untouched" {
 		t.Fatalf("a request not about autopilot answered its switch (dismiss=%v, submitted %q)", res.dismiss, got)
 	}
+	// handing a card to autopilot loosens control: the web asks the
+	// overlay's own question first, and only a yes to it hands over
 	got = ""
-	d.webAnswer(nil, &webInput{mode: domain.GateAutopilot})
+	res := d.webAnswer(nil, &webInput{card: "FD-001", mode: domain.GateAutopilot})
+	if got != "" || res.needs != webapi.ActionNeedsConfirm || !strings.Contains(res.question, "autopilot") {
+		t.Fatalf("a hand-over went without asking (submitted %q, needs %q, question %q)", got, res.needs, res.question)
+	}
+	d.webAnswer(nil, &webInput{card: "FD-001", mode: domain.GateAutopilot, confirm: res.token})
 	if got != domain.GateAutopilot {
-		t.Fatalf("a named mode submitted %q, want it honoured", got)
+		t.Fatalf("a named mode, confirmed, submitted %q, want it honoured", got)
 	}
 }
 

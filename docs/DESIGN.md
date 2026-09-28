@@ -3711,6 +3711,10 @@ other side of that trade and contains the risk with four rules instead.
   by the time the yes arrives (a goal that grew a card) is asked again,
   a second question in the same flow is asked on its own, and a question
   about another card a flow reached on the way is never the request's.
+  Handing a card to autopilot from its menu loosens control, so it asks
+  the same way, in the TUI overlay's words (what autopilot runs, within
+  what budget, and that it never lands); stopping autopilot goes at once,
+  and "Create & autopilot" was asked on the new-card form itself.
 - **An answer names what it was given against.** Every open decision
   carries the revision it was raised on — the spec commit for a design
   gate, the verify run and branch head for a failure — and the page shows

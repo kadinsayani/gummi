@@ -50,6 +50,21 @@ test.describe('a backlog', () => {
     await shot(page, info, 'action-refused');
   });
 
+  test('handing a card to autopilot asks first, in the overlay\'s words', async ({ pairedPage: page, server, api }, info) => {
+    const id = ids[2];
+    await open(page, server, id, phone(info));
+    await menu(page, 'gate');
+    // it loosens control: sent bare, the server asks back what autopilot
+    // will do with this card, and nothing changes until that is a yes
+    await expect(page.getByTestId('action-question')).toContainText(`Hand ${id} to autopilot?`);
+    await expect(page.getByTestId('action-question')).toContainText('never lands on');
+    expect(((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeFalsy();
+    await shot(page, info, 'action-autopilot');
+    await page.getByTestId('action-confirm').click();
+    await expect(page.getByTestId('action-dialog')).toHaveCount(0);
+    await expect.poll(async () => ((await api('GET', '/api/board')).json.rows.find((r: any) => r.id === id) || {}).autopilot).toBeTruthy();
+  });
+
   test('delete asks first, then the card is gone', async ({ pairedPage: page, server, api }, info) => {
     const id = ids[1];
     await open(page, server, id, phone(info));
