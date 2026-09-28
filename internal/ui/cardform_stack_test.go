@@ -156,11 +156,13 @@ func TestTheStackRowSkipsKindsWithNoBranch(t *testing.T) {
 // rule, plus the one a goal's members get — they share the goal's
 // branch instead of stacking. A done card stays on offer: done is a
 // verified branch, not a landed one, and the next slice goes on top of
-// it while it waits for review.
+// it while it waits for review. A landed one does not: its branch is on
+// main, and there is nothing left of it to stack on.
 func TestStackCandsAreTheCardsWithABranch(t *testing.T) {
 	m := NewShell(theme.GummiDark(), "v0-test")
 	m.rows = []featureRow{
 		{F: domain.Feature{ID: "FD-001", Kind: domain.KindFeature, Stage: domain.StageDone, UpdatedAt: time.Now().Add(-time.Hour)}},
+		{F: domain.Feature{ID: "FD-003", Kind: domain.KindFeature, Stage: domain.StageDone}, Landed: true},
 		{F: domain.Feature{ID: "RS-001", Kind: domain.KindResearch}},
 		{F: domain.Feature{ID: "GL-001", Kind: domain.KindGoal}},
 		{F: domain.Feature{ID: "FD-002", Kind: domain.KindFeature, GoalID: "GL-001"}},

@@ -90,11 +90,9 @@ func (m *Shell) collapseFeature(f domain.Feature, message string) tea.Cmd {
 			return noticeMsg{text: string(f.ID) + " already collapsed, nothing to do"}
 		}
 		// the push names the remote and branch the card tracks, when it
-		// tracks one, as a replay's does (engine.PushCommandTo)
-		push := engine.PushCommand(f.BranchName())
-		if remote, rb, ok := mgr.Upstream(ctx, &f); ok {
-			push = engine.PushCommandTo(remote, f.BranchName(), rb)
-		}
+		// tracks one, as a replay's does — and says so when there is no
+		// remote to push to (engine.PushCommandFor)
+		push := engine.PushCommandFor(ctx, mgr, &f)
 		return noticeMsg{text: string(f.ID) + " squashed to " + sha + "\n  " + push, reload: true}
 	})
 }

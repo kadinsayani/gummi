@@ -11,6 +11,7 @@ import (
 // in one call and names the push each moved branch needs.
 func TestRestackSettlesTheStackAndNamesThePushes(t *testing.T) {
 	f := newStackFixture(t)
+	f.git("remote", "add", "origin", "https://example.invalid/board.git")
 	ctx := context.Background()
 	a := f.card(1, "parser", "chain", 0)
 	b := f.card(2, "eval", "chain", 1)
@@ -55,6 +56,7 @@ func TestRestackSettlesTheStackAndNamesThePushes(t *testing.T) {
 // afterwards so a surface opened later still has the lines.
 func TestAnAutomaticReplayHandsBackItsPushes(t *testing.T) {
 	f := newStackFixture(t)
+	f.git("remote", "add", "origin", "https://example.invalid/board.git")
 	ctx := context.Background()
 	a := f.card(1, "parser", "chain", 0)
 	b := f.card(2, "eval", "chain", 1)
@@ -107,6 +109,7 @@ func TestAnAutomaticReplayHandsBackItsPushes(t *testing.T) {
 // and the board's own settling tick found nothing left to hand back.
 func TestARestackAnswersForTheWalkTheBoardBegan(t *testing.T) {
 	f := newStackFixture(t)
+	f.git("remote", "add", "origin", "https://example.invalid/board.git")
 	ctx := context.Background()
 	a := f.card(1, "parser", "chain", 0)
 	b := f.card(2, "eval", "chain", 1)
@@ -139,6 +142,7 @@ func TestARestackAnswersForTheWalkTheBoardBegan(t *testing.T) {
 // branch that tracks nothing falls back to origin under its own name.
 func TestAReplayPushNamesTheBranchsOwnRemote(t *testing.T) {
 	f := newStackFixture(t)
+	f.git("remote", "add", "origin", "https://example.invalid/board.git")
 	ctx := context.Background()
 	a := f.card(1, "parser", "chain", 0)
 	b := f.card(2, "eval", "chain", 1)
@@ -165,5 +169,28 @@ func TestAReplayPushNamesTheBranchsOwnRemote(t *testing.T) {
 	}
 	if len(res.Push) != 2 || res.Push[0] != want[0] || res.Push[1] != want[1] {
 		t.Fatalf("push = %v, want %v", res.Push, want)
+	}
+}
+
+// A repository with no remote has nowhere to push a replayed branch: the
+// line says so, rather than naming an origin that is not there.
+func TestAReplayInARepoWithNoRemoteSaysSo(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+	aTree := filepath.Join(f.root, ".gummi", "worktrees", string(a.ID))
+	if err := os.WriteFile(filepath.Join(aTree, "a.txt"), []byte("a fixed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.gitIn(aTree, "commit", "-q", "-a", "--amend", "-m", "A: work, fixed")
+	res, err := f.eng.Restack(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Push) != 1 || res.Push[0] != NoRemoteNote(b.BranchName()) {
+		t.Fatalf("push = %v, want the no-remote note", res.Push)
 	}
 }

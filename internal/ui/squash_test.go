@@ -45,6 +45,7 @@ func TestSquashOpensCommitDialog(t *testing.T) {
 
 func TestSquashRewritesBranchInPlace(t *testing.T) {
 	m, root, wt := squashFixture(t)
+	git(t, root, "remote", "add", "origin", "https://example.invalid/board.git")
 	mainHead := gitOut(t, root, "rev-parse", "HEAD")
 	branchHead := gitOut(t, wt, "rev-parse", "HEAD")
 	message := "FD-001: collapsed\n\nSingle commit message."

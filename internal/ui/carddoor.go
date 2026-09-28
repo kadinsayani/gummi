@@ -55,6 +55,13 @@ func (m *Shell) stackCands() []stackCand {
 		if f.Kind == domain.KindResearch || f.Kind == domain.KindGoal || f.GoalID != "" {
 			continue
 		}
+		if r.Landed {
+			// a branch already on main has nothing left to stack on: a
+			// card forked from it forks from main. A done card that has
+			// not landed — handed off, its branch waiting on a review
+			// elsewhere — stays on offer; that is what a stack is for.
+			continue
+		}
 		out = append(out, stackCand{ID: f.ID, Title: f.Title, Repo: f.Repo, Touched: f.UpdatedAt})
 	}
 	return out

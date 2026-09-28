@@ -1646,6 +1646,16 @@ func (m *Manager) Upstream(ctx context.Context, f *domain.Feature) (remote, bran
 	return remote, strings.TrimPrefix(merge, "refs/heads/"), true
 }
 
+// Remotes are the repository's configured remotes, in git's order; none
+// for a repository nothing was ever pushed from.
+func (m *Manager) Remotes(ctx context.Context) []string {
+	out, err := runGit(ctx, m.repo, "remote")
+	if err != nil {
+		return nil
+	}
+	return strings.Fields(out)
+}
+
 // DiffStat is Diff's summary: the same base, `--stat` instead of the
 // patch. It is what a caller shows when the full diff is too large to
 // hand over inline, alongside DiffBase so the reader can fetch the rest.

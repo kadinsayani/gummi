@@ -94,19 +94,50 @@ func PushCommandTo(remote, branch, remoteBranch string) string {
 	return "git push --force-with-lease " + remote + " " + branch + ":" + remoteBranch
 }
 
-// replayPushCommand is the push a replayed card's branch needs: to the
-// remote and branch it tracks when it tracks one (someone pushed it with
-// -u, or gummi adopted it from a PR), so the line is right to copy for a
-// fork or a second remote; to origin under its own name otherwise.
+// replayPushCommand is the push a replayed card's branch needs
+// (PushCommandFor).
 func (e *Engine) replayPushCommand(ctx context.Context, f *domain.Feature) string {
-	branch := f.BranchName()
-	if branch == "" {
+	if f.BranchName() == "" {
 		return ""
 	}
-	if mgr, err := e.pool.ManagerFor(ctx, f); err == nil {
-		if remote, rb, ok := mgr.Upstream(ctx, f); ok {
-			return PushCommandTo(remote, branch, rb)
-		}
+	mgr, err := e.pool.ManagerFor(ctx, f)
+	if err != nil {
+		return PushCommand(f.BranchName())
 	}
-	return PushCommand(branch)
+	return PushCommandFor(ctx, mgr, f)
+}
+
+// BranchRemotes is what PushCommandFor reads off a repository: the remote
+// and branch a card's branch tracks, and the remotes there are.
+type BranchRemotes interface {
+	Upstream(ctx context.Context, f *domain.Feature) (remote, branch string, ok bool)
+	Remotes(ctx context.Context) []string
+}
+
+// PushCommandFor is the push a rewritten branch needs: to the remote and
+// branch it tracks when it tracks one (someone pushed it with -u, or gummi
+// adopted it from a PR), so the line is right to copy for a fork or a
+// second remote; otherwise to origin, or the one remote there is, under
+// its own name. A repository with no remote at all has nowhere to push
+// to, and the line says that instead of naming an origin that is not
+// there.
+func PushCommandFor(ctx context.Context, repo BranchRemotes, f *domain.Feature) string {
+	branch := f.BranchName()
+	if remote, rb, ok := repo.Upstream(ctx, f); ok {
+		return PushCommandTo(remote, branch, rb)
+	}
+	remotes := repo.Remotes(ctx)
+	switch {
+	case len(remotes) == 0:
+		return NoRemoteNote(branch)
+	case slices.Contains(remotes, "origin"):
+		return PushCommand(branch)
+	}
+	return PushCommandTo(remotes[0], branch, branch)
+}
+
+// NoRemoteNote stands where a push line would, for a branch in a
+// repository with no remote: a comment, so copying it runs nothing.
+func NoRemoteNote(branch string) string {
+	return "# no remote is configured — " + branch + " was rewritten here only; there is nothing to push"
 }
