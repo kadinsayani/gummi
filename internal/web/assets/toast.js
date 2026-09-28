@@ -15,6 +15,45 @@ import { h } from './dom.js?v=__ASSET_V__'
 
 const MAX = 3
 
+// A refusal the page already shows where it happened (the decision's note)
+// is not said a second time in a toast: the server broadcasts the same
+// line to every viewer, and the one who answered has it in the note.
+const hushed = new Map() // normalised text -> until (ms)
+const norm = (t) => String(t || '').trim().replace(/[.\s]+$/, '').toLowerCase()
+
+// hush drops a toast saying text, and one that arrives saying it in the
+// next few seconds.
+export function hush (text, ms = 15000) {
+  const k = norm(text)
+  if (!k) return
+  hushed.set(k, Date.now() + ms)
+  const box = document.getElementById('toasts')
+  for (const el of [...(box?.children || [])]) if (norm(el.dataset.text) === k) el.remove()
+}
+
+// place stands the notices just above whatever is docked at the bottom —
+// the decision and composer, the phone's decision bar and nav — so a
+// notice never covers the composer or Send, nor the tabs at the top.
+function place (box) {
+  const vh = window.visualViewport?.height || window.innerHeight
+  const tops = ['.dock', '#mdec', '#mnav']
+    .map(s => document.querySelector(s))
+    .filter(el => el && el.getClientRects().length)
+    .map(el => el.getBoundingClientRect().top)
+    .filter(t => t > 0 && t < vh)
+  const top = tops.length ? Math.min(...tops) : vh
+  box.style.setProperty('--toast-bottom', Math.max(16, Math.round(vh - top + 8)) + 'px')
+}
+
+function isHushed (text) {
+  const k = norm(text)
+  const until = hushed.get(k)
+  if (until === undefined) return false
+  if (Date.now() < until) return true
+  hushed.delete(k)
+  return false
+}
+
 // commandLines are the lines of a notice that are a command to run: the
 // indented `git …` lines the TUI's notices put under their sentence.
 function commandLines (text) {
@@ -23,7 +62,7 @@ function commandLines (text) {
 
 export function toast (text, opts = {}) {
   const box = document.getElementById('toasts')
-  if (!box || !text) return
+  if (!box || !text || isHushed(text)) return
   // the page's own answer and the server's broadcast of the same outcome
   // often say the same sentence: show it once
   if ([...box.children].some(el => el.dataset.text === text)) return
@@ -48,6 +87,7 @@ export function toast (text, opts = {}) {
     const close = h('button', { class: 'toast-btn', type: 'button', testid: 'toast-close', 'aria-label': 'Dismiss', onclick: () => el.remove() }, '×')
     el.append(h('span', { class: 'toast-acts' }, show, copy, close))
   }
+  place(box)
   box.append(el)
   // an overflow evicts the oldest notice that will go on its own first;
   // one waiting for its command to be copied goes only when all are

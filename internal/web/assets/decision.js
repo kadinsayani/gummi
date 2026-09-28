@@ -22,7 +22,7 @@
 import { $, h, clear, decisionWord, decisionColor, needsColor, isMobile, plural } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { on, set, state, rows, row } from './store.js?v=__ASSET_V__'
-import { toast } from './toast.js?v=__ASSET_V__'
+import { toast, hush } from './toast.js?v=__ASSET_V__'
 import { openView, openModal } from './views.js?v=__ASSET_V__'
 
 let ctx = {}
@@ -76,6 +76,7 @@ export function wordsOption () {
 // note shows a line above the decision (or in its place, once the decision
 // has gone): what happened to the last answer.
 export function note (text, { tone = 'info', testid = 'decision-note' } = {}) {
+  if (text) hush(text)
   set({ decNote: text ? { text, tone, testid } : null })
 }
 
@@ -157,19 +158,61 @@ function noteEl (compact) {
     h('button', { class: 'link', type: 'button', 'aria-label': 'Dismiss', onclick: () => set({ decNote: null }) }, 'dismiss'))
 }
 
-function confirmEl () {
+// confirmEl is the question an answer's flow stopped on (the TUI's y/n),
+// drawn beside the decision rather than inside it: the decision is capped
+// and clips what overflows it, and a confirmation nobody can reach is a
+// flow nobody can finish (on a phone it sat under the composer).
+function confirmEl (compact) {
   const c = state.decConfirm
   if (!c) return null
-  return h('div', { class: 'dconfirm', testid: 'decision-confirm', role: 'alertdialog', 'aria-label': 'Confirm' },
-    h('div', { class: 'cq', testid: 'decision-confirm-question' }, c.question),
+  const tid = compact ? 'mdec-confirm' : 'decision-confirm'
+  return h('div', { class: 'dconfirm', testid: tid, role: 'alertdialog', 'aria-label': 'Confirm', 'aria-describedby': `${tid}-q`, tabindex: '-1' },
+    h('div', { class: 'cq', id: `${tid}-q`, testid: `${tid}-question` }, c.question),
     h('div', { class: 'cb' },
-      h('button', { class: 'btn', type: 'button', testid: 'decision-confirm-no', onclick: () => set({ decConfirm: null }) }, 'Cancel'),
-      h('button', { class: ['btn', 'pri', c.danger && 'danger'], type: 'button', testid: 'decision-confirm-yes', disabled: answering, onclick: () => { const go = c.go; set({ decConfirm: null }); go() } }, c.yes || 'Yes, go ahead')))
+      h('button', { class: 'btn', type: 'button', testid: `${tid}-no`, onclick: () => set({ decConfirm: null }) }, 'Cancel'),
+      h('button', { class: ['btn', 'pri', c.danger && 'danger'], type: 'button', testid: `${tid}-yes`, disabled: answering, onclick: () => { const go = c.go; set({ decConfirm: null }); go() } }, c.yes || 'Yes, go ahead')))
+}
+
+// revealConfirm brings a confirmation that just appeared into view and
+// puts focus on it, so a keyboard or a screen reader meets the question
+// before anything else (Tab then reaches Cancel and the answer).
+let reveal = false
+function revealConfirm () {
+  reveal = false
+  const el = [...document.querySelectorAll('.dconfirm')].find(e => e.getClientRects().length)
+  if (!el) return
+  el.scrollIntoView({ block: 'nearest' })
+  el.focus({ preventScroll: true })
+}
+
+// keepFocus redraws a box without dropping the focus a control inside it
+// had: the same control (by test id) takes it back once redrawn.
+function keepFocus (box, draw) {
+  const a = document.activeElement
+  const tid = a && a !== box && box.contains(a) ? a.dataset.testid : null
+  draw()
+  if (!tid) return
+  const again = box.querySelector(`[data-testid="${CSS.escape(tid)}"]`)
+  if (again && !again.disabled) again.focus({ preventScroll: true })
+}
+
+// jumpFor is the link beside the decision to the tab it is about. A
+// research card never gets a branch of its own: its work is the document,
+// so there is no diff to send anyone to.
+function jumpFor (d, card) {
+  const research = card?.kind === 'research'
+  if (d.anchor === 'spec' || (d.anchor === 'diff' && research)) return ['spec', research ? 'read the document' : 'read the spec']
+  if (d.anchor === 'diff') return ['diff', 'see the diff']
+  return null
 }
 
 let shownHi = -1
 function renderDecision () {
   const box = $('#decision')
+  keepFocus(box, () => drawDecision(box))
+}
+
+function drawDecision (box) {
   // the answers scroll inside a capped decision: keep where the list was,
   // and bring the highlighted answer into view when it moves
   const was = box.querySelector('.decision > .opts')?.scrollTop || 0
@@ -179,7 +222,7 @@ function renderDecision () {
   if (!d) return
   const stage = state.card.stage
   const offline = state.conn !== 'live'
-  const jump = d.anchor === 'diff' ? ['diff', 'see the diff'] : d.anchor === 'spec' ? ['spec', 'read the spec'] : null
+  const jump = jumpFor(d, state.card)
   box.append(h('section', {
     class: ['decision', offline && 'paused', answering && 'sending'],
     style: { '--dc': decisionColor(d, stage) },
@@ -197,8 +240,8 @@ function renderDecision () {
     ? 'Reconnecting. Answers wait until the board is back.'
     : ['You are answering against ', h('span', { class: 'mono' }, d.against?.label || d.against?.token || 'the card as shown'),
         d.multi ? ' · pick any, then enter' : '']),
-  optionButtons(d, false),
-  confirmEl()))
+  optionButtons(d, false)),
+  confirmEl(false) || '')
   const opts = box.querySelector('.decision > .opts')
   if (opts) opts.scrollTop = was
   if (state.hi !== shownHi) {
@@ -222,6 +265,10 @@ function renderNext () {
 
 function renderMdec () {
   const box = $('#mdec')
+  keepFocus(box, () => drawMdec(box))
+}
+
+function drawMdec (box) {
   const d = openDecision()
   const show = isMobile() && (!!d || !!state.decNote) && state.view !== 'thread'
   box.hidden = !show
@@ -237,7 +284,7 @@ function renderMdec () {
   if (state.mdecOpen || state.decNote || state.decConfirm) {
     box.append(noteEl(true) || '')
     if (state.mdecOpen) box.append(optionButtons(d, true))
-    box.append(confirmEl() || '')
+    box.append(confirmEl(true) || '')
   }
 }
 
@@ -317,6 +364,7 @@ async function send (id, body, label, tookWords, danger) {
     answering = false
     renderDecision()
     renderMdec()
+    if (reveal) revealConfirm()
   }
 }
 
@@ -338,6 +386,7 @@ function refused (id, err, body, label, tookWords, danger) {
       return
     case 'confirm':
       set({ decConfirm: { question: sentence(e.text) || `${label}?`, yes: label, danger, go: () => send(id, { ...body, confirm: true }, label, tookWords, danger) } })
+      reveal = true
       return
     case 'needs':
       if (e.needs === 'decision') {

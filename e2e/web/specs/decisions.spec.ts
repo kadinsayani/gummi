@@ -1,5 +1,7 @@
 import { expect, test, pair, type GummiServer } from '../fixtures/test';
 import type { Page } from '@playwright/test';
+import fs from 'node:fs';
+import path from 'node:path';
 import { shot } from '../fixtures/shots';
 
 // Answering a card's pinned decision against a real `gummi web` and the
@@ -99,6 +101,31 @@ test.describe('a design gate', () => {
     await expect.poll(() => workspace.agentLog().includes('Cover an empty name too')).toBe(true);
     await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'gate', { timeout: 30_000 });
     await shot(page, info, 'gate-rework');
+  });
+
+  test('a refused approval is said once, in the decision, and nothing covers the composer', async ({ pairedPage: page, server, workspace }, info) => {
+    // a plan whose Chosen approach was emptied keeps the gate shut
+    const dir = path.join(workspace.repo, '.gummi', 'specs');
+    const file = path.join(dir, fs.readdirSync(dir).find((f) => f.startsWith(id))!);
+    const body = fs.readFileSync(file, 'utf8');
+    fs.writeFileSync(file, body.replace(/(## Chosen approach\n)[\s\S]*?(\n## )/, '$1$2'));
+    expect(fs.readFileSync(file, 'utf8')).not.toBe(body);
+    await open(page, server, id);
+    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    await answerOption(page, false, 'advance');
+    const note = page.getByTestId('decision-error');
+    await expect(note).toContainText('gate stays shut');
+    // the board says the same line to every viewer; this one has it in the
+    // note already, so no toast repeats it over the page
+    await page.waitForTimeout(1500);
+    // (counted now, not polled: a toast goes by itself after a few seconds)
+    expect(await page.getByTestId('toast').filter({ hasText: 'gate stays shut' }).count()).toBe(0);
+    // and a toast, when there is one, stands clear of the composer
+    await page.evaluate(async () => { (await import('/assets/toast.js')).toast('A notice\nof two lines', { ms: 8000 }); });
+    const t = await page.getByTestId('toast').last().boundingBox();
+    const c = await page.getByTestId('composer').boundingBox();
+    expect(t && c && (t.y + t.height <= c.y || t.y >= c.y + c.height), 'the toast does not overlap the composer').toBe(true);
+    await shot(page, info, 'gate-refused');
   });
 
   test('the enter line says what a line would do as it is typed', async ({ pairedPage: page, server }, info) => {
@@ -247,5 +274,45 @@ test.describe('an agent’s question', () => {
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('thread-items')).toContainText('Put it beside Greet, in greet.go');
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
+  });
+});
+
+test.describe('a verified card', () => {
+  let id: string;
+  test.use({ seed: { run: async (ws) => { id = await ws.seedVerified('Add a parting helper'); } } });
+
+  // A confirm-gated answer stops on the board's own question (the TUI's
+  // y/n). The question and its buttons are drawn beside the decision, not
+  // inside its capped box: inside it they were clipped under the composer
+  // on a phone, and nobody could hand a card off by touch.
+  test('handing it off asks first, and the question can be answered by touch', async ({ pairedPage: page, server, api }, info) => {
+    await open(page, server, id);
+    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    const opt = page.getByTestId('decision-option-handoff');
+    await expect(opt).toBeVisible();
+    await opt.click();
+    await opt.click();
+    const confirm = page.getByTestId('decision-confirm');
+    await expect(confirm).toBeVisible();
+    // the board's question, with its lines kept as the board wrote them
+    await expect(page.getByTestId('decision-confirm-question')).toContainText(`Hand off ${id}`);
+    await expect(page.getByTestId('decision-confirm-question')).toHaveCSS('white-space', 'pre-line');
+    await expect(confirm).toBeFocused();
+    await shot(page, info, 'handoff-confirm');
+    // both buttons are on screen and nothing stands over them
+    for (const tid of ['decision-confirm-no', 'decision-confirm-yes']) {
+      const b = page.getByTestId(tid);
+      await expect(b).toBeInViewport({ ratio: 1 });
+      const hit = await b.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!at && (at === el || el.contains(at));
+      });
+      expect(hit, `${tid} is the element under its own centre`).toBe(true);
+    }
+    if (isPhone(info)) await page.getByTestId('decision-confirm-yes').tap();
+    else await page.getByTestId('decision-confirm-yes').click();
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage).toBe('done');
+    await expect(page.getByTestId('decision-confirm')).toHaveCount(0);
   });
 });

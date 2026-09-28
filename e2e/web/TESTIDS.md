@@ -86,7 +86,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `decision-question`, `decision-against`, `decision-more`, `decision-jump` | its parts |
 | `decision-option-<optionId>` | a numbered answer (`aria-pressed` = highlighted; on a multi-pick question, picked) |
 | `decision-note` and its kinds `decision-answered`, `decision-moved`, `decision-needs`, `decision-busy`, `decision-newcard`, `decision-error` | what happened to the last answer (a 409 said who got there first, that the card moved, what it still needs) |
-| `decision-confirm`, `decision-confirm-question`, `decision-confirm-yes`, `decision-confirm-no` | a confirmation an answer's flow asked for (409 `confirm`); yes sends the answer again with `confirm` |
+| `decision-confirm`, `decision-confirm-question`, `decision-confirm-yes`, `decision-confirm-no` | a confirmation an answer's flow asked for (409 `confirm`), drawn beside the decision (never inside its capped box) and focused when it appears; yes sends the answer again with `confirm` |
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
 | `nextup-slot`, `nextup` | "X also needs you" chip after an answer |
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
@@ -131,7 +131,8 @@ Stats: `stats`, `stats-spent`, `stats-passes`, `stats-rework`, `stats-table`,
 
 `mobile-nav`, `mnav-cards`, `mnav-thread`, `mnav-panel` (`aria-current="page"`
 on the shown view), `mobile-decision` (docked decision bar), `mdec-toggle`,
-`mdec-option-<optionId>`.
+`mdec-option-<optionId>`, `mdec-note`, `mdec-confirm`, `mdec-confirm-question`,
+`mdec-confirm-yes`, `mdec-confirm-no` (the bar's own copy of the confirmation).
 
 ## Overlays and views
 

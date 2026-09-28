@@ -322,7 +322,7 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .decision.paused .opt{pointer-events:none}
 .decision header{display:flex;align-items:center;gap:8px;padding:10px 14px 2px;font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.07em;color:color-mix(in srgb,var(--dc) var(--t-keep),#000);flex-wrap:wrap}
 .decision header .more{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400;color:var(--fg3);display:flex;gap:10px}
-.decision .q{padding:0 14px 2px;font-size:14.5px;font-weight:500;overflow-wrap:anywhere}
+.decision .q{padding:0 14px 2px;font-size:14.5px;font-weight:500;overflow-wrap:anywhere;white-space:pre-line}
 .decision .against{padding:0 14px 6px;font-size:11.5px;color:var(--fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .decision .against .mono{font-size:11px}
 .opts{display:flex;flex-direction:column;padding:0 6px 6px}
@@ -330,7 +330,8 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .opt:hover{background:var(--sunk)}
 .opt.hi{background:var(--band)}
 .opt .k{font-family:var(--mono);font-size:11px;color:var(--fg3);text-align:center;border:1px solid var(--line2);border-radius:4px;height:18px;line-height:16px}
-.opt .d{font-size:12px;color:var(--fg3);text-align:right;overflow-wrap:anywhere;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-clamp:2;overflow:hidden}
+/* an answer's detail is read in full: it is what the answer does */
+.opt .d{font-size:12px;color:var(--fg3);text-align:right;overflow-wrap:anywhere}
 .opt .d .carry{color:var(--accent);font-weight:500}
 .opt.chat .l{color:var(--fg2);font-style:italic}
 .opt.danger .l{color:var(--err)}
@@ -350,12 +351,15 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .cnote.err{color:var(--err)}
 /* what happened to the last answer, and a confirmation its flow asked for */
 .dnote{display:flex;align-items:baseline;gap:10px;padding:8px 12px;border-radius:10px;font-size:13px;color:var(--fg2);background:var(--sunk);border:1px solid var(--line)}
-.dnote > span{flex:1;min-width:0;overflow-wrap:anywhere}
+.dnote > span{flex:1;min-width:0;overflow-wrap:anywhere;white-space:pre-line}
 .dnote.warn{border-color:color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--panel))}
 .dnote.err{border-color:color-mix(in srgb,var(--err) 40%,var(--line));background:color-mix(in srgb,var(--err) 7%,var(--panel));color:var(--fg)}
 .dnote .link{font-size:12px;color:var(--fg3);flex-shrink:0}
-.dconfirm{margin:0 6px 6px;padding:10px 12px;border-radius:9px;border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line));background:color-mix(in srgb,var(--warn) 6%,var(--panel));display:flex;flex-direction:column;gap:8px}
-.dconfirm .cq{font-size:13.5px;color:var(--fg);overflow-wrap:anywhere}
+/* beside the decision, never inside its capped box (which clips) */
+.dconfirm{margin:0;padding:10px 12px;border-radius:9px;border:1px solid color-mix(in srgb,var(--warn) 45%,var(--line));background:color-mix(in srgb,var(--warn) 6%,var(--panel));display:flex;flex-direction:column;gap:8px}
+.dconfirm .cq{font-size:13.5px;color:var(--fg);overflow-wrap:anywhere;white-space:pre-line}
+.mdec .dconfirm{margin:0 10px 10px}
+.decision + .dconfirm{margin-top:6px}
 .dconfirm .cb{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
 .decision.sending .opts{opacity:.6}
 .opt.pick .k{border-style:dashed}
@@ -519,8 +523,10 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .keys{padding:14px 16px;display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:13px;color:var(--fg2)}
 .keys h3{grid-column:1/-1;margin:8px 0 0;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--fg3)}
 .keys h3:first-child{margin-top:0}
-.toasts{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;z-index:60;max-width:calc(100% - 32px);pointer-events:none}
-.toast{background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow);pointer-events:auto}
+/* just above what is docked at the bottom (toast.js sets --toast-bottom):
+   a notice never stands over the composer or Send */
+.toasts{position:fixed;left:50%;bottom:var(--toast-bottom,24px);transform:translateX(-50%);display:flex;flex-direction:column;gap:6px;align-items:center;z-index:60;max-width:calc(100% - 32px);pointer-events:none}
+.toast{background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;box-shadow:var(--shadow);pointer-events:auto;white-space:pre-line;overflow-wrap:anywhere}
 .toast.err{background:var(--err);color:var(--on-err)}
 .toast.multi{white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;width:min(680px,calc(100vw - 32px))}
 .toast .toast-cmds{display:block;margin-top:6px;font-family:var(--mono);font-size:12px}
@@ -545,7 +551,7 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .field .ferr,.aerr{font-size:12.5px;color:var(--err);margin:0}
 .field.bad input,.field.bad textarea,.field.bad select{border-color:var(--err)}
 .aform{display:flex;flex-direction:column;gap:12px}
-.aq{margin:0;color:var(--fg);font-size:14px;overflow-wrap:anywhere}
+.aq{margin:0;color:var(--fg);font-size:14px;overflow-wrap:anywhere;white-space:pre-line}
 .aq .sub{display:block;margin-top:4px;color:var(--fg3);font-size:12.5px}
 .aform textarea{font-family:var(--mono);font-size:13px;line-height:1.5}
 .cpicks{display:flex;flex-direction:column;max-height:220px;overflow:auto;border:1px solid var(--line2);border-radius:8px;background:var(--bg);padding:4px}
@@ -613,6 +619,9 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
   .mdec .sum .chev{color:var(--fg3);transition:transform .15s}
   .mdec.open .sum .chev{transform:rotate(180deg)}
   .mdec .opts{padding:0 10px 10px;max-height:40vh;overflow:auto}
+  /* a phone is too narrow for an answer's detail beside its label: it goes under it */
+  .opt{grid-template-columns:22px minmax(0,1fr);gap:2px 10px}
+  .opt .d{grid-column:2;text-align:left}
   .head{padding:10px 16px}
   .thread{padding:16px 16px 10px}
   .dock{padding:0 12px 10px}
@@ -622,7 +631,6 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
   .head-actions .hide-s{display:none}
   .annot{margin-left:10px}
   .tabs{overflow-x:auto}
-  .toasts{bottom:130px}
   /* the foot is one row of four on a phone, so the cards keep the height */
   .rail-foot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;padding:6px 8px}
   .rail-foot button,.rail-foot .newcard{flex-direction:column;justify-content:center;gap:2px;padding:6px 2px;height:auto;font-size:11px;white-space:normal;text-align:center}
