@@ -170,7 +170,13 @@ func (m *Shell) webDecisionWord(kind webapi.DecisionKind, r featureRow) (word, t
 	case webapi.DecisionAsk:
 		return "question", "info"
 	case webapi.DecisionVerify:
-		if r.F.Stage == domain.StageVerify && !r.F.VerifiedAt.IsZero() {
+		// the same reading the question under it is worded from
+		// (decisionQuestion): the verdict the verify run exited on. It
+		// used to key on the verified stamp, which a board-driven pass
+		// writes a beat after the gate is raised and a research card
+		// never gets at all — so a pass the question called "verification
+		// passed" was headed "verify failed" above it.
+		if r.F.Stage == domain.StageVerify && m.nextInputFor(r).verdict == verdictPass {
 			return "verify passed", "ok"
 		}
 		return "verify failed", "err"
@@ -271,6 +277,9 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	}
 	leave := m.enterCard(id, true)
 	defer leave()
+	// a page has this card open: watch its branch and artifact for the
+	// writes the store never hears of (freshness.go)
+	m.watchCard(r.F)
 	titles := map[domain.FeatureID]string{}
 	if r.F.GoalID != "" {
 		if g, ok := m.rowByID(r.F.GoalID); ok {

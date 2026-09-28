@@ -187,6 +187,9 @@ func (r *bridgeMsg) run(m *Shell) (cmd tea.Cmd) {
 		}
 	}()
 	cmd = r.fn(m)
+	// a request can move what a page shows without a message of its own
+	// (a pause asked for, a chip withdrawn): report it like any message
+	m.syncWebLive()
 	r.done <- nil
 	return cmd
 }
@@ -227,11 +230,13 @@ func (m *Shell) emitChanges(msg tea.Msg) {
 		return
 	}
 	m.syncWebIngest(msg)
+	// whatever the message was, a card whose busy word, session state or
+	// chip moved is reported (freshness.go): the whitelist below covers
+	// what a message says, this covers what it did
+	defer m.syncWebLive()
 	switch msg := msg.(type) {
 	case rowsMsg:
-		if msg.err == nil {
-			m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
-		}
+		m.emitRowChanges(msg)
 	case openDecisionsMsg:
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
 	case noticeMsg:

@@ -67,6 +67,12 @@ func (l *changeLog) waitFor(t *testing.T, what string, want func(webapi.Change) 
 // program writes to its output.
 func headlessBoard(t *testing.T, ag agent.Agent) (*Bridge, *changeLog, *engine.Engine, domain.Feature, *bytes.Buffer) {
 	t.Helper()
+	return headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StagePlan})
+}
+
+// headlessBoardFor is headlessBoard with the one card given.
+func headlessBoardFor(t *testing.T, ag agent.Agent, f domain.Feature) (*Bridge, *changeLog, *engine.Engine, domain.Feature, *bytes.Buffer) {
+	t.Helper()
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -99,10 +105,9 @@ func headlessBoard(t *testing.T, ag agent.Agent) (*Bridge, *changeLog, *engine.E
 		t.Fatal(err)
 	}
 	pool := worktree.WrapSingle(wt)
-	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model"})
+	eng := engine.New(engine.Config{Agents: singleAgent(ag), Store: store, Pool: pool, Workspace: ws, Model: "fake-model", Persist: true})
 	t.Cleanup(func() { eng.Close() })
 
-	f := domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StagePlan}
 	if err := store.CreateFeature(context.Background(), &f); err != nil {
 		t.Fatal(err)
 	}

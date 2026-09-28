@@ -149,8 +149,12 @@ func TestWebEdgeDecisionsMatchTheTUI(t *testing.T) {
 		return od
 	}
 
-	// a clean verify pass heads as one, and its first answer is the landing
-	m.rows[4].F.VerifiedAt = fixedTime
+	// a clean verify pass heads as one, and its first answer is the landing.
+	// The verified stamp is deliberately NOT set: a board-driven pass
+	// raises its gate before the stamp lands, and a research card is never
+	// stamped — the head reads what the question does, the verdict
+	// (TestABoardDrivenVerifyPassReadsPassedWithoutARestart drives the
+	// real path)
 	m.rows[4].Exited, m.rows[4].ExitVerdict = true, verdictPass
 	m.inbox.add("FD-044", attnGate, "verification passed")
 	if od := check("verify passed", 4); od.api.Word != "verify passed" || od.api.Tone != "ok" {

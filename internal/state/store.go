@@ -1915,3 +1915,15 @@ func (s *Store) DataVersion(ctx context.Context) (int64, error) {
 	err := s.db.QueryRowContext(ctx, "PRAGMA data_version").Scan(&v)
 	return v, err
 }
+
+// Changes is DataVersion's other half: how many rows this process's own
+// connection has written since it opened (SQLite's total_changes). The
+// store holds one connection (SetMaxOpenConns(1)), so every write made
+// through it — the engine's spend booking, a verified stamp, a check
+// baseline — moves it, and nothing another process does ever does. A
+// board polls both to learn the store moved, whoever moved it.
+func (s *Store) Changes(ctx context.Context) (int64, error) {
+	var v int64
+	err := s.db.QueryRowContext(ctx, "SELECT total_changes()").Scan(&v)
+	return v, err
+}

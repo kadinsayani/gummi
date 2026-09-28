@@ -236,6 +236,12 @@ type foreignMsg struct {
 	// the other process has been writing to the store, and the board's
 	// derived state (stage, spend, worktree) is behind.
 	reload bool
+	// changes is the store's own-write counter at the probe (0 when it
+	// could not be read): a change means this process wrote.
+	changes int64
+	// revs is what each card a page has open stands at: its branch head
+	// and its artifact's revision (freshness.go).
+	revs map[domain.FeatureID]watchRev
 }
 
 func foreignTick() tea.Cmd {
@@ -254,11 +260,12 @@ func (m *Shell) probeForeign() tea.Msg {
 	}
 	m.foreignTicks++
 	reload := len(drives) > 0 && m.foreignTicks%foreignReloadEvery == 0
-	var version int64
+	var version, changes int64
 	if m.store != nil {
 		version, _ = m.store.DataVersion(context.Background())
+		changes, _ = m.store.Changes(context.Background())
 	}
-	return foreignMsg{drives: drives, reload: reload, storeVersion: version}
+	return foreignMsg{drives: drives, reload: reload, storeVersion: version, changes: changes, revs: m.watchedRevs(context.Background())}
 }
 
 // applyForeign updates the rows' driven-elsewhere state in place. It

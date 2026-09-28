@@ -165,6 +165,13 @@ type rowsMsg struct {
 	// reason every other git-derived column is.
 	stacks map[domain.FeatureID]stackRow
 	err    error
+	// seq numbers the load by when it started (Shell.nextRowsSeq), so a
+	// load that returns after a newer one is dropped rather than applied
+	// over it. 0 is never judged stale.
+	seq uint64
+	// changes is the store's own-write counter as the load began: the
+	// rows hold every write up to it (freshness.go).
+	changes int64
 }
 
 // noticeMsg surfaces a transient outcome (success or failure) in the
@@ -278,6 +285,8 @@ func (m *Shell) refreshBlockers(id domain.FeatureID) tea.Cmd {
 // loadRows reads all features, their histories, and worktree presence.
 func (m *Shell) loadRows() tea.Msg {
 	ctx := context.Background()
+	seq := m.nextRowsSeq()
+	changes, _ := m.store.Changes(ctx)
 	feats, err := m.store.ListFeatures(ctx)
 	if err != nil {
 		return rowsMsg{err: err}
@@ -344,7 +353,7 @@ func (m *Shell) loadRows() tea.Msg {
 	// Stack annotations are derived here, on the command goroutine,
 	// because they ask git (is this card stale? has it landed?) and the
 	// render path may not. Keyed by card, so cardLine is a map lookup.
-	return rowsMsg{rows: rows, stacks: m.stackRowsForFeatures(ctx, feats)}
+	return rowsMsg{rows: rows, stacks: m.stackRowsForFeatures(ctx, feats), seq: seq, changes: changes}
 }
 
 // dependencyBlockers reports the direct dependencies that would block the

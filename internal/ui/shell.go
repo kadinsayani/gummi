@@ -308,6 +308,9 @@ type Shell struct {
 	// storeVersion is the store's data_version as last seen (foreignMsg):
 	// a change is another process's commit, and the board re-reads.
 	storeVersion int64
+	// fresh keeps the rows, and what a page was told about them, current
+	// with the store and the repository (freshness.go).
+	fresh *freshness
 	// locks is the board's per-card lock registry, shared with the engine
 	// (AttachCardLocks). Nil leaves the board's git verbs unlocked.
 	locks *state.CardLocks
@@ -579,6 +582,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		// same reason — see the Shell field's doc comment on why it is
 		// not threadInput.
 		boardInput: newThreadInput(styles),
+		fresh:      newFreshness(),
 	}
 	// indirected through m rather than passing m.now's current value: a
 	// test fixes m.now after this constructor returns (agentWorkspace,
@@ -1778,6 +1782,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.notice = noticeMsg{text: msg.err.Error(), isErr: true}
 			return m, nil
 		}
+		if m.staleRows(msg) {
+			// a load older than the one already applied (freshness.go)
+			return m, nil
+		}
 		// the cursor is kept on the card it was on, by id: the rows about
 		// to replace these can be a different length and a different order,
 		// and an index alone would quietly point somewhere else.
@@ -2428,24 +2436,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(foreignTick(), m.probeForeign)
 
 	case foreignMsg:
-		changed := m.applyForeign(msg.drives)
-		if moved := msg.storeVersion != 0 && m.storeVersion != 0 && msg.storeVersion != m.storeVersion; msg.storeVersion != 0 && (moved || m.storeVersion == 0) {
-			m.storeVersion = msg.storeVersion
-			if moved {
-				// another process committed — a card minted from the CLI,
-				// a run beside the board that stopped at a gate: read the
-				// rows and the open decisions again, so neither face shows
-				// the board as it stood before
-				return m, tea.Batch(m.loadRows, m.refetchOpenDecisions)
-			}
-		}
-		if changed || msg.reload {
-			// a drive that just started or ended moved the store too, and a
-			// long-running one keeps moving it; reload so the badges are not
-			// the only thing on the board that is current.
-			return m, m.loadRows
-		}
-		return m, nil
+		return m, m.applyForeignMsg(msg)
 
 	case followRecordMsg:
 		return m, m.applyFollow(msg)

@@ -76,22 +76,35 @@ func spendSummary(snap engine.Snapshot) string {
 
 // liveCardSpent returns the card's total spend as the session driving it
 // has it — engine.Session.CardSpent, which moves with every usage event
-// the engine books against the store row. 0 when nothing is live on the
-// card (or a restored session has not been dispatched again), which
-// leaves the caller on the board row's own copy.
+// the engine books against the store row — when that is ahead of the
+// board row's own copy. 0 when nothing is live on the card (or a restored
+// session has not been dispatched again), or when the row already says
+// more, which leaves the caller on the row.
+//
+// The session's figure is a mirror, seeded from the store when the
+// session spawned and moved only by that session's own samples: a scribe
+// pass, a consult, a critique session booked beside it never reach it.
+// It used to win outright, and a card mid-plan read 13.27 on the board
+// while `gummi status` read 46.22. The row is reloaded after every write
+// this process makes (freshness.go), so between two reloads the fresher
+// of the two is the truer, and neither is ever added to the other.
 func (m *Shell) liveCardSpent(id domain.FeatureID) float64 {
 	if m.engine == nil {
 		return 0
 	}
+	live := 0.0
 	if s := m.engine.Get(id); s != nil {
-		return s.CardSpent()
+		live = s.CardSpent()
+	} else if ff := m.engine.Freeform(id); ff != nil {
+		// a freeform card's session is not a stage session: without this
+		// its row kept the spend of its last reload while its agent kept
+		// working
+		live = ff.CardSpent()
 	}
-	// a freeform card's session is not a stage session: without this its
-	// row kept the spend of its last reload while its agent kept working
-	if ff := m.engine.Freeform(id); ff != nil {
-		return ff.CardSpent()
+	if r, ok := m.rowByID(id); ok && r.F.Spend.CreditEquivalent() >= live {
+		return 0
 	}
-	return 0
+	return live
 }
 
 // budgetSummary formats the budget: what the card has spent against what

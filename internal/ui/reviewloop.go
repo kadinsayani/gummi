@@ -174,7 +174,8 @@ func (m *Shell) onVerifyDone(id domain.FeatureID) tea.Cmd {
 // connection (SetMaxOpenConns(1)) can block, and the render loop is not a
 // place to wait on it — the same reason setGateApproval and setEnvelope
 // are commands. Like those it is a side-channel write, so it takes no
-// card lock and asks for no reload; nothing on screen renders VerifiedAt.
+// card lock; it does reload the rows once the stamp is in, because the
+// web face heads the verify decision from VerifiedAt ("verify passed").
 //
 // Research cards are deliberately NOT stamped. They reach this arm too —
 // verifyGateReason has a wording for them — but they carry no branch, and
@@ -186,7 +187,17 @@ func (m *Shell) markVerified(id domain.FeatureID) tea.Cmd {
 	if m.store == nil || id.Kind() == domain.KindResearch {
 		return nil
 	}
-	return func() tea.Msg { return m.writeVerified(id) }
+	return func() tea.Msg {
+		if msg := m.writeVerified(id); msg != nil {
+			return msg
+		}
+		// the rows are read after the stamp, not beside it: onVerifyDone
+		// batches this with a row load of its own, which can read the
+		// card before the stamp lands, and a page heads a pass it reads
+		// unstamped "verify failed" (freshness.go drops that older load
+		// once this one is applied).
+		return m.loadRows()
+	}
 }
 
 // stampVerified is markVerified done in place, for the one caller whose
