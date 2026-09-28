@@ -4001,7 +4001,18 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 					if names := m.undraftedGate(f); len(names) > 0 {
 						return m.redraftUndrafted(f.ID, names)
 					}
-					return m.onCritiqueStageDone(f.ID, f.Stage)
+					// A clean critique has nothing left to resume: its
+					// gate is already raised, so judging it again only
+					// re-raised the gate the person was looking at, and
+					// "start the architect" did nothing. Asking to run the
+					// stage there is asking for its writer. So is a line
+					// sent with the ask, whatever the critique said — it
+					// is meant for the writer, and resuming the judge
+					// dropped it.
+					if note == "" && sessionVerdict(s.Snapshot()) != verdictPass {
+						return m.onCritiqueStageDone(f.ID, f.Stage)
+					}
+					break
 				}
 				return m.critiqueStep(f.ID, f.Stage, true, "resuming "+string(f.Stage)+" critique (output already written)")
 			}
