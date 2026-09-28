@@ -165,6 +165,23 @@ func (e *Engine) stackRestackOne(ctx context.Context, view StackView, a stack.Ac
 	return nil, nil
 }
 
+// sessionHoldsTree reports whether a card's session may still touch its
+// worktree, so a replay must wait for it: one working or waiting for a
+// slot, or a conversation with an agent attached. A session that finished,
+// was paused, or was restored from a process that is gone stays in the
+// engine's map for its thread and holds nothing — reading it as running
+// kept every card that had ever run in this process out of every replay.
+func sessionHoldsTree(s *Session) bool {
+	if s == nil {
+		return false
+	}
+	switch s.State() {
+	case StateRunning, StateQueued:
+		return true
+	}
+	return s.Live()
+}
+
 // StackSnapshot builds the policy's view of one stack: the members in
 // order, and for each the git facts the policy needs.
 func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackView, error) {
@@ -189,7 +206,7 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 			ID:      f.ID,
 			Pos:     f.StackPos,
 			Branch:  f.BranchName(),
-			Running: live[f.ID] != nil || e.oneShotBusy(f.ID),
+			Running: sessionHoldsTree(live[f.ID]) || e.oneShotBusy(f.ID),
 		}
 		mgr, merr := e.pool.ManagerFor(ctx, &f)
 		if merr == nil {
