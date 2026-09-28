@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
@@ -224,5 +225,54 @@ func TestAnAnswerDoesNotRunPastABudgetStop(t *testing.T) {
 	defer mu.Unlock()
 	if len(sent) != 2 || !strings.Contains(sent[1], "The answer is: synced") {
 		t.Fatalf("the top-up's run did not open with the answer: %q", sent)
+	}
+}
+
+// Two answers to a question whose backend is gone, given at once: bringing
+// a backend up takes a while, and a second answer arriving meanwhile used
+// to find the question still open and bring up a backend of its own. One
+// answer lands; the other is told the question is no longer open.
+func TestTwoAnswersToAQuestionWhoseBackendIsGoneLandOnce(t *testing.T) {
+	ctx := context.Background()
+	f := feature(1, "Greeting prefix", domain.StagePlan)
+	var mu sync.Mutex
+	var turns []string
+	ag := agent.NewFake("")
+	ag.Responder = func(_ agent.SessionOpts, msg string) []agent.Event {
+		mu.Lock()
+		turns = append(turns, msg)
+		mu.Unlock()
+		return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
+	}
+	e := newEngine(t, ag)
+	s, err := e.Attach(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, e, EventIdle)
+	s.setPendingAsk(&Ask{Question: "How should the prefix be configured?", DecisionID: "call:1:mcp-5"})
+	s.agent().Close()
+	s.clearAgent()
+	mu.Lock()
+	turns = nil
+	mu.Unlock()
+	ag.OnNewSession = func(agent.SessionOpts) { time.Sleep(200 * time.Millisecond) } // a slow start
+
+	errs := make(chan error, 2)
+	for _, answer := range []string{"CLI flag", "config file"} {
+		go func() { errs <- e.Answer(ctx, f.ID, answer) }()
+	}
+	failed := 0
+	for range 2 {
+		if err := <-errs; err != nil {
+			failed++
+		}
+	}
+	waitFor(t, e, EventIdle)
+	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
+	if failed != 1 || len(turns) != 1 {
+		t.Fatalf("%d answers refused and %d delivered, want one of each: %q", failed, len(turns), turns)
 	}
 }

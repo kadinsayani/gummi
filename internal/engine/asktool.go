@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/atomicfile"
@@ -1163,6 +1164,9 @@ func (e *Engine) Answer(ctx context.Context, id domain.FeatureID, answer string)
 // and the record must say so, or the morning receipt silently
 // under-counts what ran unattended (DESIGN §6.3).
 func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by string) error {
+	mu, _ := e.answering.LoadOrStore(id, &sync.Mutex{})
+	mu.(*sync.Mutex).Lock()
+	defer mu.(*sync.Mutex).Unlock()
 	s := e.Get(id)
 	if s == nil {
 		return fmt.Errorf("no session for %s", id)

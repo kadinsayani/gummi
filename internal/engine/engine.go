@@ -406,6 +406,11 @@ type Engine struct {
 	// session's in-flight dispatches are unique and never collide with a
 	// backend's own tool-call ids (disjoint namespaces).
 	mcpSeq atomic.Uint64
+	// answering holds one *sync.Mutex per card, so a card's answers are
+	// taken one at a time (AnswerAs). Routing an answer can bring a
+	// backend up, which takes a while, and a second answer arriving
+	// meanwhile would find the question still open and bring up another.
+	answering sync.Map
 
 	// persistMu serializes a session save against a delete of the same
 	// feature: it spans persist's finalized-check-and-write and
