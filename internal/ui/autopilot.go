@@ -429,9 +429,9 @@ func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool
 	// f comes from the just-finished session's own snapshot, which can be
 	// a stage or more stale than the board's row — a mode set through the
 	// `A` overlay while that session was already running would not be
-	// reflected on it until the next stage's session is created. The row
-	// is the same source every other live mode read in this package
-	// treats as authoritative.
+	// reflected on it until the next stage's session is created. It reads
+	// the store before the board's row, because the row lags a hand-over
+	// that started the card in the same command.
 	if !autopilotAnswers(m.autopilotModeFor(f.ID), decisionGate) {
 		return nil, false
 	}

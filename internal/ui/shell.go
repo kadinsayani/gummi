@@ -1026,14 +1026,14 @@ func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
 	// reads it and wake the goal, but never queue it for you
 	if g := m.goalOf(id); g != "" {
 		m.logPark(id, reason, text)
-		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
+		m.logDecision(id, decisionKindForStage(m.recordStage(id)), text)
 		m.queueGoalTick(g)
 		return
 	}
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.alert(id, text)
 		m.logPark(id, reason, text)
-		m.logDecision(id, decisionKindForStage(m.stageOf(id)), text)
+		m.logDecision(id, decisionKindForStage(m.recordStage(id)), text)
 	}
 }
 
@@ -1105,7 +1105,7 @@ func (m *Shell) logDecision(id domain.FeatureID, kind, question string) {
 	if m.store == nil {
 		return
 	}
-	stage := m.stageOf(id)
+	stage := m.recordStage(id)
 	_ = m.store.OpenDecision(context.Background(), id, stage, state.DecisionPayload{
 		ID:       kind + ":" + string(id) + ":" + string(stage) + ":" + strconv.FormatInt(time.Now().UnixNano(), 10),
 		Kind:     kind,
@@ -1125,7 +1125,7 @@ func (m *Shell) logPark(id domain.FeatureID, reason, detail string) {
 	if m.store == nil {
 		return
 	}
-	_ = m.store.AppendPark(context.Background(), id, m.stageOf(id), reason, detail, "", time.Now())
+	_ = m.store.AppendPark(context.Background(), id, m.recordStage(id), reason, detail, "", time.Now())
 }
 
 // markSeen decides whether this card has unread autopilot history worth
@@ -1220,7 +1220,7 @@ func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode string) {
 	if m.store == nil {
 		return
 	}
-	_ = m.store.AppendAutopilot(context.Background(), id, m.stageOf(id),
+	_ = m.store.AppendAutopilot(context.Background(), id, m.recordStage(id),
 		event, reason, mode, "", time.Now())
 }
 
@@ -1236,15 +1236,46 @@ func (m *Shell) stageOf(id domain.FeatureID) domain.Stage {
 	return ""
 }
 
-// autopilotModeFor reads a card's stored gate-approval mode: the board's
-// own row when the card is loaded there (the same source stageOf reads,
-// kept fresh by every reload) wins, because it is what every other
-// autopilot-mode read in this package (autopilotCursorFor, planAutopilot)
-// already treats as authoritative. A card whose row hasn't loaded yet —
-// an event arriving before the first loadRows lands — falls back to the
-// engine session's own copy of the feature, which Attach/dispatch loaded
-// fresh no longer ago than the row would have.
+// storedFeature reads the card as the store holds it now. The board's
+// rows are a snapshot refreshed by an asynchronous reload, and the
+// commands that move a card (a hand-over, a crossing, a rewind) start its
+// next session before that reload can land: with a fast agent the stage
+// finishes first, and every decision made off the row then acts on the
+// card as it was — the stage it left, the mode it had before it was
+// handed over. Reading the store is what the row would say once it
+// caught up, so the decisions an event triggers read it instead.
+func (m *Shell) storedFeature(id domain.FeatureID) (domain.Feature, bool) {
+	if m.store == nil {
+		return domain.Feature{}, false
+	}
+	f, err := m.store.GetFeature(context.Background(), id)
+	if err != nil {
+		return domain.Feature{}, false
+	}
+	return f, true
+}
+
+// recordStage is the stage a row written to the card's history is filed
+// under: the stored one (storedFeature), falling back to the board's row.
+// Filing under the row's stage put a design gate autopilot raised right
+// after a hand-over under "todo", because the card had left todo before
+// the board reloaded — and the thread then headed it "TODO GATE".
+func (m *Shell) recordStage(id domain.FeatureID) domain.Stage {
+	if f, ok := m.storedFeature(id); ok {
+		return f.Stage
+	}
+	return m.stageOf(id)
+}
+
+// autopilotModeFor reads a card's stored gate-approval mode: the store
+// itself first (storedFeature — a hand-over writes the mode and starts
+// the card in one command, so the row can still read attended when the
+// first stage ends), then the board's own row, then — for a card neither
+// knows — the engine session's own copy of the feature.
 func (m *Shell) autopilotModeFor(id domain.FeatureID) string {
+	if f, ok := m.storedFeature(id); ok {
+		return f.GateApproval
+	}
 	for _, r := range m.rows {
 		if r.F.ID == id {
 			return r.F.GateApproval
