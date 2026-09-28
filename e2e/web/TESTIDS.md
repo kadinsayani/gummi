@@ -55,7 +55,7 @@ once choosing), `resume-picked`, `resume-none` ("Not now").
 ## Card head
 
 `card-head`, `card-kind`, `card-id`, `card-title`, `card-stages`,
-`stage-<stage>` (a past stage jumps to it in the thread), `card-branch`,
+`stage-<stage>` (a past stage jumps to it in the thread), `card-branch`, `card-scratch` (a research card: scratch tree, no branch),
 `card-spend`, `card-error`, `toggle-panel` (`]`), `card-actions` (menu),
 `card-actions-menu`, `action-<id>` (menu item), `action-btn-<id>` (pause/resume
 shown as a button), `action-dialog`, `action-question` (what it asks, or the
@@ -74,7 +74,7 @@ dialog), `action-confirm`, `action-cancel`.
 | `thread-items` | the polite live region holding items |
 | `stage-group-<stage>` | a stage segment (`<details>`; `open` when unfolded; the current one has class `cur`) |
 | `thread-item` | an item without a more specific id; `data-key`, `data-type` on every item |
-| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `tool-group`, `stretch`, `thread-decision` | item kinds |
+| `receipt`, `verify` (`verify-avatar` its avatar), `check-<name>`, `tool-group`, `stretch`, `thread-decision`, `thread-consult` (a consult question or answer, where it was asked) | item kinds |
 | `thread-loading`, `thread-empty`, `thread-unavailable`, `thread-error` | empty states |
 | `thread-live` | the live block's container |
 | `live`, `live-streaming`, `live-elsewhere`, `live-error`, `live-consult`, `live-consult-head`, `live-freeform`, `live-freeform-head` | live block parts |

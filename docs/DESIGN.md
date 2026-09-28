@@ -3664,6 +3664,23 @@ other side of that trade and contains the risk with four rules instead.
 - **Drift fails a test.** The read models are golden-tested from the
   same fixtures as the TUI's goldens, and a test asserts that the answers
   served for each fixture's open decision are the answers the TUI draws.
+- **What a page shows follows the store, whoever wrote it.** The board's
+  rows are a snapshot, so the host re-reads them whenever the store moved
+  after they were read — another process's commit (`data_version`) or
+  this process's own writes (its connection's change count): a verified
+  stamp, a scribe's spend, a goal's done-when results. Row loads are
+  numbered so an older one never lands over a newer one, and a reload
+  pushes only the cards whose rows moved. What no row holds — a busy
+  word, a session's state, a re-entry chip — is compared after every
+  message and request and pushed when it moves, whether or not the
+  request that started it is still waiting. The cards a page has open are
+  also watched for a new branch head or artifact revision, which a commit
+  made in the worktree elsewhere, or a spec gummi rewrote, never tells the
+  store. Card spend is the store's figure; a live session's own running
+  total is shown only while it is ahead, and never added to it. A
+  consult's questions and answers are written to the card's log (kind
+  `consult`, in no stage's segment), so the web thread draws them where
+  they were asked and both faces still have them after a restart.
 
 ### 20.2 One process hosts the board, and one board has one host
 

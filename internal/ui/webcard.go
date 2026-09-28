@@ -212,13 +212,23 @@ func webDecisionKind(k decisionKind, r featureRow) (webapi.DecisionKind, webapi.
 	case domain.StageImplement, domain.StageVerify, domain.StageOpen:
 		rev = "branch"
 	}
+	// A research card never gets a branch: its work stages write the
+	// research document in a scratch tree, and that document is what
+	// every one of its stops is about and raised on.
+	research := r.F.Kind == domain.KindResearch && cardHasArtifact(r)
+	if research && rev != "" {
+		rev = "spec"
+	}
 	switch k {
 	case decisionGate:
-		if r.F.Stage == domain.StageImplement || !cardHasArtifact(r) {
+		if !research && (r.F.Stage == domain.StageImplement || !cardHasArtifact(r)) {
 			return webapi.DecisionGate, webapi.AnchorDiff, rev
 		}
 		return webapi.DecisionGate, webapi.AnchorSpec, rev
 	case decisionVerify:
+		if research {
+			return webapi.DecisionVerify, webapi.AnchorSpec, rev
+		}
 		return webapi.DecisionVerify, webapi.AnchorDiff, rev
 	case decisionBudget:
 		return webapi.DecisionBudget, webapi.AnchorThread, rev
