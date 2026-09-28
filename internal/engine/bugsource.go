@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/pr"
 )
 
 // A BugSource yields candidate bugs to ingest. gummi ships GitHub and
@@ -298,12 +300,13 @@ func severityFromLabels(labels []struct {
 	return ""
 }
 
-// execGH runs the real gh CLI in dir. gh's stderr is folded into the
-// error so an auth or repo problem surfaces verbatim (we assume gh is
-// installed and authenticated — a missing or unauthenticated gh fails
-// loudly here rather than degrading).
+// execGH runs the gh CLI in dir — the GUMMI_GH_CMD shim when one is set,
+// exactly as internal/pr does, so every gh call gummi makes goes through
+// the same seam. gh's stderr is folded into the error so an auth or repo
+// problem surfaces verbatim (we assume gh is installed and authenticated —
+// a missing or unauthenticated gh fails loudly here rather than degrading).
 func execGH(ctx context.Context, dir string, args ...string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd := exec.CommandContext(ctx, cmp.Or(pr.GHBinary(), "gh"), args...) //nolint:gosec // the binary is operator config (GUMMI_GH_CMD), args are gummi-built
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
