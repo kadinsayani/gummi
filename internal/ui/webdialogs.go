@@ -175,14 +175,21 @@ func (d *commitMsgDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if d.drafting {
 		return webAnswer{wait: true}
 	}
+	// the question says what sending the message back will do: a landing
+	// lands the branch on its base; a squash in place collapses it to one
+	// commit and lands nothing
 	draft := strings.TrimSpace(d.input.Value())
-	why := "read the landing message, then land"
+	noun := "landing message"
+	if d.inPlace {
+		noun = "commit message"
+	}
+	why := "read the " + noun + ", then " + d.action()
 	if draft == "" {
-		why = "no landing message was drafted"
+		why = "no " + noun + " was drafted"
 		if d.reason != "" {
 			why += " (" + strings.TrimPrefix(d.reason, "no draft: ") + ")"
 		}
-		why += " — write one"
+		why += " — write one to " + d.action()
 	}
 	return webAnswer{needs: webapi.ActionNeedsMessage, question: why, draft: &draft}
 }

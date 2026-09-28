@@ -77,6 +77,30 @@ type commitMsgDialog struct {
 	// Ctrl key a multiplexer might claim.
 	focus   int
 	buttons *buttonRow
+
+	// inPlace marks a squash in place (openSquashDialog): the message is
+	// the one commit the branch collapses to, and nothing lands on the
+	// base. The dialog says so rather than asking for a landing.
+	inPlace bool
+}
+
+// squashInPlace makes d the squash-in-place flavour of the dialog.
+func (d *commitMsgDialog) squashInPlace() *commitMsgDialog {
+	d.inPlace = true
+	d.buttons = newButtonRow(
+		button{label: "Cancel"},
+		button{label: "Redraft"},
+		button{label: "Squash", danger: true},
+	)
+	return d
+}
+
+// action says what the dialog's submit does, for a person about to do it.
+func (d *commitMsgDialog) action() string {
+	if d.inPlace {
+		return "squash " + d.branch + " to one commit in place — nothing lands on " + d.base()
+	}
+	return "land " + d.branch + " on " + d.base()
 }
 
 func newCommitMsgDialog(f domain.Feature, onSubmit func(string) tea.Cmd, draft func(ctx context.Context, f domain.Feature, fresh bool) (string, error)) *commitMsgDialog {
@@ -313,8 +337,12 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 		// a goal lands as one merge commit over its cards' own commits
 		title = "merge "
 	}
+	where := d.branch + " → " + d.base()
+	if d.inPlace {
+		title, where = "squash ", d.branch+" → one commit, in place (nothing lands on "+d.base()+")"
+	}
 	b.WriteString(s.DialogTitle.Render(title+string(d.feature)) + "\n")
-	b.WriteString(s.Subtle.Render(d.branch+" → "+d.base()) + "\n\n")
+	b.WriteString(s.Subtle.Render(where) + "\n\n")
 	b.WriteString(d.input.View() + "\n")
 	// Say when the message continues past the box. Approving something
 	// you cannot see all of is the failure this guards, and a reader with
@@ -328,7 +356,11 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 		// that was, in the observed drive, sitting fully visible on
 		// screen — what this guard actually checks is that the text is
 		// untouched, so it says that instead.
-		b.WriteString("\n" + s.Warning.Render("this is the scribe's draft, untouched — ctrl+s again to land it as written"))
+		again := "ctrl+s again to land it as written"
+		if d.inPlace {
+			again = "ctrl+s again to squash with it as written"
+		}
+		b.WriteString("\n" + s.Warning.Render("this is the scribe's draft, untouched — "+again))
 	case d.drafting && !d.modified:
 		// A live spinner and elapsed clock, not static text: this pass
 		// took ~90s the first time and ~2min the second in the round 2
@@ -357,6 +389,10 @@ func (d *commitMsgDialog) View(s *theme.Styles, w, h int) string {
 		}
 	}
 	b.WriteString("\n\n" + d.buttons.View(s, d.focus == commitFieldButtons) + "\n")
-	b.WriteString("\n" + s.Faint.Render("tab buttons · enter activates · ctrl+s merge · esc cancel"))
+	verb := "merge"
+	if d.inPlace {
+		verb = "squash"
+	}
+	b.WriteString("\n" + s.Faint.Render("tab buttons · enter activates · ctrl+s "+verb+" · esc cancel"))
 	return s.DialogFrame.Render(b.String())
 }

@@ -927,7 +927,7 @@ func (m *Shell) openSquashDialog(f domain.Feature) tea.Cmd {
 			return "", nil
 		}
 		return m.engine.LandingMessage(dctx, feature, fresh)
-	})
+	}).squashInPlace()
 	// The dialog names the branch this lands on. It is a field rather than
 	// a constructor argument (commitMsgDialog.baseBranch has the why), and
 	// this is the wiring: without it the dialog falls back to saying "main"

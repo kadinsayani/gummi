@@ -205,6 +205,27 @@ func TestActionRefusesToLandAnUnverifiedCard(t *testing.T) {
 	}
 }
 
+// The message a landing stops to have read says what sending it back
+// does: land the branch on its base, or — a squash in place — collapse it
+// to one commit and land nothing.
+func TestTheMessageQuestionSaysWhatHappens(t *testing.T) {
+	h := newCardBoard(t, agent.NewFake("ok"))
+	c, _ := h.verifiedCard("Dark mode")
+	for action, want := range map[string]string{
+		"squash": "squash feat/dark-mode to one commit in place — nothing lands on main",
+		"merge":  "land feat/dark-mode on main",
+	} {
+		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Against: h.card(c.ID).Decision.Against.Token})
+		e := errorOf(t, raw)
+		if st != http.StatusConflict || e.Needs != webapi.ActionNeedsMessage || !strings.Contains(e.Text, want) {
+			t.Errorf("%s with no message = %d %+v, want its question to say %q", action, st, e, want)
+		}
+		if action == "squash" && strings.Contains(e.Text, "landing") {
+			t.Errorf("a squash in place asks about a landing: %q", e.Text)
+		}
+	}
+}
+
 // The landing entries offer the message the verify gate drafted as their
 // default — the one the landing dialog would open on — so a person reads
 // it before landing; a draft the branch has moved past is not offered.
