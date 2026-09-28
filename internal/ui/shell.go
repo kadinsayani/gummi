@@ -153,6 +153,12 @@ type Shell struct {
 	// one writer).
 	openOnLoad domain.FeatureID
 
+	// rebaseHeld is the stop a card was waiting at when an agent rebase
+	// was dispatched on it (rebase.go's agentRebase): a resolve session
+	// that ends without resolving puts it back, since that decision still
+	// stands.
+	rebaseHeld map[domain.FeatureID]attnItem
+
 	// bounceNotes holds the line the composer aimed at a decision's
 	// bounce answer: the card is rewound now, but its reborn work stage
 	// only runs when someone starts it, so the note waits in memory and

@@ -285,9 +285,30 @@ func stageExited(events []state.CardEvent, hist []state.TransitionRecord, stage 
 			entered = tr.At
 		}
 	}
+	// A rebase-resolve session borrows the stage it runs at and ends with
+	// no verdict: it judges nothing, so it says nothing about how the
+	// stage ended. Its exit is skipped, or a verify that passed read as one
+	// with no clear verdict once an agent rebase had run beside it.
+	rebases := map[string]bool{}
+	for _, ev := range events {
+		if ev.Kind != state.EventStageEnter || ev.Stage != stage {
+			continue
+		}
+		var p struct {
+			Flavor string `json:"flavor"`
+		}
+		if json.Unmarshal([]byte(ev.Payload), &p) == nil && p.Flavor == "rebase" {
+			if run, ok := strings.CutSuffix(ev.Dedupe, ":"+state.EventStageEnter); ok {
+				rebases[run] = true
+			}
+		}
+	}
 	for i := len(events) - 1; i >= 0; i-- {
 		ev := events[i]
 		if ev.Kind != state.EventStageExit || ev.Stage != stage {
+			continue
+		}
+		if run, ok := strings.CutSuffix(ev.Dedupe, ":"+state.EventStageExit); ok && rebases[run] {
 			continue
 		}
 		if ev.At.Before(entered) {

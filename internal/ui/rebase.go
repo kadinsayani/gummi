@@ -8,6 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 )
 
 // The agent-rebase flow: rebaseFeature's plain rebase stops on
@@ -56,8 +57,15 @@ func (m *Shell) offerAgentRebase(msg rebaseConflictMsg) {
 	})
 }
 
-// agentRebase dispatches the engine's rebase-resolve session.
+// agentRebase dispatches the engine's rebase-resolve session, holding the
+// stop the card waits at so an unresolved rebase can put it back.
 func (m *Shell) agentRebase(f domain.Feature, files []string) tea.Cmd {
+	if it, ok := m.inbox.get(f.ID); ok {
+		if m.rebaseHeld == nil {
+			m.rebaseHeld = map[domain.FeatureID]attnItem{}
+		}
+		m.rebaseHeld[f.ID] = it
+	}
 	return func() tea.Msg {
 		if err := m.engine.RunRebase(context.Background(), f, files); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
@@ -97,9 +105,30 @@ func (m *Shell) judgeRebase(id domain.FeatureID) tea.Cmd {
 // workflow's remaining stages already cover it.
 func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	id := msg.f.ID
+	held, wasHeld := m.rebaseHeld[id]
+	delete(m.rebaseHeld, id)
 	if !msg.ok {
-		m.raiseEscalation(id, "agent rebase failed — "+msg.problem+"; read the transcript (t), then resolve on the branch")
-		m.notice = noticeMsg{text: string(id) + ": agent rebase failed — " + msg.problem, isErr: true}
+		// The resolve session took the stage session's place on the engine,
+		// and it carries no verdict of its own: left standing, it made the
+		// card read as a stage that ended with no clear verdict — at a
+		// verify that had passed, "verification stopped here" with "land
+		// anyway" on offer, while the store still said verified. Drop it,
+		// so the card reads as its stage really ended, as it does after a
+		// restart.
+		m.dropSession(id)
+		text := "agent rebase failed — " + msg.problem + ": the branch is still on its old base, so its conflicts with " +
+			m.baseBranchOf(id) + " remain; read the transcript, then resolve them on the branch"
+		if wasHeld && held.Kind == attnGate && !held.Escalated {
+			// the card was already waiting on a person (a passed verify
+			// whose landing hit the conflict): that decision still
+			// stands, and the rebase not happening is the news, not a
+			// new stop that replaces it
+			m.inbox.put(held)
+			m.logPark(id, state.ParkReasonNeedsYou, text)
+		} else {
+			m.raiseEscalation(id, text)
+		}
+		m.notice = noticeMsg{text: string(id) + ": " + text, isErr: true, id: id}
 		return m.loadRows
 	}
 	f := msg.f
