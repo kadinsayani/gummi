@@ -44,5 +44,12 @@
 // extends a card's life to now when anything on it is still live. The
 // waiting-on-you spans are the same derivation the card's own clock
 // sums (cardrun.DecisionSpans), clamped to the window instead of to the
-// card's life — one correlation rule, two horizons.
+// card's life — one correlation rule, two horizons. The same holds for
+// an agent's open question: a session blocked in ask_user is time on
+// you, not agent time, even though the session is still open and its
+// block still draws — the window clock subtracts the ask's span from the
+// agent (cardrun.AskSpans, cardrun.WorkingTime), so a lane that reads
+// "on you since 14:02" is never beside a headline that says nobody was
+// waiting. Lane blocks, peak concurrency and the busiest stretch are
+// about what was open and so still count the session.
 package fleetrun

@@ -348,6 +348,7 @@ func buckets(m map[string]float64) []Bucket {
 func clock(sess []Session, evs []state.CardEvent, f domain.Feature) Clock {
 	var c Clock
 	var first, last time.Time
+	asks := AskSpans(evs)
 	for _, s := range sess {
 		if s.Started.IsZero() {
 			continue
@@ -356,7 +357,9 @@ func clock(sess []Session, evs []state.CardEvent, f domain.Feature) Clock {
 			first = s.Started
 		}
 		if s.Closed {
-			c.Agent += s.Duration()
+			// a pass blocked on its own question was not working
+			// through it: that stretch is the reader's (AskSpans)
+			c.Agent += WorkingTime(s.Started, s.Ended, asks)
 			if s.Ended.After(last) {
 				last = s.Ended
 			}
@@ -382,10 +385,12 @@ func clock(sess []Session, evs []state.CardEvent, f domain.Feature) Clock {
 	// nobody had been asked.
 	c.OnYou = openDecisionTime(evs, first, last)
 	if c.OnYou > c.Waiting {
-		// A decision can be open while a session runs — a stage that
-		// asked a question and kept reading. That time is the agent's,
-		// not the reader's, and the residual is the ceiling on what can
-		// be charged to a person.
+		// A decision can be open while a session runs — a gate
+		// pre-opened as a crossing is attempted, say. That time is the
+		// agent's, not the reader's, and the residual is the ceiling on
+		// what can be charged to a person. An ask is the exception, and
+		// it is already out of Agent above: a session blocked on its own
+		// question is not working, so its wait lands in the residual.
 		c.OnYou = c.Waiting
 	}
 	c.Idle = c.Waiting - c.OnYou

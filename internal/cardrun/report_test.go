@@ -543,3 +543,31 @@ func TestReportNamesNothingElsewhereOnACardWithNoSessionKeys(t *testing.T) {
 		t.Errorf("first pass + rework + elsewhere = %.2f, more than the card's %.2f", got, run.Money.Credits)
 	}
 }
+
+// An agent's question stops its session inside a tool call: the session
+// stays open while nobody but the reader can move it. That stretch is
+// time on you, not time the agent worked — the one place a decision
+// standing open during a session takes the time from the agent.
+func TestReportChargesAnAnsweredAskInsideAPassToYou(t *testing.T) {
+	enter, _ := json.Marshal(map[string]string{"role": "architect", "flavor": "stage"})
+	exit, _ := json.Marshal(map[string]any{"verdict": ""})
+	q, _ := json.Marshal(state.DecisionPayload{ID: "q1", Kind: state.DecisionKindAsk, Question: "which store?"})
+	a, _ := json.Marshal(state.AskPayload{ID: "q1", Answer: "sqlite", By: "user"})
+	evs := []state.CardEvent{
+		{Stage: domain.StagePlan, Kind: state.EventStageEnter, At: base, Payload: string(enter)},
+		{Stage: domain.StagePlan, Kind: state.EventDecisionOpen, At: base.Add(10 * time.Minute), Payload: string(q)},
+		{Stage: domain.StagePlan, Kind: state.EventAsk, At: base.Add(2*time.Hour + 10*time.Minute), Payload: string(a)},
+		{Stage: domain.StagePlan, Kind: state.EventStageExit, At: base.Add(2*time.Hour + 20*time.Minute), Payload: string(exit)},
+	}
+	run := Report(Input{Feature: card(10, 100), Events: evs})
+
+	if want := 20 * time.Minute; run.Clock.Agent != want {
+		t.Errorf("agent = %v, want %v — the pass less the two hours it sat on the question", run.Clock.Agent, want)
+	}
+	if want := 2 * time.Hour; run.Clock.OnYou != want {
+		t.Errorf("on you = %v, want %v — question to answer", run.Clock.OnYou, want)
+	}
+	if run.Clock.Idle != 0 {
+		t.Errorf("idle = %v, want none", run.Clock.Idle)
+	}
+}

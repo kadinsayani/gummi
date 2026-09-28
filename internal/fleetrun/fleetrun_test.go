@@ -421,3 +421,31 @@ func TestATokenlessBackendSaysNothingRatherThanZero(t *testing.T) {
 		t.Errorf("tokens = %+v, want nothing said", rep.Tokens)
 	}
 }
+
+// A card blocked on an agent's question keeps its session open — the
+// session is inside the ask tool — yet nothing but the reader can move
+// it. The window clock charges that stretch to you, the same stretch the
+// lane draws as a wait, so the headline and the lane cannot disagree
+// about whom the card is waiting on.
+func TestAnOpenAskIsTimeOnYouNotAgentTime(t *testing.T) {
+	c := wsCard(1, "asks")
+	q, _ := json.Marshal(state.DecisionPayload{ID: "q1", Kind: state.DecisionKindAsk, Question: "which store?"})
+	c.Events = append(c.Events,
+		ev(c, domain.StagePlan, state.EventStageEnter, enterFor("architect"), base.Add(time.Hour)),
+		ev(c, domain.StagePlan, state.EventDecisionOpen, string(q), base.Add(time.Hour+10*time.Minute)),
+	)
+	c.Run = cardrun.Report(cardrun.Input{Feature: c.Feature, Events: c.Events})
+	now := base.Add(4 * time.Hour)
+	rep := Fold(Input{Now: now, Window: wsWindow, Cards: []Card{c}, Rows: []AllTimeRow{{Feature: c.Feature}}})
+
+	l := laneOf(t, rep, c.Feature.ID)
+	if want := base.Add(time.Hour + 10*time.Minute); !l.OpenWaitFrom.Equal(want) {
+		t.Fatalf("lane waits on you since %v, want %v", l.OpenWaitFrom, want)
+	}
+	if want := 10 * time.Minute; rep.Agent != want {
+		t.Errorf("agent = %v, want %v — the session until it asked", rep.Agent, want)
+	}
+	if want := 2*time.Hour + 50*time.Minute; rep.OnYou != want {
+		t.Errorf("on you = %v, want %v — the open question to now", rep.OnYou, want)
+	}
+}

@@ -35,6 +35,20 @@
 // session's peak context occupancy is stamped on its stage_exit, because
 // the row holding the live figure is deleted the moment the stage ends.
 //
+// # Whose time an open question is
+//
+// A session that calls ask_user stays open on the record — the question
+// is answered from inside the tool call — but from the moment it asks
+// until it is answered nothing but the reader can move it. That stretch
+// is time on you, not agent time: every clock here subtracts an ask's
+// span from the session it fell in (AskSpans, WorkingTime) before it
+// charges the agent, and the span then counts as waiting on you like
+// any other open decision. Other decisions standing open while a
+// session runs — a gate pre-opened as a crossing is attempted — leave
+// the session's time with the agent, because the session is working.
+// fleetrun's window clock applies the same two helpers, so the card's
+// run tab, the stats tab and the timeline cannot disagree about it.
+//
 // # What a pass is
 //
 // A session is one run of one stage by one role in one flavour — a plan

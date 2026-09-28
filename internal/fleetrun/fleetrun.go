@@ -489,15 +489,16 @@ func windowClock(c Card, w Window, now time.Time) cardWindow {
 	if lifeTo.After(lifeFrom) {
 		cl.Elapsed = lifeTo.Sub(lifeFrom)
 	}
+	// an open session blocked on its own question is not working: that
+	// stretch is the reader's, and the wait below charges it to them
+	asks := cardrun.AskSpans(c.Events)
 	for _, a := range agent {
 		from := later(a.from, w.From)
 		to := a.to
 		if to.IsZero() || to.After(w.To) {
 			to = w.To
 		}
-		if to.After(from) {
-			cl.Agent += to.Sub(from)
-		}
+		cl.Agent += cardrun.WorkingTime(from, to, asks)
 	}
 	if cl.Agent > cl.Elapsed {
 		cl.Agent = cl.Elapsed

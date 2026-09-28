@@ -197,7 +197,8 @@ type Bucket struct {
 // Clock is where the hours went.
 type Clock struct {
 	// Agent is the time a session was actually running, summed over the
-	// card's closed sessions.
+	// card's closed sessions, less any stretch a session stood blocked on
+	// its own ask_user question (AskSpans) — that is time on you.
 	Agent time.Duration
 	// Elapsed is first session start to last session end — the card's own
 	// life, not counting whatever happened after the work stopped.

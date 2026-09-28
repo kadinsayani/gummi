@@ -38,6 +38,40 @@ type Span struct {
 // decisions can stand open together — an ask raised while a gate waits
 // — and a card cannot wait on two people for twice the time.
 func DecisionSpans(evs []state.CardEvent) []Span {
+	return decisionSpans(evs, false)
+}
+
+// AskSpans is DecisionSpans narrowed to agent questions: the stretches a
+// session stood inside its ask tool, blocked on the reader. They are the
+// one kind of open decision that takes time from the agent rather than
+// only from the residual — a session asking a question is open on the
+// record and doing nothing until it is answered — so every clock that
+// counts agent time subtracts them (WorkingTime) before it charges the
+// agent, and the time falls to the person instead. A gate standing open
+// while a session runs is not like that: the session is really working,
+// and that time stays the agent's.
+func AskSpans(evs []state.CardEvent) []Span {
+	return decisionSpans(evs, true)
+}
+
+// WorkingTime is how much of the session interval [from,to) an agent
+// was actually working: the interval less whatever of it fell inside an
+// ask span, an unanswered ask running to the interval's end.
+func WorkingTime(from, to time.Time, asks []Span) time.Duration {
+	if !to.After(from) {
+		return 0
+	}
+	d := to.Sub(from)
+	for _, sp := range clampSpans(asks, from, to) {
+		d -= sp.To.Sub(sp.From)
+	}
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+func decisionSpans(evs []state.CardEvent, asksOnly bool) []Span {
 	answeredAt := map[string]time.Time{}
 	for _, ev := range evs {
 		if ev.Kind != state.EventGate && ev.Kind != state.EventAsk {
@@ -59,6 +93,9 @@ func DecisionSpans(evs []state.CardEvent) []Span {
 		}
 		var p state.DecisionPayload
 		if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.ID == "" {
+			continue
+		}
+		if asksOnly && p.Kind != state.DecisionKindAsk {
 			continue
 		}
 		var to time.Time
