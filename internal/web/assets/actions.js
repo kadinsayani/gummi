@@ -78,6 +78,8 @@ function dialog (card, a, { ask = null } = {}) {
   const m = openModal({
     title: `${cap(a.label)} · ${card.id}`,
     testid: 'action-dialog',
+    // the head redraws under a dialog: focus goes back to its menu button
+    returnTo: '[data-testid="card-actions"]',
     body,
     actions: [
       { label: 'Cancel', testid: 'action-cancel' },

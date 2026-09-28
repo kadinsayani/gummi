@@ -391,6 +391,8 @@ function openLanding (id, d, o, draft, question = '') {
   const m = openModal({
     title: `${sentence(o.label)} · ${id}`,
     testid: 'landing-dialog',
+    // the answer that opened it is redrawn while it is up
+    returnTo: `[data-testid$="-option-${CSS.escape(o.id)}"]`,
     body: [h('p', { class: 'aq', testid: 'landing-question' }, question || 'Read the landing message, then land.'), input, err],
     actions: [
       { label: 'Cancel', testid: 'landing-cancel' },

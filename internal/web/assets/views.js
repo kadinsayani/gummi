@@ -86,26 +86,28 @@ export function openView (name, params = {}) {
 function openerFor (returnTo) {
   const a = document.activeElement
   if (a && a !== document.body) return a
-  const el = typeof returnTo === 'string' ? document.querySelector(returnTo) : returnTo
-  return el?.getClientRects().length ? el : null
+  return shown(returnTo)
+}
+
+// shown resolves returnTo to the first matching element on screen.
+function shown (returnTo) {
+  const els = typeof returnTo === 'string' ? [...document.querySelectorAll(returnTo)] : [returnTo]
+  return els.find(el => el?.getClientRects().length) || null
+}
+
+// focusBack gives focus back on close: to the opener, or — when a redraw
+// replaced it while the overlay was up — to returnTo's element now.
+function focusBack (opener, returnTo) {
+  const el = opener && document.contains(opener) ? opener : returnTo ? shown(returnTo) : null
+  el?.focus?.()
 }
 
 // openModal shows one dialog over the page. body is a Node (or bodyEl a
 // ready container); actions are [{label, primary, danger, testid, onClick}].
 // An action whose onClick returns false keeps the dialog open.
 export function openModal ({ title, body, bodyEl, actions = [], wide = false, testid = 'modal', onClose, role = 'dialog', returnTo }) {
-  closeOverlay()
-  const opener = openerFor(returnTo)
   const mbody = bodyEl || h('div', { class: 'mbody' }, body)
-  let layerDone = null
-  const close = () => {
-    if (!current || current.scrim !== scrim) return
-    current = null
-    scrim.remove()
-    layerDone?.()
-    try { onClose?.() } catch (err) { console.error(err) }
-    if (opener && opener.focus && document.contains(opener)) opener.focus()
-  }
+  let close = null
   const foot = actions.length
     ? h('div', { class: 'mfoot' }, actions.map(a => h('button', {
       class: ['btn', a.primary && 'pri', a.danger && 'danger'],
@@ -124,12 +126,7 @@ export function openModal ({ title, body, bodyEl, actions = [], wide = false, te
       h('h2', null, title),
       h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Close', title: 'Close (esc)', testid: 'modal-close', onclick: () => close() }, icon('close'))),
     mbody, foot)
-  const scrim = h('div', { class: 'scrim', testid: 'scrim' }, box)
-  scrim.addEventListener('mousedown', (e) => { if (e.target === scrim) close() })
-  scrim.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } })
-  document.body.append(scrim)
-  current = { scrim, close }
-  layerDone = pushLayer(close)
+  close = layer(box, { onClose, returnTo })
   const first = box.querySelector('input,textarea,select,[autofocus]') || box
   first.focus()
   return { el: box, body: mbody, close }
@@ -137,25 +134,96 @@ export function openModal ({ title, body, bodyEl, actions = [], wide = false, te
 
 // openOverlay shows a bare panel (the palette, the keys sheet) in a scrim.
 export function openOverlay (panel, { onClose, returnTo } = {}) {
+  return { close: layer(panel, { onClose, returnTo }) }
+}
+
+// layer puts box over the page in a scrim, as the one overlay open, and
+// returns its close. While it is up it is the page: everything behind it
+// is inert (neither focus nor a screen reader reaches it), focus stays in
+// it — Tab wraps, and a control a redraw took away hands focus to its
+// redrawn self or to the box, never to <body> — and escape closes it
+// wherever focus is. Closing gives focus back to whatever opened it.
+function layer (box, { onClose, returnTo }) {
   closeOverlay()
   const opener = openerFor(returnTo)
-  const scrim = h('div', { class: 'scrim', testid: 'scrim' }, panel)
+  if (!box.hasAttribute('tabindex')) box.tabIndex = -1 // focus's last resort
+  const scrim = h('div', { class: 'scrim', testid: 'scrim' }, box)
   let layerDone = null
+  let lastTid = null
+  const behind = []
+  const kept = new MutationObserver(() => {
+    if (current?.scrim !== scrim || holdsFocus(scrim)) return
+    const again = lastTid && box.querySelector(`[data-testid="${CSS.escape(lastTid)}"]`)
+    const to = again && again.getClientRects().length && !again.disabled ? again : box
+    to.focus({ preventScroll: true })
+  })
   const close = () => {
     if (!current || current.scrim !== scrim) return
     current = null
+    kept.disconnect()
     scrim.remove()
+    for (const el of behind) el.inert = false
     layerDone?.()
-    onClose?.()
-    if (opener && opener.focus && document.contains(opener)) opener.focus()
+    try { onClose?.() } catch (err) { console.error(err) }
+    focusBack(opener, returnTo)
   }
   scrim.addEventListener('mousedown', (e) => { if (e.target === scrim) close() })
-  scrim.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close() } })
+  scrim.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { e.stopPropagation(); close() }
+    if (e.key === 'Tab') wrapTab(e, box)
+  })
+  scrim.addEventListener('focusin', (e) => { lastTid = e.target?.dataset?.testid || null })
+  for (const el of document.body.children) {
+    if (el.id === 'toasts' || el.tagName === 'SCRIPT' || el.inert) continue
+    el.inert = true
+    behind.push(el)
+  }
   document.body.append(scrim)
-  current = { scrim, close }
+  kept.observe(box, { childList: true, subtree: true })
+  current = { scrim, box, close }
   layerDone = pushLayer(close)
-  return { close }
+  return close
 }
+
+// holdsFocus: focus is inside the overlay, or on something that sits over
+// it (a menu it opened, a notice).
+function holdsFocus (scrim) {
+  const a = document.activeElement
+  return !!a && a !== document.body && (scrim.contains(a) || !!a.closest?.('.menu, #toasts'))
+}
+
+// wrapTab keeps Tab inside the box: past the last control to the first,
+// and back.
+function wrapTab (e, box) {
+  const els = [...box.querySelectorAll('a[href],button,input,select,textarea,summary,[tabindex]:not([tabindex="-1"])')]
+    .filter(el => !el.disabled && el.getClientRects().length)
+  if (!els.length) { e.preventDefault(); box.focus(); return }
+  const first = els[0]
+  const last = els[els.length - 1]
+  const a = document.activeElement
+  if (e.shiftKey && (a === first || a === box)) {
+    e.preventDefault()
+    last.focus()
+  } else if (!e.shiftKey && a === last) {
+    e.preventDefault()
+    first.focus()
+  }
+}
+
+// Escape closes the overlay even when focus is on nothing (a redraw took
+// the focused control away): the scrim's own listener hears only keys
+// that start inside it. A menu over the overlay goes first.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || !current || e.defaultPrevented) return
+  e.preventDefault()
+  if (menuOpen) { closeMenu(); return }
+  current.close()
+})
+
+// Focus that wanders outside an open overlay is brought back into it.
+document.addEventListener('focusin', () => {
+  if (current && !holdsFocus(current.scrim)) current.box.focus({ preventScroll: true })
+})
 
 export function closeOverlay () { current?.close() }
 
