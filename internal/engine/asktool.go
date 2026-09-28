@@ -723,6 +723,7 @@ func (e *Engine) handleAsk(s *Session, tc *agent.ToolCall) {
 	e.openAskDecision(s, ask)
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
+	e.yieldSlotForAsk(s)
 }
 
 // decisionIDFor mints the ask's durable identity: the tool-call id on the
@@ -1196,7 +1197,9 @@ func (e *Engine) AnswerAs(ctx context.Context, id domain.FeatureID, answer, by s
 	// artifact and re-derive the repo from scratch. reentryTurn restates
 	// the exchange the answer belongs to; the transcript still shows the
 	// person's own words.
+	e.retakeSlotAfterAnswer(s)
 	if err := e.deliverTurn(ctx, s, reentryTurn(ask, answer)); err != nil {
+		defer e.yieldSlotForAsk(s) // the question is open again: so is the lane
 		// Restore the question, exactly as every other failing branch
 		// above does. This is the branch a restored ask always takes, and
 		// deliverTurn refuses a session with no agent behind it — which a
@@ -1280,6 +1283,7 @@ func askOptionLabels(ask *Ask) []string {
 // Sending a message appeared to restart it only because Send sets the
 // flag on its way past.
 func (e *Engine) resumeAfterAnswer(s *Session) {
+	e.retakeSlotAfterAnswer(s)
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventUpdated})

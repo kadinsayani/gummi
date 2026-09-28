@@ -407,7 +407,14 @@ stream-json) and **codex** (Codex CLI, `codex exec --json`).
   the other, so an attended run always starts immediately regardless of
   how full the autopilot pool is. Either cap can be raised (or, internally,
   set to 0 for uncapped) and excess autopilot sessions queue behind it; a
-  paused/blocked session frees its slot. Parallel token burn is the
+  paused/blocked session frees its slot. That includes an attended run
+  waiting on a person's `ask_user` answer: its slot goes to the next
+  queued attended card, and the answer takes a slot back at once — even
+  if the lane filled meanwhile, so for that turn it runs one over its cap
+  — because the agent is live inside its own tool call and an answer
+  that then queued behind another card's turn would land while nothing
+  moved. An autopilot card never yields this way: autopilot answers its
+  own questions at once. Parallel token burn is the
   operator's call: cards drive in disjoint worktrees under per-card locks
   (§8.2 Decision 12), so nothing in the engine needs the serialization.
   Interactive stages only run when you attach.

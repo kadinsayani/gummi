@@ -2291,6 +2291,46 @@ func (e *Engine) freeSlot(s *Session) {
 	e.schedule()
 }
 
+// yieldSlotForAsk gives an attended stage's slot back while it waits on a
+// person's answer, and lets the next queued attended card start.
+//
+// A session blocked on a question is blocked on a person, and a blocked
+// session frees its slot (DESIGN §4.2). It used to hold it: with the one
+// attended lane, a card whose question nobody had answered yet kept every
+// other attended card queued behind it for as long as the question sat
+// there, and nothing said what they were waiting for.
+//
+// The answer takes the slot back at once (retakeSlotAfterAnswer), even
+// when the lane has filled in the meantime: the agent is live and blocked
+// inside its own tool call, and an answer that then waited on some other
+// card's turn would be a person told their answer landed while nothing
+// moved. So a lane can run one over its cap for the length of that turn
+// — the card that started meanwhile keeps its slot, and the lane settles
+// back as either finishes.
+func (e *Engine) yieldSlotForAsk(s *Session) {
+	if s.Interactive || !s.yieldSlot() {
+		return
+	}
+	e.mu.Lock()
+	if e.lanes[poolAttended].running > 0 {
+		e.lanes[poolAttended].running--
+	}
+	e.mu.Unlock()
+	e.schedule()
+}
+
+// retakeSlotAfterAnswer is yieldSlotForAsk's other half: the answered
+// session holds a slot again for the rest of its run.
+func (e *Engine) retakeSlotAfterAnswer(s *Session) {
+	p, ok := s.retakeSlot()
+	if !ok {
+		return
+	}
+	e.mu.Lock()
+	e.lanes[p].running++
+	e.mu.Unlock()
+}
+
 // TopUp durably raises a feature's envelope and resumes the exhausted
 // stage from its checkpoint — the "top up" action of a budget-exhaustion
 // gate (DESIGN §5.1 layer 3). The raise is persisted to the store, so it
@@ -2686,6 +2726,7 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 		if e.maybeConventionAsk(s) {
 			e.persist(s)
 			e.send(Event{Feature: s.Feature.ID, Stage: s.Feature.Stage, Kind: EventQuestion})
+			e.yieldSlotForAsk(s)
 			return
 		}
 		kind = EventIdle

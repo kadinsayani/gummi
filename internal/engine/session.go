@@ -332,6 +332,7 @@ type Session struct {
 	stopped    bool
 	finalized  bool    // stopped; must not be persisted (may be dropped)
 	heldSlot   bool    // true between taking and releasing an attention slot
+	askYield   bool    // the slot was given back while a person answers (yieldSlotForAsk)
 	budget     float64 // stage credit budget (0 = none)
 	creditRate float64 // adapter's token→credit rate (0 = engine default)
 	// cardSpent is the whole card's metered spend (credit-equivalent) as
@@ -583,6 +584,34 @@ func (s *Session) slot() (held bool, pool lanePool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.heldSlot, s.pool
+}
+
+// yieldSlot gives back an attended session's slot while it waits on a
+// person, reporting whether it did. Only an attended run yields: an
+// autopilot card's questions are answered by autopilot (or its goal's
+// lead) at once, and yielding there would let the pool run over its cap
+// the moment the answer lands.
+func (s *Session) yieldSlot() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.heldSlot || s.pool != poolAttended {
+		return false
+	}
+	s.heldSlot, s.askYield = false, true
+	return true
+}
+
+// retakeSlot takes back a slot yieldSlot gave up, reporting the pool it
+// counts against, or false when nothing was yielded.
+func (s *Session) retakeSlot() (lanePool, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.askYield || s.state != StateRunning {
+		s.askYield = false
+		return 0, false
+	}
+	s.askYield, s.heldSlot = false, true
+	return s.pool, true
 }
 
 // repool re-binds the pool this session competes in, reporting whether
