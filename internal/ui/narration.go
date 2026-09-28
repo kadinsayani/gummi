@@ -492,6 +492,11 @@ func verifyStopped(in nextInput, art string) string {
 		}
 		return "Verify is blocked on the environment — the missing prerequisites are in the " + art + "."
 	}
+	if in.kind == domain.KindResearch && in.verdict == verdictFail && in.verdictFloorReason != "" {
+		// the document floor overruled the verifier: say which floor, so
+		// the reader is not sent looking for a finding nobody wrote
+		return "Verify failed: " + sanitize(in.verdictFloorReason) + " — the report is on the thread; send it back to fix the document." + loopBreaker(in)
+	}
 	if in.verdict == verdictFail || in.verdict == verdictChanges {
 		return "Verify reported failure — the evidence is in the " + art + "." + loopBreaker(in)
 	}

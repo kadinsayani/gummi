@@ -64,6 +64,17 @@ func TestDiscoveryThatLeavesNoChecksIsSaidOnce(t *testing.T) {
 	}
 }
 
+// A research verify the document floor failed says so, instead of
+// pointing at a finding in the document that nobody wrote.
+func TestAResearchVerifyFailedByTheFloorSaysWhich(t *testing.T) {
+	in := nextInput{stage: domain.StageVerify, kind: domain.KindResearch, verdict: verdictFail,
+		verdictFloorReason: "the document floor failed — 0 open threads, 0 broken citations, 5 unmapped questions"}
+	got := verifyStopped(in, "research document")
+	if !strings.Contains(got, "5 unmapped questions") || !strings.Contains(got, "send it back") {
+		t.Errorf("floor-failed research verify = %q", got)
+	}
+}
+
 // The document-floor refusal names what is unmapped and the rule, and
 // speaks no terminal keys.
 func TestDocFloorRefusalIsActionable(t *testing.T) {

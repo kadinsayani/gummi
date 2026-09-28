@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"strings"
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
@@ -69,5 +70,19 @@ func (e *Engine) gateDocumentVerdict(s *Session) {
 		return
 	}
 	s.appendToolDone("check "+DocumentFloorCheck+": FAIL ("+rep.Summary(l)+")", false, rep.Explain(l))
-	s.setVerdictFloor("fail", "the document floor failed — "+rep.Summary(l))
+	s.setVerdictFloor("fail", documentFloorReason+rep.Summary(l))
+}
+
+// documentFloorReason opens the verdict-floor reason a failing document
+// floor stamps, so a reader of the snapshot can tell it from the others.
+const documentFloorReason = "the document floor failed — "
+
+// DocumentFloorFailed reports whether a finished research verify was
+// failed by the document floor rather than by its verifier: the case a
+// caller answers with the floor's own report (the done edge's
+// StatusBlockedDocument) rather than as a verify that found the work
+// wanting.
+func DocumentFloorFailed(snap Snapshot) bool {
+	return snap.Feature.Kind == domain.KindResearch && snap.VerdictFloor == "fail" &&
+		strings.HasPrefix(snap.VerdictFloorReason, documentFloorReason)
 }

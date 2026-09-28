@@ -1279,6 +1279,13 @@ func (d *Driver) applyVerdict(ctx context.Context, f domain.Feature) (Outcome, e
 	case domain.StageVerify:
 		v := verdict.SessionVerdict(snap)
 		d.emitResult(f, v)
+		// A research verify the document floor failed is answered by the
+		// floor's own gate, which blocks with the report (citations,
+		// unmapped questions) a caller can act on — the same outcome the
+		// done edge gave before the floor also ran inside verify.
+		if engine.DocumentFloorFailed(snap) {
+			return d.crossGate(ctx, f)
+		}
 		out := gatepolicy.Decide(gatepolicy.Input{
 			Stage:       domain.StageVerify,
 			Kind:        f.Kind,
