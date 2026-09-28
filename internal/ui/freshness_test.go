@@ -179,6 +179,33 @@ func TestAnOlderRowLoadNeverReplacesANewerOne(t *testing.T) {
 	}
 }
 
+// A card that left the board (deleted) is reported gone, not moved: a
+// page that has it open has nothing to refetch, and every refetch of it
+// would be a 404 the browser logs as a failed load.
+func TestADeletedCardIsReportedGone(t *testing.T) {
+	m := populatedShell(160, 50)
+	var got []webapi.Change
+	m.SetChangeHook(func(c webapi.Change) { got = append(got, c) })
+	all := append([]featureRow(nil), m.rows...)
+	m.Update(rowsMsg{rows: all})
+	left := all[0].F.ID
+	got = nil
+	m.Update(rowsMsg{rows: append([]featureRow(nil), all[1:]...)})
+	var gone, moved bool
+	for _, c := range got {
+		if c.Kind == webapi.ChangeCard && c.ID == string(left) {
+			if c.Gone {
+				gone = true
+			} else {
+				moved = true
+			}
+		}
+	}
+	if !gone || moved {
+		t.Fatalf("changes for the deleted %s = %+v, want one gone card change and no refetch", left, got)
+	}
+}
+
 // A re-entry chip raised after its request stopped waiting reaches every
 // open page. With a real model the read takes longer than the request
 // follows it; the chip was raised on a detached message nothing mapped

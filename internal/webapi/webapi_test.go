@@ -87,6 +87,7 @@ func TestChangeShapes(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, []Change{
 		{Kind: ChangeBoard},
 		{Kind: ChangeCard, ID: "FD-012"},
+		{Kind: ChangeCard, ID: "FD-013", Gone: true},
 		{Kind: ChangeLive, ID: "FD-012"},
 		{Kind: ChangeToast, ID: "FD-012", Text: "FD-012: paused", Err: false},
 		{Kind: ChangeViewers, Viewers: []Viewer{{Person: "Simon", Device: "Mac · Firefox", DeviceID: "a1b2c3d4", Since: at}}},

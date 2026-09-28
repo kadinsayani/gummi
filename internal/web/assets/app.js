@@ -151,7 +151,9 @@ async function startBoard () {
 function connectEvents () {
   connect({
     board: () => loadBoard(),
-    card: (c) => { if (c.id === state.sel) refresh(c.id) },
+    // a card that is gone has nothing to refetch: the board change that
+    // comes with it moves the page off it (initSelection)
+    card: (c) => { if (c.id === state.sel && !c.gone) refresh(c.id) },
     live: (c) => { if (c.id === state.sel) loadLive(c.id) },
     toast: (c) => toast(c.text, { err: c.err }),
     viewers: (c) => set({ viewers: c.viewers || [] }),

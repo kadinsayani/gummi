@@ -152,9 +152,13 @@ func (m *Shell) emitRowChanges(msg rowsMsg) {
 	if len(next) != len(fs.seen) || len(cards) > 0 {
 		moved = true
 	}
+	// a card that left the board is said to be gone rather than moved: a
+	// page that has it open has nothing to refetch, and asking would only
+	// be answered 404
+	var gone []string
 	for id := range fs.seen {
 		if _, ok := next[id]; !ok {
-			cards = append(cards, string(id))
+			gone = append(gone, string(id))
 		}
 	}
 	fs.seen, fs.stacks = next, msg.stacks
@@ -164,6 +168,9 @@ func (m *Shell) emitRowChanges(msg rowsMsg) {
 	m.EmitChange(webapi.Change{Kind: webapi.ChangeBoard})
 	for _, id := range cards {
 		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id})
+	}
+	for _, id := range gone {
+		m.EmitChange(webapi.Change{Kind: webapi.ChangeCard, ID: id, Gone: true})
 	}
 }
 

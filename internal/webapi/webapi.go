@@ -68,6 +68,10 @@ type Change struct {
 	// a toast about one card; the run, for ingest; empty for board, agent
 	// and viewers.
 	ID string `json:"id,omitempty"`
+	// Gone marks a card change whose card has left the board (it was
+	// deleted): there is nothing left to refetch, and a page showing it
+	// moves off it with the board change that comes with it.
+	Gone bool `json:"gone,omitempty"`
 	// Text and Err are a toast's message and whether it reports a failure.
 	Text string `json:"text,omitempty"`
 	Err  bool   `json:"err,omitempty"`

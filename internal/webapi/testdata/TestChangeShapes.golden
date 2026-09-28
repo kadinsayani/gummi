@@ -7,6 +7,11 @@
     "id": "FD-012"
   },
   {
+    "kind": "card",
+    "id": "FD-013",
+    "gone": true
+  },
+  {
     "kind": "live",
     "id": "FD-012"
   },
