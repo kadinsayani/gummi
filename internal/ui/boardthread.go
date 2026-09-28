@@ -54,7 +54,7 @@ func (m *Shell) ensureBoardSession() tea.Cmd {
 		// mirrors attachOrRun's own wording for the identical precondition
 		// on a card's chat/run — a static board with no coding agent wired
 		// has nothing to open here either.
-		m.boardErr = "no agent configured (set a model/provider to enable agents)"
+		m.boardErr = m.noAgent(" (set a model/provider to enable agents)")
 		return nil
 	}
 	m.boardOpening = true

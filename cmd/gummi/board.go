@@ -131,10 +131,12 @@ func openBoard(o boardOpts) (_ *boardHost, err error) {
 	// board session that replaced it binds its own endpoint when it
 	// starts (engine.BoardSession) — which is why mcpworkspace.go's
 	// socket path carries a nonce in the first place.
-	if eng, _, cleanup := buildEngine(store, pool, ws, locks); eng != nil {
+	if eng, _, cleanup, why := buildEngine(store, pool, ws, locks); eng != nil {
 		h.engine = eng
 		shell.AttachEngine(eng)
 		h.onClose(cleanup)
+	} else {
+		shell.SetEngineUnavailable(why)
 	}
 	// layer-3 budget: new features get this credit envelope, drawn on by
 	// every stage until it runs dry and a human gate offers a top-up.

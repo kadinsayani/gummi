@@ -336,7 +336,7 @@ func (m *Shell) startIngest(path, profile, repo string) tea.Cmd {
 // made with named, rather than the board's default.
 func (m *Shell) startIngestWith(path, profile, repo string, envelope int) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(" — ingestion needs one"), isErr: true}
 		return nil
 	}
 	if m.ingestRun != nil {
@@ -373,7 +373,7 @@ func (m *Shell) startIngestWith(path, profile, repo string, envelope int) tea.Cm
 // --request-changes headless, not exposed here).
 func (m *Shell) startDecomposeReRun(f domain.Feature) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured — decompose needs one", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(" — decompose needs one"), isErr: true}
 		return nil
 	}
 	if m.ingestRun != nil {

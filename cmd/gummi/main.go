@@ -159,13 +159,18 @@ func quitOnHangup(p *tea.Program) func() {
 //	                        headless adapter's token→credit rate, for a
 //	                        local endpoint (llama.cpp) that the engine
 //	                        still needs to meter against a credit budget
-func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, locks *state.CardLocks) (*engine.Engine, []string, func()) {
-	eng, agents, names, err := newEngineFromEnv(store, pool, ws)
+//
+// With no engine, why says what stopped it, for the board to repeat when
+// a card is asked to run: the line on stderr is gone by then, and on a
+// web host was never in front of the person asking.
+func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, locks *state.CardLocks) (_ *engine.Engine, _ []string, cleanup func(), why string) {
+	eng, agents, names, why, err := engineFromEnv(store, pool, ws)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
+		why = err.Error()
 	}
 	if eng == nil {
-		return nil, nil, nil
+		return nil, nil, nil, why
 	}
 	// The board drives cards for as long as it is open, so it takes each
 	// card's lock the way a headless command does — before the first
@@ -189,7 +194,7 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 			seen[a] = struct{}{}
 			_ = a.Close()
 		}
-	}
+	}, ""
 }
 
 // newEngineFromEnv constructs the orchestrator and its agents from the
@@ -203,6 +208,15 @@ func buildEngine(store *state.Store, pool *worktree.Pool, ws state.Workspace, lo
 // returning a nil error, so callers that already have their own generic
 // "no coding agent is configured" message for those cases are unaffected.
 func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (*engine.Engine, map[string]agent.Agent, []string, error) {
+	eng, agents, names, _, err := engineFromEnv(store, pool, ws)
+	return eng, agents, names, err
+}
+
+// engineFromEnv is newEngineFromEnv, plus why: on a nil engine with a
+// nil error, what kept every agent from starting. It is a string rather
+// than a second error because it is not one to its callers — a board
+// with no agent is a static board, which is allowed.
+func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) (_ *engine.Engine, _ map[string]agent.Agent, _ []string, why string, _ error) {
 	// per-role model routing from .gummi/profiles.yaml (falls back to
 	// the single env model when absent or a role isn't covered)
 	profiles, err := config.LoadProfiles(ws.ProfilesFile())
@@ -231,7 +245,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 		if cfg.Guarded() {
 			perm = agent.PermissionGuarded
 			if issues := guardedIncompatibilities(defaultBackendName(), profiles); len(issues) > 0 {
-				return nil, nil, nil, fmt.Errorf("permissions: guarded is incompatible with the resolved backend for %s",
+				return nil, nil, nil, "", fmt.Errorf("permissions: guarded is incompatible with the resolved backend for %s",
 					formatGuardedIncompatibilities(issues))
 			}
 		}
@@ -247,10 +261,10 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	agents, err := buildAgents(profiles)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "gummi:", err)
-		return nil, nil, nil, nil
+		return nil, nil, nil, err.Error(), nil
 	}
 	if len(agents) == 0 {
-		return nil, nil, nil, nil
+		return nil, nil, nil, "none of the backends the profiles name could start", nil
 	}
 	model := cmp.Or(os.Getenv("GUMMI_MODEL"), "gpt-5")
 	// Two independent attention pools (internal/engine): attended — every
@@ -313,7 +327,7 @@ func newEngineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspac
 	// fallback. Re-sorting alphabetically here would silently pick the wrong
 	// default (e.g. "premium" ahead of the configured "thrifty").
 	names := profiles.Names()
-	return eng, agents, names, nil
+	return eng, agents, names, "", nil
 }
 
 // profileNames returns the profile names declared in .gummi/profiles.yaml

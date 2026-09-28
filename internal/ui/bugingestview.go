@@ -355,7 +355,7 @@ func (m *Shell) useInForm() tea.Cmd {
 // issues. The fetch shells out, so it runs off the main loop.
 func (m *Shell) startBugIngest(params bugIngestParams) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured — bug import needs the engine", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(" — bug import needs the engine"), isErr: true}
 		m.restorePendingCard()
 		return nil
 	}

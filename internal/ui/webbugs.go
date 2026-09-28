@@ -37,7 +37,7 @@ type BugQuery struct {
 // in.
 func (m *Shell) webBugFetch(in string) (func(context.Context, engine.GitHubSource) (engine.BugIngestResult, error), string, error) {
 	if m.engine == nil {
-		return nil, "", webErr(WebUnavailable, "no agent configured — bug import needs the engine")
+		return nil, "", webErr(WebUnavailable, "%s", m.noAgent(" — bug import needs the engine"))
 	}
 	fetch := m.ghIssues
 	if fetch == nil {

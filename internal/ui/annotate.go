@@ -37,7 +37,7 @@ func compileOpenQuestions(doc spec.Doc) string { return engine.CompileSpecCommen
 // open-count burn down.
 func (m *Shell) requestSpecChanges(sv *specView) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(""), isErr: true}
 		return nil
 	}
 	turn := compileOpenQuestions(sv.doc)

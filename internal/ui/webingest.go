@@ -241,7 +241,7 @@ func (b *Bridge) StartIngest(ctx context.Context, req webapi.IngestRequest) (web
 func (m *Shell) webIngestFree() error {
 	switch {
 	case m.engine == nil:
-		return webErr(WebUnavailable, "no agent configured — ingestion needs one")
+		return webErr(WebUnavailable, "%s", m.noAgent(" — ingestion needs one"))
 	case m.ingestRun != nil:
 		return webErr(WebConflict, "an ingest is already decomposing — wait for it")
 	case m.ingest != nil:
@@ -342,7 +342,7 @@ func (b *Bridge) ApproveIngest(ctx context.Context, id string) (webapi.IngestRun
 			return nil
 		}
 		if mint = m.takeIngest(); mint == nil {
-			perr = webErr(WebUnavailable, "no agent configured — ingestion needs one")
+			perr = webErr(WebUnavailable, "%s", m.noAgent(" — ingestion needs one"))
 			return nil
 		}
 		m.webIngest.review, m.webIngest.state = nil, webapi.IngestMaterialized

@@ -228,6 +228,9 @@ type Shell struct {
 
 	// agent orchestration (nil engine means no agent wired)
 	engine *engine.Engine
+	// engineWhy is why the host came up with no engine, in the words the
+	// failure gave; empty when it is not known. See noAgent.
+	engineWhy string
 	// follow is the live tail of a card another process is driving, opened
 	// by watchForeign and rendered read-only by the card thread's live
 	// stage block. Non-nil only while the card page is open on that card;
@@ -788,6 +791,26 @@ func (m *Shell) AttachCardLocks(l *state.CardLocks) { m.locks = l }
 // AttachEngine wires the agent orchestrator, enabling interactive chat
 // and autonomous stages. Optional: without it the board is static.
 func (m *Shell) AttachEngine(e *engine.Engine) { m.engine = e }
+
+// SetEngineUnavailable records why the host has no engine to attach, so
+// a refusal can say it. The reason is otherwise one line on the host's
+// stderr at startup — which a web host's reader never sees, and which a
+// host started by a service manager writes to a journal nobody is
+// reading when a card refuses to run.
+func (m *Shell) SetEngineUnavailable(why string) { m.engineWhy = strings.TrimSpace(why) }
+
+// noAgent words a refusal for want of an engine. With no reason on
+// record it is the plain "no agent configured" followed by tail, the
+// caller's own clause about what needed one. With a reason it says that
+// instead: the agent is configured and did not start, and sending the
+// reader to their configuration would send them the wrong way.
+func (m *Shell) noAgent(tail string) string {
+	if m.engineWhy == "" {
+		return "no agent configured" + tail
+	}
+	return "no agent started: " + sanitize(m.engineWhy) +
+		" — fix that in the environment gummi runs in, then restart it"
+}
 
 // SetProfileNames sets the profile names offered by the new-feature
 // form (from profiles.yaml). Empty leaves the built-in presets.
@@ -3350,7 +3373,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		return m.openCloseOut()
 	case "I":
 		if m.engine == nil {
-			m.notice = noticeMsg{text: "no agent configured — ingestion needs one", isErr: true}
+			m.notice = noticeMsg{text: m.noAgent(" — ingestion needs one"), isErr: true}
 			return nil
 		}
 		if m.ingestRun != nil {
@@ -3368,7 +3391,7 @@ func (m *Shell) boardVerb(key string) tea.Cmd {
 		}
 	case "G":
 		if m.engine == nil {
-			m.notice = noticeMsg{text: "no agent configured — bug import needs the engine", isErr: true}
+			m.notice = noticeMsg{text: m.noAgent(" — bug import needs the engine"), isErr: true}
 			return nil
 		}
 		if m.bugIngesting {
@@ -3937,7 +3960,7 @@ func (m *Shell) attachOrRun(f domain.Feature) tea.Cmd {
 		return m.watchConducted(f)
 	}
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)"), isErr: true}
 		return nil
 	}
 	if !autonomousStage(f.Stage) {
@@ -3980,7 +4003,7 @@ func (m *Shell) runStageWithNote(f domain.Feature, note string) tea.Cmd {
 		// to. Say so rather than dereferencing nothing: this is now
 		// reachable from the work stage's own gate, where "send it back
 		// with changes" re-runs the stage.
-		m.notice = noticeMsg{text: string(f.ID) + ": no agent configured — nothing to re-run the stage with", isErr: true}
+		m.notice = noticeMsg{text: string(f.ID) + ": " + m.noAgent(" — nothing to re-run the stage with"), isErr: true}
 		return nil
 	}
 	// entering the plan stage hydrates the loop's round counter from the
@@ -4355,7 +4378,7 @@ func (m *Shell) setRepo(id domain.FeatureID, repo string) tea.Cmd {
 // its own u picks the work back up.
 func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured — budgets meter agent spend", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(" — budgets meter agent spend"), isErr: true}
 		return nil
 	}
 	actor := m.humanActor()

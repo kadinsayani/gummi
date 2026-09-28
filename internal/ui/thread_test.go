@@ -1673,3 +1673,25 @@ func TestSessionlessSpendGetsItsOwnLine(t *testing.T) {
 		t.Errorf("a role that ran as a session was given a duplicate line:\n%s", joined)
 	}
 }
+
+// A host that came up with no engine knows why — the backend's binary was
+// not on its PATH, say — and the refusal to run a card has to repeat it:
+// "no agent configured" sends the reader to a configuration that is fine.
+func TestARefusedRunSaysWhyTheHostHasNoAgent(t *testing.T) {
+	m := populatedShell(120, 34)
+	f := m.rows[m.sel].F
+	m.runStage(f)
+	if !strings.Contains(m.notice.text, "no agent configured") {
+		t.Fatalf("with no reason on record, notice = %q, want the plain no-agent-configured refusal", m.notice.text)
+	}
+
+	const why = `claude binary "claude" not found: exec: "claude": executable file not found in $PATH`
+	m.SetEngineUnavailable(why)
+	m.runStage(f)
+	if !strings.Contains(m.notice.text, why) {
+		t.Fatalf("notice = %q, want it to carry the reason %q", m.notice.text, why)
+	}
+	if strings.Contains(m.notice.text, "no agent configured") {
+		t.Fatalf("notice = %q: an agent that failed to start is not one that was never configured", m.notice.text)
+	}
+}

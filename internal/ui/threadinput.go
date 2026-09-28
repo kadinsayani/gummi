@@ -1072,7 +1072,7 @@ func (m *Shell) sendThreadMessage(f domain.Feature, text string) tea.Cmd {
 // composer always clears here.
 func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)"}
+		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)")}
 		return nil
 	}
 	m.threadInput.Reset()
@@ -1114,7 +1114,7 @@ func (m *Shell) sendConsultMessage(f domain.Feature, text string) tea.Cmd {
 // the two can never be the same call.
 func (m *Shell) sendFreeformTurn(f domain.Feature, text string) tea.Cmd {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured (set a model/provider to enable agents)"}
+		m.notice = noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)")}
 		return nil
 	}
 	m.threadInput.Reset()

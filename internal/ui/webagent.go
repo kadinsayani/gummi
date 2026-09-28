@@ -113,7 +113,7 @@ func webBoardItems(tr []engine.Message) (items []webapi.Item, streaming string, 
 func (m *Shell) WebAgentOpen(req webapi.AgentOpenRequest) (tea.Cmd, error) {
 	switch {
 	case m.engine == nil:
-		return nil, webErr(WebUnavailable, "no agent configured (set a model/provider to enable agents)")
+		return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
 	case m.board != nil:
 		return nil, nil
 	case m.boardOpening:
@@ -178,7 +178,7 @@ func (m *Shell) WebAgentInterrupt() (tea.Cmd, error) {
 // the question came with (webConfirmToken).
 func (m *Shell) WebAgentProfile(req webapi.AgentProfileRequest) (tea.Cmd, error) {
 	if m.engine == nil {
-		return nil, webErr(WebUnavailable, "no agent configured (set a model/provider to enable agents)")
+		return nil, webErr(WebUnavailable, "%s", m.noAgent(" (set a model/provider to enable agents)"))
 	}
 	if strings.TrimSpace(req.Profile) == "" && strings.TrimSpace(req.Model) == "" {
 		return nil, webErr(WebBadRequest, "name a profile or a model to switch to")

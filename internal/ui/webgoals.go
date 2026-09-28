@@ -206,7 +206,7 @@ func (m *Shell) WebGoalAction(id, action string, req webapi.GoalActionRequest, p
 		return nil, webErr(WebNotFound, "%s is not a goal", f.ID)
 	}
 	if m.engine == nil {
-		return nil, webErr(WebUnavailable, "no agent configured — a goal needs the engine")
+		return nil, webErr(WebUnavailable, "%s", m.noAgent(" — a goal needs the engine"))
 	}
 	if r.DrivenAbroad {
 		return nil, webErr(WebConflict, "%s is being driven by another gummi process — watch it there", f.ID)
@@ -317,7 +317,7 @@ func (b *Bridge) CreateGoal(ctx context.Context, req webapi.GoalCreateRequest) (
 			perr = webErr(WebBadRequest, "describe the objective — a goal is created from it")
 			return nil
 		case m.engine == nil || m.store == nil:
-			perr = webErr(WebUnavailable, "no agent configured — a goal needs the engine")
+			perr = webErr(WebUnavailable, "%s", m.noAgent(" — a goal needs the engine"))
 			return nil
 		}
 		for _, p := range req.References {

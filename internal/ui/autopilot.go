@@ -571,7 +571,7 @@ func autopilotSettled(id domain.FeatureID, cmd tea.Cmd) tea.Cmd {
 func (m *Shell) autopilotRun(id domain.FeatureID, to domain.Stage) tea.Cmd {
 	return func() tea.Msg {
 		if m.engine == nil {
-			return noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
+			return noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)"), isErr: true}
 		}
 		f, err := m.store.GetFeature(context.Background(), id)
 		if err != nil {
@@ -711,7 +711,7 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 			return msg
 		}
 		if autonomousStage(plan.to) && m.engine == nil {
-			return noticeMsg{text: "no agent configured (set a model/provider to enable agents)", isErr: true}
+			return noticeMsg{text: m.noAgent(" (set a model/provider to enable agents)"), isErr: true}
 		}
 		if plan.bucket == "gate" {
 			// A gate is crossed through the engine's own advance floor, as

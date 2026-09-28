@@ -200,7 +200,7 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) stri
 func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	actor := m.humanActor()
 	if m.engine == nil {
-		m.notice = noticeMsg{text: "no agent configured", isErr: true}
+		m.notice = noticeMsg{text: m.noAgent(""), isErr: true}
 		return nil
 	}
 	if dv.openCount() == 0 {
