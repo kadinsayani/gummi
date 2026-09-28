@@ -222,6 +222,12 @@ type noticeMsg struct {
 	// same sentence with the act named instead. Empty means text reads the
 	// same on both faces (webText).
 	web string
+	// aside marks a notice about work that followed an act rather than
+	// the act itself: the checks an approval baselines, a scribe pass it
+	// started. The act already happened, so a web intent that sees an
+	// aside passes it on as a notice and never reads it as the act being
+	// refused, even when it is an error.
+	aside bool
 }
 
 // webText is the notice in the words the web face shows.
@@ -969,7 +975,7 @@ func (m *Shell) warnScribeFailure(id domain.FeatureID, err error) {
 	m.scribeWarned[id] = true
 	// not isErr, for the reason the no-checks notice is not: the pass
 	// that failed rides in the wake of a crossing that succeeded
-	m.notice = noticeMsg{id: id, text: sanitize(string(id) + ": " + sf.Error() +
+	m.notice = noticeMsg{id: id, aside: true, text: sanitize(string(id) + ": " + sf.Error() +
 		" — check discovery, the budget estimate and landing drafts are skipped until it works; fix the scribe's model in .gummi/profiles.yaml")}
 }
 

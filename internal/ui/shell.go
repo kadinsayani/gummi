@@ -2288,13 +2288,15 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		delete(m.baselining, msg.id)
 		switch {
 		case msg.err != nil:
-			m.notice = noticeMsg{text: string(msg.id) + ": gummi-checks baseline failed — " + sanitize(msg.err.Error()), isErr: true}
+			m.notice = noticeMsg{text: string(msg.id) + ": gummi-checks baseline failed — " + sanitize(msg.err.Error()), isErr: true, aside: true}
 		case len(msg.results) > 0:
 			// the results live in the store (BaselineFails via loadRows), not
 			// in m.checks — that map is manual verify runs, and a baseline
 			// bleeding into it would mislabel the dashboard and the
 			// failed-check guidance at verify.
 			m.notice = baselineNotice(msg.id, msg.results)
+			// the baseline follows an approval that already crossed
+			m.notice.aside = true
 		}
 		return m, m.loadRows
 

@@ -259,7 +259,7 @@ func (t *webIntent) noticed(m *Shell, before noticeMsg) {
 		t.out.restore = n.restore
 		return
 	}
-	if n.isErr {
+	if n.isErr && !n.aside {
 		t.out.refused = n.webText()
 	}
 }
