@@ -158,7 +158,7 @@ func (d *commitMsgDialog) startDraft(fresh bool) tea.Cmd {
 				msg.guard = true
 				msg.reason = guard.Error()
 			} else {
-				msg.reason = "draft unavailable: " + err.Error()
+				msg.reason = "no draft: " + engine.CommitDraftFailureReason(err)
 			}
 		}
 		return msg

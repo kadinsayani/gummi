@@ -118,7 +118,7 @@ func TestCommitMsgDialogSurfacesDraftFailureReason(t *testing.T) {
 		{
 			name:   "fault",
 			err:    errors.New(`scribe session could not open: model "mab/qwen3.6-35b-a3b-q5xl" not found`),
-			prefix: "draft unavailable",
+			prefix: "no draft: the scribe could not draft one",
 		},
 		{
 			name:   "guard-rejection",

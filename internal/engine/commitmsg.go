@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -13,8 +14,97 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
+
+// commitmsgFreeformPrompt is commitmsgPrompt for a freeform card (DESIGN
+// §19), which has no spec and no verify: its context is what the person
+// asked for in the card's conversation, and what stands behind the landing
+// is a person's read of the diff. Same contract on the reply otherwise.
+func commitmsgFreeformPrompt(feed *worktree.DraftFeed, asked string) string {
+	return strings.NewReplacer(
+		"Inlined below: the spec's digest — the authoritative context — plus the",
+		"Inlined below: what the person asked for on this card (it has no spec) — the context — plus the",
+		"This branch is verified and awaiting a human landing.",
+		"A person has read this branch's diff and is about to land it.",
+		"\n## Spec digest\n\n",
+		"\n## What the person asked for\n\n",
+	).Replace(commitmsgPrompt(feed, asked, ""))
+}
+
+// commitmsgFreeformCap bounds the conversation digest like the spec's.
+const commitmsgFreeformTurnCap = 400
+
+// freeformDigest is a freeform card's stand-in for the spec digest: its
+// title and the person's own turns, in order. The agent's replies are left
+// out — they are what the diff already shows — and so is gummi's own
+// narration. The newest turns are kept when the conversation is long,
+// because a later turn is the one that corrected an earlier one.
+func (e *Engine) freeformDigest(ctx context.Context, f domain.Feature) string {
+	var turns []string
+	if e.cfg.Store != nil {
+		evs, err := e.cfg.Store.Events(ctx, f.ID)
+		if err == nil {
+			for _, ev := range evs {
+				if ev.Kind != state.EventMessage {
+					continue
+				}
+				var p struct {
+					Author  string `json:"author"`
+					Content string `json:"content"`
+				}
+				if json.Unmarshal([]byte(ev.Payload), &p) != nil || p.Author != string(AuthorUser) {
+					continue
+				}
+				turns = appendTurn(turns, p.Content)
+			}
+		}
+	}
+	// A board that does not persist (and a turn not mirrored yet) still
+	// has the conversation in the live session's transcript.
+	if len(turns) == 0 {
+		if ff := e.Freeform(f.ID); ff != nil {
+			ff.mu.Lock()
+			sess := ff.sess
+			ff.mu.Unlock()
+			if sess != nil {
+				for _, m := range sess.Snapshot().Transcript {
+					if m.Author == AuthorUser {
+						turns = appendTurn(turns, m.Content)
+					}
+				}
+			}
+		}
+	}
+	head := f.Title + "\n\n"
+	body := strings.Join(turns, "\n")
+	for len(head)+len(body) > commitmsgDigestCap && len(turns) > 1 {
+		turns = turns[1:]
+		body = "[earlier turns omitted]\n" + strings.Join(turns, "\n")
+	}
+	if body == "" {
+		return strings.TrimSpace(head)
+	}
+	return head + body
+}
+
+// appendTurn adds one of the person's turns to a digest, on one line and
+// capped.
+func appendTurn(turns []string, content string) []string {
+	t := strings.Join(strings.Fields(content), " ")
+	if len(t) > commitmsgFreeformTurnCap {
+		cut := commitmsgFreeformTurnCap
+		for cut > 0 && !utf8.RuneStart(t[cut]) {
+			cut--
+		}
+		t = t[:cut] + "…"
+	}
+	if t == "" {
+		return turns
+	}
+	return append(turns, "- "+t)
+}
 
 // commitmsgPrompt builds the scribe prompt for a squash-merge landing
 // commit message. Everything the scribe needs travels inline — the spec's
@@ -426,6 +516,44 @@ type CommitDraftGuardError struct{ reason string }
 
 func (e *CommitDraftGuardError) Error() string { return e.reason }
 
+// CommitDraftUnavailable is a draft that could not be made for a reason
+// that is not the scribe's reply: the card's inputs could not be gathered,
+// or the pass ran out of time. Short is the reason a dialog prints; Err is
+// the detail, for logs.
+type CommitDraftUnavailable struct {
+	Short string
+	Err   error
+}
+
+func (e *CommitDraftUnavailable) Error() string {
+	if e.Err == nil {
+		return e.Short
+	}
+	return e.Short + ": " + e.Err.Error()
+}
+
+func (e *CommitDraftUnavailable) Unwrap() error { return e.Err }
+
+// CommitDraftFailureReason is the short reason a landing dialog gives for a
+// draft that did not arrive — "no draft: <this>". A person about to land a
+// branch is owed the cause in a phrase, not a wrapped Go error: the dialog
+// used to print "draft unavailable: scribe could not read the spec for its
+// digest: open : no such file or directory".
+func CommitDraftFailureReason(err error) string {
+	var u *CommitDraftUnavailable
+	if errors.As(err, &u) {
+		return u.Short
+	}
+	var sf *ScribeFailure
+	if errors.As(err, &sf) {
+		return "the scribe (" + sf.who() + ") failed — " + sf.Short()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return "the scribe timed out"
+	}
+	return "the scribe could not draft one"
+}
+
 // NewCommitDraftGuardError builds a guard rejection carrying reason, so
 // callers outside the engine package can construct (or inspect) one.
 func NewCommitDraftGuardError(reason string) *CommitDraftGuardError {
@@ -480,23 +608,33 @@ func (e *Engine) draftCommitMessage(ctx context.Context, f domain.Feature, verif
 	rc, backend := e.resolveRole(f.Profile, agent.RoleScribe)
 	ag := e.agentFor(backend)
 	if ag == nil {
-		return "", errors.New("no scribe agent is configured for the scribe backend")
+		return "", &CommitDraftUnavailable{Short: "no scribe backend is configured"}
 	}
 	workDir, specPath, err := e.locate(ctx, f)
 	if err != nil {
-		return "", fmt.Errorf("scribe could not locate the feature worktree: %w", err)
+		return "", &CommitDraftUnavailable{Short: "the card's worktree could not be found", Err: err}
 	}
 	wt, err := e.mgr(ctx, &f)
 	if err != nil {
-		return "", fmt.Errorf("scribe could not resolve the feature's repository: %w", err)
+		return "", &CommitDraftUnavailable{Short: "the card's repository could not be resolved", Err: err}
 	}
 	feed, err := wt.BranchDraftFeed(ctx, &f)
 	if err != nil {
-		return "", fmt.Errorf("scribe could not gather the branch draft feed: %w", err)
+		return "", &CommitDraftUnavailable{Short: "the branch's commits could not be read", Err: err}
 	}
-	raw, err := os.ReadFile(specPath)
-	if err != nil {
-		return "", fmt.Errorf("scribe could not read the spec for its digest: %w", err)
+	// A freeform card has no spec to digest (DESIGN §19): its context is
+	// its conversation. Reading specPath for one opened "" and put the raw
+	// "open : no such file or directory" in front of every person landing
+	// a freeform card.
+	var prompt string
+	if f.IsFreeform() {
+		prompt = commitmsgFreeformPrompt(feed, e.freeformDigest(ctx, f))
+	} else {
+		raw, err := os.ReadFile(specPath)
+		if err != nil {
+			return "", &CommitDraftUnavailable{Short: "the card's " + f.Kind.ArtifactNoun() + " could not be read", Err: err}
+		}
+		prompt = commitmsgPrompt(feed, commitmsgDigest(string(raw)), commitmsgVerifyNote(verifyNote))
 	}
 	ctx, cancel := context.WithTimeout(ctx, commitDraftTimeout)
 	defer cancel()
@@ -510,11 +648,11 @@ func (e *Engine) draftCommitMessage(ctx context.Context, f domain.Feature, verif
 		}, commitScribeRepoHints(e.repoInstructionsCard(wt.RepoRoot()))...),
 	})
 	if err != nil {
-		return "", fmt.Errorf("scribe session could not open: %w", err)
+		return "", e.scribeFailed(ctx, f, "the landing draft", rc.Model, ag, err)
 	}
 	defer func() { _ = sess.Close() }()
-	if err := sess.Send(ctx, commitmsgPrompt(feed, commitmsgDigest(string(raw)), commitmsgVerifyNote(verifyNote))); err != nil {
-		return "", fmt.Errorf("scribe failed to start the draft: %w", err)
+	if err := sess.Send(ctx, prompt); err != nil {
+		return "", e.scribeFailed(ctx, f, "the landing draft", rc.Model, ag, err)
 	}
 	var text assistantText
 	drain := func() (string, error) {
@@ -555,10 +693,13 @@ func (e *Engine) draftCommitMessage(ctx context.Context, f domain.Feature, verif
 			case agent.EventIdle:
 				return drain()
 			case agent.EventError:
-				return "", fmt.Errorf("scribe refused or returned nothing: %w", ev.Err)
+				return "", e.scribeFailed(ctx, f, "the landing draft", rc.Model, ag, ev.Err)
 			}
 		case <-ctx.Done():
-			return "", errors.New("the scribe draft timed out")
+			if errors.Is(ctx.Err(), context.Canceled) {
+				return "", ctx.Err()
+			}
+			return "", &CommitDraftUnavailable{Short: "the scribe timed out", Err: ctx.Err()}
 		}
 	}
 }

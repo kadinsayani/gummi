@@ -139,7 +139,7 @@ func (d *commitMsgDialog) webAnswer(_ *Shell, in *webInput) webAnswer {
 	if draft == "" {
 		why = "no landing message was drafted"
 		if d.reason != "" {
-			why += " (" + d.reason + ")"
+			why += " (" + strings.TrimPrefix(d.reason, "no draft: ") + ")"
 		}
 		why += " — write one"
 	}
