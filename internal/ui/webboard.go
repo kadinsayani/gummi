@@ -235,6 +235,7 @@ func (m *Shell) todaySpent(msg todaySpentMsg) {
 
 // webResumeOffer projects the held quit-resume question.
 func (m *Shell) webResumeOffer() *webapi.ResumeOffer {
+	m.settleQuitResume()
 	o := m.resumeOffer
 	if o == nil {
 		return nil

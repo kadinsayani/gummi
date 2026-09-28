@@ -20,11 +20,12 @@ import (
 // nothing, and picking cards restarts those the quit stopped — and only
 // those.
 func TestHeadlessBoardHoldsTheResumeQuestion(t *testing.T) {
-	b, _, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
+	b, _, eng, f, _ := headlessBoard(t, agent.NewFake("ok"))
 	ctx := context.Background()
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
 	offer := func() {
 		t.Helper()
+		pausedByQuit(t, b, eng, f)
 		if err := b.Do(ctx, func(m *Shell) tea.Cmd {
 			m.resumeOffer = &quitResumeOffer{cards: []engine.QuitStoppedCard{{Feature: f, ParkedAt: time.Now()}}, since: "2m ago"}
 			return nil
@@ -53,6 +54,71 @@ func TestHeadlessBoardHoldsTheResumeQuestion(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume == nil })
+}
+
+// pausedByQuit leaves f's session as a quit leaves it and a reopen
+// restores it: paused, mid-stage.
+func pausedByQuit(t *testing.T, b *Bridge, eng *engine.Engine, f domain.Feature) {
+	t.Helper()
+	ctx := context.Background()
+	var saveErr error
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		saveErr = m.store.SaveSession(ctx, state.SessionSnapshot{
+			Feature: f.ID, Stage: f.Stage, Role: "architect", State: "paused",
+		})
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if saveErr != nil {
+		t.Fatal(saveErr)
+	}
+	if err := eng.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if s := eng.Get(f.ID); s == nil || s.State() != engine.StatePaused {
+		t.Fatalf("precondition: %s was not restored paused", f.ID)
+	}
+}
+
+// Starting an offered card from its own page answers the question for
+// that card: the banner must not go on offering to resume a card that is
+// already running.
+func TestStartingAnOfferedCardByHandSettlesTheResumeQuestion(t *testing.T) {
+	release := make(chan struct{})
+	defer close(release)
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		<-release
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	b, _, eng, f, _ := headlessBoard(t, ag)
+	ctx := context.Background()
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	pausedByQuit(t, b, eng, f)
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		m.quitCut = map[domain.FeatureID]bool{f.ID: true}
+		m.resumeOffer = &quitResumeOffer{cards: []engine.QuitStoppedCard{{Feature: f, ParkedAt: time.Now()}}, since: "27m ago"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume != nil })
+
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.runStage(f) }); err != nil {
+		t.Fatal(err)
+	}
+	waitBoard(t, b, func(bd webapi.Board) bool { return bd.Resume == nil })
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd {
+		if m.quitCut[f.ID] {
+			t.Errorf("%s is running and still marked as cut by the quit", f.ID)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Resume(ctx, webapi.ResumeRequest{None: true}, "Simon"); err == nil {
+		t.Error("the question was settled, and answering it again went through")
+	}
 }
 
 // Nothing on a headless board can see a dialog, so one no intent is

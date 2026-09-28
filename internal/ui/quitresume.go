@@ -213,3 +213,43 @@ type quitResumeOffer struct {
 	cards []engine.QuitStoppedCard
 	since string
 }
+
+// settleQuitResume drops from the held question, and from quitCut, every
+// card that is no longer where the quit left it. The question is
+// answered card by card as well as all at once: a person who opens one
+// of its cards and starts it there has answered for that card, and a
+// banner still offering to resume it is offering something that already
+// happened. Dropping is for good — a card restarted and then paused by
+// hand is paused by that hand, not by the quit.
+//
+// Paused is the test because it is the only state StopForQuit leaves and
+// Restore brings back; anything else means the card has moved since.
+func (m *Shell) settleQuitResume() {
+	if m.engine == nil {
+		return
+	}
+	still := func(id domain.FeatureID) bool {
+		s := m.engine.Get(id)
+		return s != nil && s.State() == engine.StatePaused
+	}
+	for id := range m.quitCut {
+		if !still(id) {
+			delete(m.quitCut, id)
+		}
+	}
+	o := m.resumeOffer
+	if o == nil {
+		return
+	}
+	kept := o.cards[:0:0]
+	for _, c := range o.cards {
+		if still(c.Feature.ID) {
+			kept = append(kept, c)
+		}
+	}
+	if len(kept) == 0 {
+		m.resumeOffer = nil
+		return
+	}
+	o.cards = kept
+}

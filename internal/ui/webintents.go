@@ -629,6 +629,7 @@ func (m *Shell) setDependencies(f domain.Feature, want []domain.FeatureID) tea.C
 // settled — as the TUI's dialog is once answered.
 func (b *Bridge) Resume(ctx context.Context, req webapi.ResumeRequest, person string) error {
 	out, werr := b.intent(ctx, "", webInput{actor: state.PersonActor(person)}, webWait, func(m *Shell, _ featureRow) (tea.Cmd, error) {
+		m.settleQuitResume()
 		o := m.resumeOffer
 		if o == nil {
 			return nil, refuse(WebConflict, "there is nothing to pick back up")
