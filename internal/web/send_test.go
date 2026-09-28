@@ -1,0 +1,116 @@
+package web
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/webapi"
+)
+
+// liveAgent answers every turn and never goes idle: a conversation that
+// stays open between turns, which is what a composer steers.
+func liveAgent() *agent.Fake {
+	return &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		if opts.Role == agent.RoleScribe {
+			return []agent.Event{{Kind: agent.EventIdle}}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "heard: " + msg}}
+	}}
+}
+
+func (h *cardBoard) composer(id, text string) webapi.Composer {
+	h.t.Helper()
+	var c webapi.Composer
+	if st := h.call(http.MethodPost, "/api/cards/"+id+"/composer", webapi.SendRequest{Text: text}, &c); st != http.StatusOK {
+		h.t.Fatalf("composer %q: %d", text, st)
+	}
+	return c
+}
+
+func (h *cardBoard) send(id, text string) (int, json.RawMessage) {
+	h.t.Helper()
+	var raw json.RawMessage
+	st := h.call(http.MethodPost, "/api/cards/"+id+"/send", webapi.SendRequest{Text: text}, &raw)
+	return st, raw
+}
+
+// The composer says where a line goes before it is sent, by the rules
+// enter sends it with: prose steers the live architect, a verb the card
+// offers only from its menu opens the menu, and a line the agent refused
+// because it was mid-turn comes back to be sent again.
+func TestSendRoutesALine(t *testing.T) {
+	ag := liveAgent()
+	h := newCardBoard(t, ag)
+	c := h.planCard("Dark mode")
+
+	// nobody is attached: prose at the stop is read first, and would go
+	// with the answer that takes words
+	if got := h.composer(c.ID, ""); got.Route != webapi.RouteAnswer || !strings.Contains(got.Says, "start the architect") {
+		t.Errorf("empty composer at the stop = %+v", got)
+	}
+	// a verb the card has, but not among its answers, is the menu's
+	if got := h.composer(c.ID, "/rebase"); got.Route != webapi.RouteMenu {
+		t.Errorf("/rebase composer = %+v, want menu", got)
+	}
+	st, raw := h.send(c.ID, "/rebase")
+	var res webapi.SendResponse
+	if st != http.StatusOK || json.Unmarshal(raw, &res) != nil || res.Route != webapi.RouteMenu {
+		t.Fatalf("send /rebase = %d %s, want route menu", st, raw)
+	}
+
+	// start the architect; the conversation stays open between turns
+	st, raw = h.answer(c.ID, webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "run", Against: c.Decision.Against.Token})
+	if st != http.StatusOK {
+		t.Fatalf("start the architect: %d %s", st, raw)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		if s := h.eng.Get(domain.FeatureID(c.ID)); s != nil && s.Live() && len(s.Snapshot().Transcript) > 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the architect never attached")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got := h.composer(c.ID, "use the system theme"); got.Route != webapi.RouteSteer {
+		t.Errorf("composer with the architect live = %+v, want steer", got)
+	}
+
+	// mid-turn: the line is handed back
+	ag.SendErr = agent.ErrBusy
+	st, raw = h.send(c.ID, "use the system theme")
+	if e := errorOf(t, raw); st != http.StatusConflict || e.Error != webapi.ConflictBusy || e.Text != "use the system theme" {
+		t.Fatalf("send while busy = %d %s, want 409 busy with the line", st, raw)
+	}
+	ag.SendErr = nil
+	st, raw = h.send(c.ID, "use the system theme")
+	if st != http.StatusOK || json.Unmarshal(raw, &res) != nil || res.Route != webapi.RouteSteer {
+		t.Fatalf("send = %d %s, want route steer", st, raw)
+	}
+	deadline = time.Now().Add(10 * time.Second)
+	for !transcriptHas(h, c.ID, "heard: use the system theme") {
+		if time.Now().After(deadline) {
+			t.Fatal("the steered line never reached the architect")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+func transcriptHas(h *cardBoard, id, text string) bool {
+	s := h.eng.Get(domain.FeatureID(id))
+	if s == nil {
+		return false
+	}
+	for _, m := range s.Snapshot().Transcript {
+		if strings.Contains(m.Content, text) {
+			return true
+		}
+	}
+	return false
+}

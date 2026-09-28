@@ -1,0 +1,44 @@
+#!/bin/sh
+# A stand-in for gh in the web routes' tests, reached through GUMMI_GH_CMD:
+# canned answers for the two calls the PR tab makes and for the issue list
+# bug import reads, and a failure for anything else. With
+# FAKE_GH_FAIL set every call fails, the way an unauthenticated gh does.
+if [ -n "$FAKE_GH_FAIL" ]; then
+  echo "gh: authentication required" >&2
+  exit 1
+fi
+if [ -n "$FAKE_GH_LOG" ]; then
+  echo "$*" >> "$FAKE_GH_LOG"
+fi
+case "$1 $2" in
+"pr view")
+  echo '{"state":"OPEN","comments":[{},{}],"headRefOid":"0123456789abcdef0123456789abcdef01234567"}'
+  ;;
+"issue list")
+  cat <<'JSON'
+[{"number":7,"title":"Crash on empty board","body":"It crashes when the board is empty.","url":"https://github.com/o/r/issues/7","state":"OPEN","labels":[{"name":"bug"},{"name":"P1"}],"author":{"login":"ana"}},
+ {"number":8,"title":"Slow rail","body":"","url":"https://github.com/o/r/issues/8","state":"OPEN","labels":[],"author":{"login":"bo"}}]
+JSON
+  ;;
+"api graphql")
+  cat <<'JSON'
+{"data":{"repository":{"pullRequest":{
+  "headRefOid":"0123456789abcdef0123456789abcdef01234567",
+  "reviewThreads":{"nodes":[
+    {"id":"T_1","path":"main.go","isResolved":false,"isOutdated":false,
+     "comments":{"nodes":[
+       {"id":"C_1","author":{"login":"octo"},"body":"name it better","diffHunk":"@@ -1,3 +1,4 @@\n package main\n \n-func a() {}\n+func a() { b() }"},
+       {"id":"C_2","author":{"login":"simon"},"body":"agreed","diffHunk":""}]}},
+    {"id":"T_2","path":"main.go","isResolved":true,"isOutdated":false,
+     "comments":{"nodes":[{"id":"C_3","author":{"login":"octo"},"body":"done","diffHunk":"@@ -1 +1 @@\n-x\n+y"}]}}],
+   "pageInfo":{"hasNextPage":false,"endCursor":null}},
+  "comments":{"nodes":[{"author":{"login":"octo"},"body":"thanks for this"}]},
+  "reviews":{"nodes":[{"author":{"login":"octo"},"body":"","state":"COMMENTED"}]}
+}}}}
+JSON
+  ;;
+*)
+  echo "fake gh: unsupported: $*" >&2
+  exit 1
+  ;;
+esac
