@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1411,5 +1412,48 @@ func TestAnAbandonedGoalDoesNotReadAsLanded(t *testing.T) {
 		if rp.Landed {
 			t.Errorf("an abandoned goal reads as landed: %+v", rp)
 		}
+	}
+}
+
+// A person's gestures on a goal are recorded as that person: a named one
+// at the web face (WithActor) by name, in the log and in the goal doc's
+// notes; the terminal's as the bare "user" it always was.
+func TestGoalGesturesRecordWhoMadeThem(t *testing.T) {
+	e, _, store, wt := advanceEngine(t)
+	ctx := context.Background()
+	g := goalAtPlan(t, store, wt, testGoalDoc, 4000)
+	if res, err := e.Advance(WithActor(ctx, state.PersonActor("alice")), g.ID, state.PersonActor("alice")); err != nil || res.Status != StatusAdvanced {
+		t.Fatalf("advance: %v %v", res.Status, err)
+	}
+	alice := WithActor(ctx, state.PersonActor("alice"))
+	if err := e.RaiseGoalBudget(alice, g.ID, 4500); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.GoalNote(alice, g.ID, "also make it work on Windows"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.RaiseGoalBudget(ctx, g.ID, 5000); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := store.GoalLog(ctx, g.ID)
+	var raised []string
+	var noted string
+	for _, en := range log {
+		switch en.Action {
+		case state.GoalRaised:
+			raised = append(raised, en.By)
+		case state.GoalNote:
+			noted = en.By
+		}
+	}
+	if want := []string{state.PersonActor("alice"), state.ActorUser}; !slices.Equal(raised, want) {
+		t.Errorf("raises recorded by %q, want %q", raised, want)
+	}
+	if noted != state.PersonActor("alice") {
+		t.Errorf("the note is recorded by %q, want alice", noted)
+	}
+	raw, _ := os.ReadFile(filepath.Join(wt.Root(), g.ArtifactPath()))
+	if notes, _ := spec.ViewSection(string(raw), "Notes"); !strings.Contains(notes, ", alice) also make it work on Windows") {
+		t.Errorf("the goal doc's note does not name alice: %q", notes)
 	}
 }

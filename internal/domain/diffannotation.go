@@ -21,4 +21,8 @@ type DiffAnnotation struct {
 	// a locally-authored annotation (reviewer agent, TUI) and carries no
 	// uniqueness constraint.
 	SourceRef string
+	// Author is the named person who wrote it at the web face (DESIGN
+	// §20.3); empty for the terminal, an agent, or a pulled review thread
+	// (which names its reviewer in its body).
+	Author string
 }

@@ -12,6 +12,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -54,6 +55,21 @@ func TestActionPausesARun(t *testing.T) {
 	c = h.waitCard(c.ID, "the pause", func(c webapi.Card) bool { return c.Status == webapi.StatusPaused })
 	if c.Running != nil {
 		t.Errorf("a paused card still reads running: %+v", c.Running)
+	}
+	// the card's history says who took it back
+	evs, err := h.store.Events(context.Background(), domain.FeatureID(c.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var by []string
+	for _, ev := range evs {
+		var p state.AutopilotPayload
+		if ev.Kind == state.EventAutopilot && json.Unmarshal([]byte(ev.Payload), &p) == nil && p.Event == state.AutopilotHandedBack {
+			by = append(by, p.By)
+		}
+	}
+	if len(by) == 0 || by[len(by)-1] != state.PersonActor("Simon") {
+		t.Errorf("the pause's handback is recorded by %q, want Simon", by)
 	}
 }
 

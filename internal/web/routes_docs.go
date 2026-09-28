@@ -210,7 +210,7 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	diff, err := d.AddAnnotation(r.Context(), req.Idx, req.Comment, req.Text)
+	diff, err := d.AddAnnotation(r.Context(), req.Idx, req.Comment, req.Text, person(r))
 	if err != nil {
 		writeDocsError(w, err, r.PathValue("id"))
 		return

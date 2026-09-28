@@ -8,6 +8,7 @@ import (
 
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
 )
 
@@ -82,5 +83,10 @@ func TestCreateAFreeformCardStartsIt(t *testing.T) {
 	}
 	if got := h.card(c.ID).Composer.Route; got != webapi.RouteFreeform {
 		t.Errorf("a freeform card's composer routes to %s", got)
+	}
+	// the opening turn is the line of whoever created the card — Simon —
+	// not an anonymous "you" every viewer would read as their own
+	if first := h.eng.Freeform(domain.FeatureID(c.ID)).Snapshot().Transcript[0]; first.By != state.PersonActor("Simon") {
+		t.Errorf("the opening turn is by %q, want Simon", first.By)
 	}
 }

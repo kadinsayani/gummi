@@ -1147,7 +1147,7 @@ func (e *Engine) RaiseGoalSubstrate(ctx context.Context, goalID domain.FeatureID
 	if runs == cur.Runs && minutes == cur.Minutes {
 		return nil
 	}
-	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalSubstrateBudget, From: cur.Runs, To: runs, Minutes: minutes, By: "user",
+	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalSubstrateBudget, From: cur.Runs, To: runs, Minutes: minutes, By: personOf(ctx),
 		Detail: fmt.Sprintf("raised from %d runs / %d minutes", cur.Runs, cur.Minutes)})
 	e.send(Event{Feature: goalID, Stage: goal.Stage, Kind: EventGoal})
 	return nil
@@ -1626,10 +1626,10 @@ func (e *Engine) GoalResumed(ctx context.Context, goalID domain.FeatureID) error
 		case state.GoalStalled:
 			switch {
 			case log[i].Card != "":
-				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: "user",
+				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: personOf(ctx),
 					Detail: "picked back up after waiting on " + string(log[i].Card) + "'s environment"})
 			case log[i].Ref != "":
-				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: "user",
+				e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalResumed, By: personOf(ctx),
 					Detail: "picked back up after " + strings.TrimPrefix(log[i].Ref, "experiment:") + " could not be believed"})
 			}
 			return nil
@@ -2330,7 +2330,7 @@ func (e *Engine) startGoal(ctx context.Context, goal *domain.Feature) error {
 	} else if budget.Agreed() && !substrateBudgetFrom(mustGoalLog(ctx, e, goal.ID), nil, e.now()).Agreed() {
 		// once: a crossing resumed half-way must not reset a budget a
 		// person has raised since
-		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalSubstrateBudget, To: budget.Runs, Minutes: budget.Minutes, By: "user",
+		e.goalLog(ctx, goal.ID, state.GoalPayload{Action: state.GoalSubstrateBudget, To: budget.Runs, Minutes: budget.Minutes, By: personOf(ctx),
 			Detail: "agreed with the plan"})
 	}
 	// Where the goal itself belongs is settled here, from the plan, before
@@ -2584,12 +2584,12 @@ func (e *Engine) GoalNote(ctx context.Context, goalID domain.FeatureID, note str
 	}
 	if path := e.artifactFile(&goal); path != "" {
 		if raw, rerr := os.ReadFile(path); rerr == nil {
-			if doc, nerr := spec.AppendGoalNote(string(raw), note, e.now().Local().Format("2006-01-02 15:04")); nerr == nil {
+			if doc, nerr := spec.AppendGoalNote(string(raw), note, spec.Stamp(e.now().Local().Format("2006-01-02 15:04"), state.PersonName(actorOf(ctx)))); nerr == nil {
 				_ = atomicfile.Write(path, []byte(doc), 0o600)
 			}
 		}
 	}
-	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalNote, Detail: note, By: "user"})
+	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalNote, Detail: note, By: personOf(ctx)})
 	e.send(Event{Feature: goalID, Stage: goal.Stage, Kind: EventGoal})
 	return nil
 }
@@ -2607,7 +2607,7 @@ func (e *Engine) StopGoal(ctx context.Context, goalID domain.FeatureID) error {
 	if goal.Stage != domain.StageImplement {
 		return fmt.Errorf("%s is at %s; only a goal whose cards are running can be stopped", goalID, goal.Stage)
 	}
-	if err := e.goalWrapUp(ctx, goalID, "you stopped the goal", "user"); err != nil {
+	if err := e.goalWrapUp(ctx, goalID, "you stopped the goal", personOf(ctx)); err != nil {
 		return err
 	}
 	// A finished session of the goal's own — its review, left registered
@@ -2684,8 +2684,8 @@ func (e *Engine) ReverseGoalDecision(ctx context.Context, goalID domain.FeatureI
 	if why = strings.TrimSpace(why); why != "" {
 		detail += " — " + why
 	}
-	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalReversed, Ref: dec.DecisionRef(), Card: dec.Card, Detail: detail, By: "user"})
-	return e.SendBackGoal(ctx, goalID, "", "user")
+	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalReversed, Ref: dec.DecisionRef(), Card: dec.Card, Detail: detail, By: personOf(ctx)})
+	return e.SendBackGoal(ctx, goalID, "", personOf(ctx))
 }
 
 // RaiseGoalBudget raises a goal's budget — the one move of the ceiling,
@@ -2706,7 +2706,7 @@ func (e *Engine) RaiseGoalBudget(ctx context.Context, goalID domain.FeatureID, t
 	if err := e.cfg.Store.UpdateFeature(ctx, &goal); err != nil {
 		return err
 	}
-	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalRaised, From: from, To: to, Detail: "you raised the goal budget", By: "user"})
+	e.goalLog(ctx, goalID, state.GoalPayload{Action: state.GoalRaised, From: from, To: to, Detail: "you raised the goal budget", By: personOf(ctx)})
 	// a wrap-up the goal forced on itself for lack of budget is lifted by
 	// more budget; one you or its lead asked for stands
 	if goal.Stage == domain.StageImplement && goal.Goal.WrappingUp() {

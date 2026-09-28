@@ -481,16 +481,16 @@ func (d *reverseDialog) HandleKey(key tea.KeyPressMsg) (bool, tea.Cmd) {
 			d.cursor--
 		}
 	case "enter":
-		return true, reverseGoalDecision(d.eng, d.f, d.decisions[d.cursor].DecisionRef(), "")
+		return true, reverseGoalDecision(d.eng, d.f, d.decisions[d.cursor].DecisionRef(), "", state.ActorUser)
 	}
 	return false, nil
 }
 
 // reverseGoalDecision has a goal's lead take the other way on one of its
 // decisions for review: the dialog's enter, and the web face's reverse.
-func reverseGoalDecision(eng *engine.Engine, f domain.Feature, ref, why string) tea.Cmd {
+func reverseGoalDecision(eng *engine.Engine, f domain.Feature, ref, why, actor string) tea.Cmd {
 	return func() tea.Msg {
-		if err := eng.ReverseGoalDecision(context.Background(), f.ID, ref, why); err != nil {
+		if err := eng.ReverseGoalDecision(engine.WithActor(context.Background(), actor), f.ID, ref, why); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + ": " + ref + " reversed — the goal went back to its cards", reload: true, clearInbox: f.ID}

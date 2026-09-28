@@ -28,6 +28,9 @@ func TestCapturedAnswerNamesItsAnswerer(t *testing.T) {
 		{state.ActorAutopilot, "%% @autopilot"},
 		{state.ActorUser, "%% @user"},
 		{"", "%% @user"}, // an undeclared answerer is a person, as before
+		// a named person at the web face: still a person's marker, with
+		// the name beside the date as their spec notes carry it
+		{state.PersonActor("carol"), "%% @user"},
 	} {
 		args := askArgs(t, Ask{
 			ChangesSection: "Chosen approach",
@@ -63,6 +66,9 @@ func TestCapturedAnswerNamesItsAnswerer(t *testing.T) {
 		if !strings.Contains(got, c.want+"(") {
 			t.Errorf("by %q: answer filed without %s — the artifact does not say who decided\n%s",
 				c.by, c.want, got)
+		}
+		if name := state.PersonName(c.by); name != "" && !strings.Contains(got, ", "+name+"): resolved") {
+			t.Errorf("by %q: the answer does not name %s:\n%s", c.by, name, got)
 		}
 		if c.by == state.ActorAutopilot && strings.Contains(got, "%% @user(") {
 			t.Errorf("an autopilot-taken answer is still filed as the user's:\n%s", got)

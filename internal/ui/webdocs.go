@@ -491,7 +491,7 @@ func (d *WebDocs) Diff(ctx context.Context, since string) (webapi.Diff, error) {
 func webAnnotation(a domain.DiffAnnotation, idx int) webapi.Annotation {
 	w := webapi.Annotation{
 		ID: a.ID, File: a.File, Idx: idx, Excerpt: a.Excerpt, Comment: a.Comment,
-		Source: "gummi", Resolved: a.Resolved, At: a.CreatedAt,
+		Source: "gummi", Resolved: a.Resolved, At: a.CreatedAt, By: a.Author,
 	}
 	if a.SourceRef != "" {
 		w.Source = "pr"
@@ -521,7 +521,9 @@ func prCommentAuthor(body string) string {
 // as the page showed it; a diff that has moved under the page since is
 // refused as ErrMoved rather than commenting on whatever line idx names
 // now.
-func (d *WebDocs) AddAnnotation(ctx context.Context, idx int, comment, text string) (webapi.Diff, error) {
+//
+// person is who wrote it, recorded with it and shown beside it.
+func (d *WebDocs) AddAnnotation(ctx context.Context, idx int, comment, text, person string) (webapi.Diff, error) {
 	comment = strings.TrimSpace(comment)
 	if comment == "" {
 		return webapi.Diff{}, invalid("a comment needs some text")
@@ -539,7 +541,9 @@ func (d *WebDocs) AddAnnotation(ctx context.Context, idx int, comment, text stri
 	if text != "" && diffPayload(lines[idx]) != text {
 		return webapi.Diff{}, ErrMoved
 	}
-	if _, err := d.store.AddDiffAnnotation(ctx, newDiffAnnotation(d.f.ID, lines, idx, comment), d.now()); err != nil {
+	ann := newDiffAnnotation(d.f.ID, lines, idx, comment)
+	ann.Author = strings.TrimSpace(person)
+	if _, err := d.store.AddDiffAnnotation(ctx, ann, d.now()); err != nil {
 		return webapi.Diff{}, err
 	}
 	return d.Diff(ctx, "")

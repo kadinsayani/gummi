@@ -349,7 +349,7 @@ func (m *Shell) topUpGoalAndContinue(f domain.Feature, need engine.GoalNeedsBudg
 	eng, store, actor := m.engine, m.store, m.humanActor()
 	m.inbox.remove(f.ID)
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx := engine.WithActor(context.Background(), actor)
 		if eng == nil {
 			return noticeMsg{text: "no engine to raise the budget with", isErr: true}
 		}
@@ -503,12 +503,12 @@ func (m *Shell) sendBackGoal(f domain.Feature, note string) tea.Cmd {
 
 // goalNote hands a line typed into a running goal to its lead.
 func (m *Shell) goalNote(f domain.Feature, note string) tea.Cmd {
-	eng := m.engine
+	eng, actor := m.engine, m.humanActor()
 	return func() tea.Msg {
 		if eng == nil {
 			return noticeMsg{text: "no engine to take the note", isErr: true}
 		}
-		if err := eng.GoalNote(context.Background(), f.ID, note); err != nil {
+		if err := eng.GoalNote(engine.WithActor(context.Background(), actor), f.ID, note); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + ": note added — the lead reads it next", reload: true}
@@ -529,9 +529,9 @@ func (m *Shell) confirmStopGoal(f domain.Feature) tea.Cmd {
 // stopGoal tells a goal to finish now: the confirm's yes, and the web
 // face's stop.
 func (m *Shell) stopGoal(f domain.Feature) tea.Cmd {
-	eng := m.engine
+	eng, actor := m.engine, m.humanActor()
 	return func() tea.Msg {
-		if err := eng.StopGoal(context.Background(), f.ID); err != nil {
+		if err := eng.StopGoal(engine.WithActor(context.Background(), actor), f.ID); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		return noticeMsg{text: string(f.ID) + " is wrapping up", reload: true}

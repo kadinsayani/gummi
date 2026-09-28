@@ -152,7 +152,8 @@ type Annotation struct {
 	Excerpt string `json:"excerpt"`
 	Comment string `json:"comment"`
 	// By is who wrote it when that is known: a pull request reviewer's
-	// login. Comments made at the board carry no author.
+	// login, or the named person who wrote it at the web face. A comment
+	// made at the terminal carries no author.
 	By string `json:"by"`
 	// Source is "gummi" for a comment made at the board, "pr" for a
 	// review thread pulled from the linked pull request.

@@ -241,7 +241,7 @@ func (m *Shell) WebGoalAction(id, action string, req webapi.GoalActionRequest, p
 		}
 		eng := m.engine
 		return func() tea.Msg {
-			if err := eng.RaiseGoalSubstrate(context.Background(), f.ID, runs, minutes); err != nil {
+			if err := eng.RaiseGoalSubstrate(engine.WithActor(context.Background(), by), f.ID, runs, minutes); err != nil {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 			return noticeMsg{text: string(f.ID) + ": substrate budget raised", reload: true}
@@ -270,7 +270,7 @@ func (m *Shell) WebGoalAction(id, action string, req webapi.GoalActionRequest, p
 		if ref == "" {
 			return nil, webErr(WebBadRequest, "name the decision to reverse (D-N)")
 		}
-		return reverseGoalDecision(m.engine, f, ref, strings.TrimSpace(req.Why)), nil
+		return reverseGoalDecision(m.engine, f, ref, strings.TrimSpace(req.Why), by), nil
 
 	case webapi.GoalActionLand:
 		if f.Stage != domain.StageVerify {

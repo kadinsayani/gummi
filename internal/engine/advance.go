@@ -10,6 +10,7 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
+	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verifydoc"
 	"github.com/morphis/gummi/internal/workflow"
 )
@@ -347,7 +348,13 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 		// autopilot. Before the transition, so a goal that could not start
 		// stays at plan rather than conducting nothing.
 		if f.IsGoal() {
-			if gerr := e.startGoal(ctx, &f); gerr != nil {
+			gctx := ctx
+			if state.IsPersonActor(actor) {
+				// what the goal records as agreed at this crossing, it
+				// records as agreed by whoever crossed it
+				gctx = WithActor(ctx, actor)
+			}
+			if gerr := e.startGoal(gctx, &f); gerr != nil {
 				return res, fmt.Errorf("starting goal %s: %w", f.ID, gerr)
 			}
 		}

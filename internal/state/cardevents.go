@@ -232,10 +232,15 @@ const (
 // records a different fact — the card's stored gate-approval mode
 // changed to X — not a takeover or a handback, so a reader must check
 // Event and not treat every EventAutopilot row as a boundary crossing.
+//
+// By is the person whose gesture it was (state.PersonActor), when a named
+// person at the web face made it; empty for the terminal's "you" and for
+// every row written before it existed.
 type AutopilotPayload struct {
 	Event  string `json:"event"`
 	Reason string `json:"reason,omitempty"`
 	Mode   string `json:"mode,omitempty"`
+	By     string `json:"by,omitempty"`
 }
 
 // ToolPayload is the JSON shape of an EventTool and EventToolResult
@@ -738,7 +743,16 @@ func (s *Store) AppendPark(ctx context.Context, id domain.FeatureID, stage domai
 // otherwise be recorded twice (e.g. a retried save re-observing the same
 // takeover).
 func (s *Store) AppendAutopilot(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, dedupe string, at time.Time) error {
-	payload, err := json.Marshal(AutopilotPayload{Event: event, Reason: reason, Mode: mode})
+	return s.AppendAutopilotBy(ctx, id, stage, event, reason, mode, "", dedupe, at)
+}
+
+// AppendAutopilotBy is AppendAutopilot for a gesture a named person made
+// (AutopilotPayload.By).
+func (s *Store) AppendAutopilotBy(ctx context.Context, id domain.FeatureID, stage domain.Stage, event, reason, mode, by, dedupe string, at time.Time) error {
+	if by == ActorUser {
+		by = ""
+	}
+	payload, err := json.Marshal(AutopilotPayload{Event: event, Reason: reason, Mode: mode, By: by})
 	if err != nil {
 		return fmt.Errorf("encoding autopilot event for %s: %w", id, err)
 	}

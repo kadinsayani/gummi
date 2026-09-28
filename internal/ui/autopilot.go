@@ -669,6 +669,7 @@ func (m *Shell) openAutopilot(f domain.Feature) tea.Cmd {
 // Verify gate — see autopilotForward) is left exactly where it is: the
 // mode write alone is the whole effect for it.
 func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan) tea.Cmd {
+	by := m.humanActor()
 	return func() tea.Msg {
 		msg := m.setGateApproval(f.ID, mode)()
 		if nm, ok := msg.(noticeMsg); ok && nm.isErr {
@@ -700,9 +701,9 @@ func (m *Shell) startAutopilot(f domain.Feature, mode string, plan autopilotPlan
 		// drew a run that opened and was immediately reported lost.
 		switch {
 		case mode == domain.GateAttended:
-			m.logAutopilot(f.ID, state.AutopilotHandedBack, "you turned autopilot off", mode)
+			m.logAutopilot(f.ID, state.AutopilotHandedBack, "you turned autopilot off", mode, by)
 		case plan.to != "" || m.sessionWorking(f.ID):
-			m.logAutopilot(f.ID, state.AutopilotTookOver, "you handed it to autopilot", mode)
+			m.logAutopilot(f.ID, state.AutopilotTookOver, "you handed it to autopilot", mode, by)
 		}
 		if mode == domain.GateAttended || plan.to == "" {
 			// nothing to start: the plain "autopilot <stop>" notice

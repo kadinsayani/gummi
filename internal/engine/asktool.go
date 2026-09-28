@@ -1395,7 +1395,9 @@ func (e *Engine) captureAnswer(s *Session, ask *Ask, answer, by string) string {
 	if err != nil {
 		return AnswerNotSavedPrefix + err.Error()
 	}
-	date := e.now().Format("2006-01-02")
+	// a named person's answer (the web face) says who, as their spec
+	// notes do: the author stays the word every rule reads as a human's
+	date := spec.Stamp(e.now().Format("2006-01-02"), state.PersonName(by))
 	content := string(raw)
 	line, ok := spec.FindAnchor(content, anchor)
 	text := "resolved — " + answer

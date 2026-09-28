@@ -749,6 +749,10 @@ var migrations = []string{
 	// excusing checks on an unknown base is re-measured at its next
 	// verify (engine.RebaselineIfBaseMoved).
 	`ALTER TABLE check_baseline ADD COLUMN base_rev TEXT NOT NULL DEFAULT ''`,
+	// Who wrote a diff comment at the board, when a named person at the web
+	// face did (DESIGN §20.3). Empty is the terminal, an agent, or a row
+	// written before the column existed.
+	`ALTER TABLE diff_annotations ADD COLUMN author TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.

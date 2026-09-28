@@ -537,7 +537,8 @@ func TestDocsDiffParsesAndAnnotates(t *testing.T) {
 		t.Fatalf("added line = %+v", target)
 	}
 
-	// a comment lands on the line it was made on
+	// a comment lands on the line it was made on, under the name of who
+	// made it
 	var after webapi.Diff
 	body := fmt.Sprintf(`{"idx":%d,"comment":"why a second func?","text":"func b() {}"}`, target.Idx)
 	if st := b.send(http.MethodPost, "/api/cards/FD-001/diff/annotations", body, &after); st != http.StatusOK {
@@ -547,7 +548,7 @@ func TestDocsDiffParsesAndAnnotates(t *testing.T) {
 		t.Fatalf("annotations = %+v", after.Annotations)
 	}
 	a := after.Annotations[0]
-	if a.Idx != target.Idx || a.File != "main.go" || a.Excerpt != "+func b() {}" || a.Comment != "why a second func?" || a.Source != "gummi" || a.Resolved {
+	if a.Idx != target.Idx || a.File != "main.go" || a.Excerpt != "+func b() {}" || a.Comment != "why a second func?" || a.Source != "gummi" || a.Resolved || a.By != "Simon" {
 		t.Errorf("annotation = %+v", a)
 	}
 	stale := fmt.Sprintf(`{"idx":%d,"comment":"x","text":"not this line"}`, target.Idx)

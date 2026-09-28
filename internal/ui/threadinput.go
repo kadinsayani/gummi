@@ -1173,12 +1173,15 @@ func (m *Shell) startFreeform(f domain.Feature) tea.Cmd {
 	}
 	eng := m.engine
 	id := f.ID
+	// the brief is the line of whoever created the card: on a board
+	// several people share, it is theirs, not every viewer's "you"
+	who := engine.WithActor(context.Background(), m.lineActor())
 	return func() tea.Msg {
 		ff, err := eng.OpenFreeform(context.Background(), f)
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
-		if err := ff.Kickoff(context.Background()); err != nil {
+		if err := ff.Kickoff(who); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
 		return nil

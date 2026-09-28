@@ -137,7 +137,9 @@ function groupNode (grp, last) {
   const bits = last
     ? [st.role && st.role !== st.stage ? st.role : (st.role ? '' : ROLE[st.stage] || ''), st.model, st.exited && verdict ? verdict : null].filter(Boolean)
     : [plural(count, 'event'), verdict || receipt?.receipt?.text || receipt?.text, st.credits ? `${cr(st.credits)} cr` : null].filter(Boolean)
-  const name = st.flavor && !/^(stage|work)$/.test(st.flavor) ? `${st.stage} · ${st.flavor}` : st.stage
+  // a freeform card's one conversation is headed as its live block is
+  const stageName = st.stage === 'open' ? 'freeform' : st.stage
+  const name = st.flavor && !/^(stage|work)$/.test(st.flavor) ? `${stageName} · ${st.flavor}` : stageName
   clear(g.summary).append(h('div', { class: 'ev-stage' },
     last ? null : h('span', { class: 'fold', 'aria-hidden': 'true' }, '▸'),
     h('b', null, name),
@@ -322,7 +324,9 @@ function renderLive () {
       for (const [k, label] of [['consult', 'consult · read-only'], ['freeform', 'freeform']]) {
         const c = l[k]
         if (!c || !(c.turns?.length || c.streaming || c.busy || c.sending || c.err)) continue
-        parts.push(h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label)))
+        // headed as the settled turns are: the conversation, then its agent
+        parts.push(h('div', { class: ['ev-stage', k === 'freeform' ? 'st-open' : 'st-todo'], testid: `live-${k}-head` }, h('b', null, label),
+          k === 'freeform' ? h('span', { class: 'sum' }, c.role || 'implementer') : null))
         parts.push(...conversation(k, c, c.role || (k === 'freeform' ? 'implementer' : 'consult'), k === 'freeform' ? 'open' : null))
         if (c.sending) parts.push(you({ text: c.sending, via: 'sending' }))
         if (c.busy) parts.push(h('div', { class: 'live', testid: `live-${k}` }, h('span', { class: 'spinner' }), h('span', { class: 'shimmer' }, c.verb || 'thinking')))

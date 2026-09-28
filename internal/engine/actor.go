@@ -1,6 +1,10 @@
 package engine
 
-import "context"
+import (
+	"context"
+
+	"github.com/morphis/gummi/internal/state"
+)
 
 // actorKey carries, on a send's context, who typed the line: the actor the
 // store records a person as (state.PersonActor). A board shared by several
@@ -20,4 +24,14 @@ func WithActor(ctx context.Context, actor string) context.Context {
 func actorOf(ctx context.Context) string {
 	a, _ := ctx.Value(actorKey{}).(string)
 	return a
+}
+
+// personOf is the person a hand-driven act on ctx is recorded as: the
+// actor WithActor put there (a named person from the web face), or the
+// terminal's bare "user".
+func personOf(ctx context.Context) string {
+	if a := actorOf(ctx); a != "" {
+		return a
+	}
+	return state.ActorUser
 }

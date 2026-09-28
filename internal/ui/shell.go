@@ -1243,12 +1243,15 @@ func (m *Shell) fetchLastSeen() tea.Msg {
 // typed — so recording those again here would put two endings on one
 // ending. A handback with no period open is harmless: the reader has
 // nothing to close and ignores it.
-func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode string) {
+//
+// by is whose gesture it was (humanActor, read on the loop when the
+// gesture was made): a named person at the web face is recorded by name.
+func (m *Shell) logAutopilot(id domain.FeatureID, event, reason, mode, by string) {
 	if m.store == nil {
 		return
 	}
-	_ = m.store.AppendAutopilot(context.Background(), id, m.recordStage(id),
-		event, reason, mode, "", time.Now())
+	_ = m.store.AppendAutopilotBy(context.Background(), id, m.recordStage(id),
+		event, reason, mode, by, "", time.Now())
 }
 
 // stageOf reads the card's current stage from the loaded rows. A card
@@ -4134,7 +4137,7 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		m.pausing = map[domain.FeatureID]bool{}
 	}
 	m.pausing[f.ID] = true
-	id := f.ID
+	id, by := f.ID, m.humanActor()
 	return func() tea.Msg {
 		if err := m.engine.Pause(context.Background(), f.ID); err != nil {
 			return pausedMsg{id: id, inner: noticeMsg{text: sanitize(err.Error()), isErr: true}}
@@ -4145,7 +4148,7 @@ func (m *Shell) pauseRun(f domain.Feature) tea.Cmd {
 		// park row, and it is not a turn anyone typed. Without this the
 		// period would stay open until the next thing you happened to do
 		// on the card, dating the handback to whenever that was.
-		m.logAutopilot(f.ID, state.AutopilotHandedBack, "you parked it", f.GateApproval)
+		m.logAutopilot(f.ID, state.AutopilotHandedBack, "you parked it", f.GateApproval, by)
 		// Pausing stops the *agent*; it does not answer the *question* a
 		// pending attention item is asking, and clearing the item
 		// unconditionally used to conflate the two. A card parked at a
@@ -4353,11 +4356,12 @@ func (m *Shell) setEnvelope(id domain.FeatureID, to int) tea.Cmd {
 		m.notice = noticeMsg{text: "no agent configured — budgets meter agent spend", isErr: true}
 		return nil
 	}
+	actor := m.humanActor()
 	return func() tea.Msg {
 		if id.Kind() == domain.KindGoal {
 			// a goal's budget is its ceiling: only raised, and the goal is
 			// told, so a wrap-up it forced can be reconsidered
-			if err := m.engine.RaiseGoalBudget(context.Background(), id, to); err != nil {
+			if err := m.engine.RaiseGoalBudget(engine.WithActor(context.Background(), actor), id, to); err != nil {
 				return noticeMsg{text: err.Error(), isErr: true}
 			}
 			return noticeMsg{text: fmt.Sprintf("%s: goal budget raised to %d credits", id, to), reload: true}
