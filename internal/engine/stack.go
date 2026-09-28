@@ -253,6 +253,17 @@ func (e *Engine) stackRestackOne(ctx context.Context, view StackView, a stack.Ac
 		return nil, fmt.Errorf("restacking %s onto %s: %w", f.ID, a.Base, err)
 	}
 	e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
+	// The card's base just moved, so what its baseline excused was
+	// measured on a commit it no longer forks from (rebaseline.go). The
+	// re-measure runs the repo's checks, so it goes off the tick.
+	e.wg.Add(1)
+	go func() {
+		defer e.wg.Done()
+		if note := e.rebaselineNote(context.Background(), f); note != "" {
+			e.cardNote(context.Background(), f.ID, f.Stage, note)
+			e.send(Event{Feature: f.ID, Stage: f.Stage, Kind: EventUpdated})
+		}
+	}()
 	return nil, nil
 }
 

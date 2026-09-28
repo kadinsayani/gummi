@@ -744,6 +744,11 @@ var migrations = []string{
 	`ALTER TABLE features ADD COLUMN stack_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE features ADD COLUMN stack_pos INTEGER NOT NULL DEFAULT 0`,
 	`CREATE INDEX IF NOT EXISTS features_stack ON features(stack_id)`,
+	// The commit a check baseline was measured on. Empty for a baseline
+	// taken before this column existed: its base is unknown, and a card
+	// excusing checks on an unknown base is re-measured at its next
+	// verify (engine.RebaselineIfBaseMoved).
+	`ALTER TABLE check_baseline ADD COLUMN base_rev TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -1432,6 +1437,11 @@ type CheckResult struct {
 	ExitCode int
 	Output   string
 	RanAt    time.Time
+	// BaseRev is the commit the check was measured on — the card's fork
+	// point at the time. An excusal is a claim about that commit, and
+	// stops being one once the card's base has moved; "" for a baseline
+	// taken before this was recorded.
+	BaseRev string
 }
 
 // ExcusedChecks names the baseline checks that were ALREADY failing on
@@ -1456,6 +1466,18 @@ func ExcusedChecks(baseline []CheckResult) []string {
 	return out
 }
 
+// ExcusedOn is the commit the excused checks were measured on — the one an
+// excusal is a claim about — or "" when nothing is excused or the baseline
+// predates the record.
+func ExcusedOn(baseline []CheckResult) string {
+	for _, r := range baseline {
+		if !r.OK && r.BaseRev != "" {
+			return r.BaseRev
+		}
+	}
+	return ""
+}
+
 // SetCheckBaseline replaces the feature's whole check baseline in one
 // transaction (delete + insert), so a re-baseline never leaves stale
 // rows behind renamed or removed checks.
@@ -1471,10 +1493,10 @@ func (s *Store) SetCheckBaseline(ctx context.Context, id domain.FeatureID, resul
 	}
 	for _, r := range results {
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO check_baseline (feature_id, name, cmd, ok, exit_code, output, ran_at)
-			VALUES (?,?,?,?,?,?,?)`,
+			INSERT INTO check_baseline (feature_id, name, cmd, ok, exit_code, output, ran_at, base_rev)
+			VALUES (?,?,?,?,?,?,?,?)`,
 			string(id), r.Name, r.Cmd, r.OK, r.ExitCode, r.Output,
-			r.RanAt.UTC().Format(timeFmt)); err != nil {
+			r.RanAt.UTC().Format(timeFmt), r.BaseRev); err != nil {
 			return fmt.Errorf("baselining check %s for %s: %w", r.Name, id, err)
 		}
 	}
@@ -1489,7 +1511,7 @@ func (s *Store) SetCheckBaseline(ctx context.Context, id domain.FeatureID, resul
 // treating every failure as live.
 func (s *Store) CheckBaseline(ctx context.Context, id domain.FeatureID) ([]CheckResult, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT name, cmd, ok, exit_code, output, ran_at
+		SELECT name, cmd, ok, exit_code, output, ran_at, base_rev
 		FROM check_baseline WHERE feature_id = ? ORDER BY name`, string(id))
 	if err != nil {
 		return nil, err
@@ -1499,7 +1521,7 @@ func (s *Store) CheckBaseline(ctx context.Context, id domain.FeatureID) ([]Check
 	for rows.Next() {
 		var r CheckResult
 		var ranAt string
-		if err := rows.Scan(&r.Name, &r.Cmd, &r.OK, &r.ExitCode, &r.Output, &ranAt); err != nil {
+		if err := rows.Scan(&r.Name, &r.Cmd, &r.OK, &r.ExitCode, &r.Output, &ranAt, &r.BaseRev); err != nil {
 			return nil, err
 		}
 		if r.RanAt, err = time.Parse(timeFmt, ranAt); err != nil {

@@ -31,7 +31,7 @@ func TestSpecShape(t *testing.T) {
 		Notes:    []SpecNote{{Line: 6, Anchor: 5, Author: "user", By: "Simon", Date: "2026-09-27", Text: "only at night?"}},
 		Checks: []SpecCheck{
 			{Name: "build", Cmd: "go build ./...", Last: &CheckOutcome{OK: true, At: at}},
-			{Name: "lint", Cmd: "golangci-lint run", Excused: true},
+			{Name: "lint", Cmd: "golangci-lint run", Excused: true, ExcusedOn: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c"},
 		},
 	}))
 }

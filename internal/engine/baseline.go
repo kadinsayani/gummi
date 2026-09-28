@@ -8,7 +8,6 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/spec"
-	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verify"
 )
 
@@ -48,14 +47,7 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 	if len(checks) == 0 {
 		return nil, nil
 	}
-	baselineChecks := checks[:0]
-	for _, ch := range checks {
-		if ch.Baseline != nil && !*ch.Baseline {
-			continue
-		}
-		baselineChecks = append(baselineChecks, ch)
-	}
-	results, err := verify.RunWithBudget(ctx, workDir, baselineChecks, verifyStageTimeout)
+	results, err := verify.RunWithBudget(ctx, workDir, baselineEligible(checks), verifyStageTimeout)
 	if f.IsGoal() {
 		// the goal tree is the tree its cards land on, so a check that
 		// regenerates a tracked file there must not outlive the check
@@ -65,16 +57,25 @@ func (e *Engine) BaselineChecks(ctx context.Context, f domain.Feature) ([]verify
 		return nil, err
 	}
 
-	baseline := make([]state.CheckResult, 0, len(results))
-	now := time.Now().UTC()
-	for _, r := range results {
-		baseline = append(baseline, state.CheckResult{
-			Name: r.Name, Cmd: r.Cmd, OK: r.OK,
-			ExitCode: r.ExitCode, Output: r.Output, RanAt: now,
-		})
-	}
-	if err := e.cfg.Store.SetCheckBaseline(ctx, f.ID, baseline); err != nil {
+	// Each row names the commit it was measured on — the card's fork
+	// point — because an excusal is only true of that commit
+	// (rebaseline.go).
+	if err := e.cfg.Store.SetCheckBaseline(ctx, f.ID, baselineRows(results, e.forkPointOf(ctx, f), time.Now().UTC())); err != nil {
 		return nil, err
 	}
 	return results, nil
+}
+
+// forkPointOf is the card's recorded fork point, "" when it has none or
+// it cannot be read.
+func (e *Engine) forkPointOf(ctx context.Context, f domain.Feature) string {
+	mgr, err := e.mgr(ctx, &f)
+	if err != nil || mgr == nil {
+		return ""
+	}
+	fork, err := mgr.ForkPoint(ctx, &f)
+	if err != nil {
+		return ""
+	}
+	return fork
 }

@@ -113,7 +113,9 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	}
 	if f.Stage != domain.StageVerify {
 		m.notice = noticeMsg{text: string(id) + " rebased onto main"}
-		return m.loadRows
+		// the base moved: re-measure what its baseline excused (at
+		// verify, the re-run below does it as the stage starts)
+		return tea.Batch(m.loadRows, m.rebaselineCmd(id))
 	}
 	return func() tea.Msg {
 		m.dropSession(f.ID) // the finished rebase session is stale

@@ -159,7 +159,12 @@ func TestVerifyKickoffChangedCmdIgnoresBaseline(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-	}, "- name: fail-check\n  cmd: \"echo boom; exit 3\"\n")
+		// The row names no base, so verify re-measures it on the card's
+		// base (rebaseline.go). The command fails only where the card's
+		// own files are — its worktree carries .gummi/, a checkout of the
+		// base does not — so the re-measure finds it passing there, and
+		// the failure is the card's.
+	}, "- name: fail-check\n  cmd: \"test ! -d .gummi || { echo boom; exit 3; }\"\n")
 
 	if !strings.Contains(got, "fail-check: FAIL (exit 3)") || strings.Contains(got, "pre-existing") {
 		t.Errorf("edited command must not inherit the old baseline:\n%s", got)

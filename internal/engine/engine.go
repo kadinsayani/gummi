@@ -1565,6 +1565,15 @@ func (e *Engine) runSpecChecks(s *Session) string {
 	}
 	results = append(results, proven...)
 
+	// An excusal is a claim about the commit it was measured on; a card
+	// whose base moved since (a rebase, a restack) has its excused checks
+	// measured again on the new base before any are written off.
+	if ownVerify {
+		if note := e.rebaselineNote(context.Background(), s.Feature); note != "" {
+			s.appendActivity(note)
+		}
+	}
+
 	// The approval-time baseline separates failures the feature caused
 	// from ones the branch was born with. A baseline entry speaks for a
 	// live check only when the command is unchanged — an edited command

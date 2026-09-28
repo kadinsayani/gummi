@@ -1007,6 +1007,44 @@ func (m *Shell) scribeEstimate(id domain.FeatureID) tea.Cmd {
 // leaving the worktree untouched) it offers the agent hand-off — or,
 // with no engine, reports the conflicted files to resolve by hand.
 func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
+	return m.rebaseFeatureLocked(f)
+}
+
+// rebasedMsg is a rebase that went through: its notice, and — because a
+// rebase moves the card's base, and what its baseline excused was
+// measured on the old one — the re-measure behind it (rebaselineCmd).
+type rebasedMsg struct {
+	id     domain.FeatureID
+	notice noticeMsg
+}
+
+// rebaselineCmd re-measures a card's excused checks when its base moved
+// (engine.RebaselineIfBaseMoved) and says what that found. Nothing when
+// there is no engine, nothing excused, or the base did not move.
+func (m *Shell) rebaselineCmd(id domain.FeatureID) tea.Cmd {
+	if m.engine == nil {
+		return nil
+	}
+	eng := m.engine
+	return func() tea.Msg {
+		ctx := context.Background()
+		f, err := m.store.GetFeature(ctx, id)
+		if err != nil {
+			return nil
+		}
+		before, _ := m.store.CheckBaseline(ctx, id)
+		res, err := eng.RebaselineIfBaseMoved(ctx, f)
+		if err != nil {
+			return noticeMsg{text: sanitize(string(id) + ": the excused checks could not be re-measured on the new base — " + err.Error())}
+		}
+		if !res.Moved {
+			return nil
+		}
+		return noticeMsg{text: sanitize(string(id) + ": " + engine.RebaselineSentence(res, before)), reload: true}
+	}
+}
+
+func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 	return m.cardLocked(f.ID, func() tea.Msg {
 		ctx := context.Background()
 		if ok, err := m.wt.Exists(ctx, &f); err != nil {
@@ -1058,7 +1096,7 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true}
+		return rebasedMsg{id: f.ID, notice: noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true}}
 	})
 }
 

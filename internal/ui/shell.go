@@ -350,6 +350,10 @@ type Shell struct {
 	// avoid. Absent entry and empty slice both mean "nothing excused",
 	// which is the ordinary case.
 	excusedChecks map[domain.FeatureID][]string
+	// excusedOn is, per feature, the commit its excused checks were
+	// measured on (state.ExcusedOn) — an excusal is a claim about that
+	// commit — loaded beside excusedChecks.
+	excusedOn map[domain.FeatureID]string
 	// threadScroll is how many lines back from the newest the card
 	// thread's body is scrolled. Zero is the bottom, which is where a
 	// card opens and where it stays as a live stage streams — counting
@@ -573,6 +577,7 @@ func NewShell(t theme.Theme, version string) *Shell {
 		rounds:         map[roundKey]int{},
 		cardEvents:     map[domain.FeatureID][]state.CardEvent{},
 		excusedChecks:  map[domain.FeatureID][]string{},
+		excusedOn:      map[domain.FeatureID]string{},
 		threadDrafts:   map[domain.FeatureID]string{},
 		copilotHint:    true,
 		motionEnabled:  true,
@@ -2121,6 +2126,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case rebaseSettledMsg:
 		return m, m.rebaseSettled(msg)
 
+	case rebasedMsg:
+		model, cmd := m.Update(msg.notice)
+		return model, tea.Batch(cmd, m.rebaselineCmd(msg.id))
+
 	case worktreeEnteredMsg:
 		// show the transition notice, reload, and run the background
 		// one-shot passes: check discovery and/or the envelope estimate.
@@ -2523,6 +2532,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case excusedChecksMsg:
 		m.excusedChecks[msg.id] = msg.names
+		m.excusedOn[msg.id] = msg.on
 		return m, nil
 
 	case cardEventsMsg:
@@ -4152,6 +4162,7 @@ func (m *Shell) loadCardEvents(id domain.FeatureID) tea.Cmd {
 type excusedChecksMsg struct {
 	id    domain.FeatureID
 	names []string
+	on    string // the commit they were measured failing on, "" when unrecorded
 }
 
 // loadExcusedChecks reads one card's check baseline and reduces it to the
@@ -4179,7 +4190,7 @@ func (m *Shell) loadExcusedChecks(id domain.FeatureID) tea.Cmd {
 			// correct without it, and most cards have no baseline at all.
 			return nil
 		}
-		return excusedChecksMsg{id: id, names: state.ExcusedChecks(baseline)}
+		return excusedChecksMsg{id: id, names: state.ExcusedChecks(baseline), on: state.ExcusedOn(baseline)}
 	}
 }
 

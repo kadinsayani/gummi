@@ -289,13 +289,18 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 	if checks, _, err := spec.ParseChecks(content); err == nil && len(checks) > 0 {
 		last := d.lastChecks(ctx)
 		excused := map[string]bool{}
+		excusedOn := ""
 		if base, err := d.store.CheckBaseline(ctx, d.f.ID); err == nil {
 			for _, n := range state.ExcusedChecks(base) {
 				excused[n] = true
 			}
+			excusedOn = state.ExcusedOn(base)
 		}
 		for _, c := range checks {
 			sc := webapi.SpecCheck{Name: c.Name, Cmd: c.Cmd, Excused: excused[c.Name]}
+			if sc.Excused {
+				sc.ExcusedOn = excusedOn
+			}
 			if o, ok := last[c.Name]; ok {
 				sc.Last = &o
 			}

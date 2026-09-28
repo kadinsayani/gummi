@@ -513,7 +513,7 @@ func verifyStopped(in nextInput, art string) string {
 			return "Verify passed on the reviewer's own commands — this card has no gummi-checks, so gummi ran none" +
 				". Decide how it leaves gummi."
 		}
-		return "Verify passed — the work is ready" + excusedClause(in.excusedChecks) +
+		return "Verify passed — the work is ready" + excusedClause(in.excusedChecks, in.excusedOn) +
 			". Decide how it leaves gummi."
 	}
 	return ""
@@ -544,7 +544,7 @@ func goalMetClause(g *engine.GoalReport) string {
 //
 // Empty for the ordinary case — a branch born clean — so the sentence is
 // unchanged wherever there is nothing to disclose.
-func excusedClause(names []string) string {
+func excusedClause(names []string, on string) string {
 	if len(names) == 0 {
 		return ""
 	}
@@ -554,7 +554,13 @@ func excusedClause(names []string) string {
 		// which is agent-written text like any other on this page
 		safe = append(safe, sanitize(n))
 	}
-	return ", with " + strings.Join(safe, " and ") + " excused (already failing before this card)"
+	// An excusal is a claim about the commit it was measured on, so the
+	// clause names it; verify re-measures on a new one when the base moves.
+	before := "before this card"
+	if on != "" {
+		before = "on " + shortSHA(on) + ", the commit this card forks from"
+	}
+	return ", with " + strings.Join(safe, " and ") + " excused (already failing " + before + ")"
 }
 
 // loopBreaker is the FD-004 guard, moved from the ordering into the

@@ -121,7 +121,7 @@ function checksTable (checks) {
       h('span', { class: c.last ? (c.last.ok ? 'okc' : 'badc') : 'nonec', 'aria-label': c.last ? (c.last.ok ? 'passed' : 'failed') : 'not run' }, c.last ? (c.last.ok ? '✓' : '✕') : '·'),
       h('span', null, c.name),
       h('span', { class: 'c', title: c.cmd }, c.cmd),
-      h('span', { class: 'at' }, c.excused ? h('span', { class: 'excused', title: 'Already failing when the branch was cut' }, 'excused') : c.last ? clock(c.last.at) : ''))))
+      h('span', { class: 'at' }, c.excused ? h('span', { class: 'excused', title: c.excusedOn ? `Already failing on ${c.excusedOn.slice(0, 7)}, the commit this card forks from — re-measured when its base moves` : 'Already failing when the branch was cut' }, c.excusedOn ? `excused on ${c.excusedOn.slice(0, 7)}` : 'excused') : c.last ? clock(c.last.at) : ''))))
 }
 
 function openNote (h2, sec, ctx) {

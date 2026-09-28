@@ -53,6 +53,10 @@ type SpecCheck struct {
 	// Excused marks a check that was already failing when the branch was
 	// cut: verify writes it off rather than holding the card to it.
 	Excused bool `json:"excused,omitempty"`
+	// ExcusedOn is the commit an excused check was measured failing on:
+	// the excusal is a claim about that commit, re-measured when the
+	// card's base moves. Empty when unrecorded.
+	ExcusedOn string `json:"excusedOn,omitempty"`
 }
 
 // CheckOutcome is a check's last result.

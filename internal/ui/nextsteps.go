@@ -144,6 +144,9 @@ type nextInput struct {
 	// verify ran none and a pass rests on the reviewer's own commands
 	// (featureRow.NoChecks). The pass sentence says so.
 	noChecks bool
+	// excusedOn is the commit excusedChecks were measured failing on, ""
+	// when the baseline predates the record.
+	excusedOn string
 
 	// base is the branch this card lands on, resolved once at attach
 	// (Shell.baseBranch). The landing row used to write the literal
@@ -353,6 +356,7 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		exited:           r.Exited,
 		excusedChecks:    m.excusedChecks[r.F.ID],
 		noChecks:         r.NoChecks,
+		excusedOn:        m.excusedOn[r.F.ID],
 		base:             m.baseBranch(r.F),
 		branch:           r.F.BranchName(),
 		adopted:          r.F.Adopted(),

@@ -134,6 +134,11 @@ type statusView struct {
 	// above is a pass that did not cover it. Absent when the branch was
 	// born clean, which is the ordinary case.
 	ExcusedChecks []string `json:"excused_checks,omitempty"`
+	// ExcusedOn is the commit those checks were measured failing on — the
+	// card's fork point at the time. An excusal is a claim about that
+	// commit only: when the card's base moves, verify re-measures them.
+	// Absent for a baseline taken before the commit was recorded.
+	ExcusedOn string `json:"excused_on,omitempty"`
 	// UnprovenFiles names the files this branch changed that no check
 	// that ran exercised — verify's own declaration, read back off the
 	// artifact. A cgo tree this container cannot build, a suite only CI
@@ -261,6 +266,7 @@ func buildStatus(ctx context.Context, store *state.Store, wt *worktree.Pool, ws 
 		Escalation:      openEscalation(ctx, store, f),
 		Rounds:          roundCounts(ctx, store, f),
 		ExcusedChecks:   excusedChecks(ctx, store, f),
+		ExcusedOn:       excusedOn(ctx, store, f),
 		UnprovenFiles:   unprovenFiles(f),
 		StageSpend:      stageSpendRows(ctx, store, f),
 		GoalID:          string(f.GoalID),
@@ -364,6 +370,24 @@ func excusedChecks(ctx context.Context, store *state.Store, f *domain.Feature) [
 	return state.ExcusedChecks(baseline)
 }
 
+// excusedOn is the commit the card's excused checks were measured on, ""
+// when none are excused or it was not recorded.
+func excusedOn(ctx context.Context, store *state.Store, f *domain.Feature) string {
+	baseline, err := store.CheckBaseline(ctx, f.ID)
+	if err != nil {
+		return ""
+	}
+	return state.ExcusedOn(baseline)
+}
+
+// shortSHA is a commit id cut to the length people read.
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
 // stageSpendRows projects the store's per-stage breakdown into the view,
 // largest first so the stage that dominates a run reads at the top. Ties
 // break on stage then role, so the order is stable across calls.
@@ -456,8 +480,12 @@ func renderStatus(w io.Writer, v statusView) {
 	// are any — the ordinary clean-baseline card should not carry a line
 	// about a carve-out that did not apply to it.
 	if len(v.ExcusedChecks) > 0 {
-		fmt.Fprintf(w, "  Excused:  %s (already failing on the fresh branch; not gated at verify)\n",
-			strings.Join(v.ExcusedChecks, ", "))
+		on := "the fresh branch"
+		if v.ExcusedOn != "" {
+			on = shortSHA(v.ExcusedOn) + ", the commit it forks from"
+		}
+		fmt.Fprintf(w, "  Excused:  %s (already failing on %s; not gated at verify)\n",
+			strings.Join(v.ExcusedChecks, ", "), on)
 	}
 	// Same place, same reason: a pass that never compiled three of the
 	// branch's files is a pass about the other files, and the person
