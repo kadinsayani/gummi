@@ -104,6 +104,11 @@ type doctorCheck struct {
 type doctorOpts struct {
 	Deep  bool
 	Probe ProbeFn
+	// Board is the running board's engine when this doctor is served by
+	// it (gummi web's Doctor view), nil for `gummi doctor` run on its own.
+	// It adds what only the running process knows: whether it applied
+	// the profiles the file now holds.
+	Board interface{ ProfilesState() engine.ProfilesState }
 }
 
 // ProbeFn runs one per-role reachability probe against a backend and model,
@@ -267,6 +272,9 @@ func buildDoctorReport(cwd string, opts doctorOpts) doctorReport {
 	// these are all unknown ("not probed") and never touch a backend or the
 	// cache; --deep runs a live, TTL-cached probe per effective model.
 	checks = append(checks, reachChecks(ws, profiles, opts, time.Now())...)
+	if opts.Board != nil {
+		checks = append(checks, profilesLiveCheck(opts.Board.ProfilesState()))
+	}
 
 	// 6. budget (GUMMI_ENVELOPE)
 	checks = append(checks, envelopeCheck())
@@ -429,6 +437,18 @@ func reachChecks(ws state.Workspace, profiles config.Profiles, opts doctorOpts, 
 			}
 			bi := backendInfoFor(backend)
 			name := "reach:" + pname + "/" + string(role)
+			// A model id the backend refuses by its spelling alone needs
+			// no live probe to call — and "not probed" beside it sent a
+			// board whose every scribe pass was failing to Ready.
+			if suggest, bad := modelIDRefused(bi, model); bad {
+				checks = append(checks, doctorCheck{
+					Name:        name,
+					Status:      statusFail,
+					Detail:      fmt.Sprintf("%s is not a model id the %s CLI accepts — it spells versions with dashes", model, bi.name),
+					Remediation: fmt.Sprintf("set this role's model to %s in .gummi/profiles.yaml (a running board picks the edit up for its next session)", suggest),
+				})
+				continue
+			}
 			if !opts.Deep {
 				checks = append(checks, doctorCheck{
 					Name:        name,
@@ -479,6 +499,39 @@ func reachChecks(ws state.Workspace, profiles config.Profiles, opts doctorOpts, 
 		}
 	}
 	return checks
+}
+
+// modelIDRefused reports a model id the backend is known to refuse by its
+// spelling, and the spelling it takes (agent.ClaudeModelIDHint). Only the
+// claude backend has such a rule: the same models are spelled with a dot
+// by other CLIs, so a profile moved between backends carries ids its new
+// one rejects.
+func modelIDRefused(bi backendInfo, model string) (string, bool) {
+	if bi.name != "claude" {
+		return "", false
+	}
+	return agent.ClaudeModelIDHint(model)
+}
+
+// profilesLiveCheck reports whether the running board follows
+// profiles.yaml, for a doctor served BY that board (gummi web). The file
+// is what the rest of the checklist judges; the engine resolves sessions
+// from its own copy, which it re-reads when the file changes and which
+// refuses an edit that does not validate. A refused edit is the one case
+// where the checklist and the running board disagree, so it is said here.
+func profilesLiveCheck(st engine.ProfilesState) doctorCheck {
+	if st.Refused != "" {
+		return doctorCheck{
+			Name: "profiles:live", Status: statusWarn,
+			Detail:      "the running board did not apply the latest profiles.yaml: " + st.Refused,
+			Remediation: "fix .gummi/profiles.yaml (the board keeps the profiles it had until an edit validates), or restart gummi",
+		}
+	}
+	detail := "the running board resolves new sessions from profiles.yaml as it reads now"
+	if st.Reloads > 0 {
+		detail += fmt.Sprintf(" (%d edit%s picked up since it started)", st.Reloads, plural(st.Reloads))
+	}
+	return doctorCheck{Name: "profiles:live", Status: statusOK, Detail: detail}
 }
 
 // envelopeCheck validates GUMMI_ENVELOPE. It never fails readiness: a run
@@ -566,6 +619,21 @@ func lockHeldCheck(ws state.Workspace) doctorCheck {
 	if h.Hostname != "" {
 		where += " on " + h.Hostname
 	}
+	// A doctor served by the board that holds the lock — gummi web's own
+	// Doctor view — is looking at itself. Telling it to stop gummi web
+	// before opening the TUI warned the reader about the page they were
+	// reading, as the one non-ok line on an otherwise ready board.
+	if h.PID == os.Getpid() && (h.Hostname == "" || h.Hostname == thisHost()) {
+		detail := "held by this board"
+		if h.Host == state.HostWeb {
+			detail += " — gummi web serves it"
+			if h.URL != "" {
+				detail += " at " + h.URL
+			}
+		}
+		return doctorCheck{Name: "lock", Status: statusOK, Detail: detail + " (" + where + ")",
+			Remediation: "a second board here would be refused while this one runs; status/spec/diff/watch/doctor take no lock"}
+	}
 	if h.Host == state.HostWeb {
 		detail := "workspace busy — gummi web serves this board"
 		fix := "open the board in the browser, or stop gummi web before opening the TUI"
@@ -579,6 +647,12 @@ func lockHeldCheck(ws state.Workspace) doctorCheck {
 		Name: "lock", Status: statusWarn, Detail: "workspace busy — another TUI holds it (" + where + ")",
 		Remediation: "close the other TUI before opening the board",
 	}
+}
+
+// thisHost is this machine's hostname, "" when it cannot be read.
+func thisHost() string {
+	h, _ := os.Hostname()
+	return h
 }
 
 // hostedInThisWorkspace reports whether the calling process is the agent

@@ -193,7 +193,11 @@ func runWeb(fl cliFlags, args []string) error {
 		// on both surfaces because it asks every backend for a turn.
 		Doctor: func(r *http.Request) webapi.Doctor {
 			deep := r.URL.Query().Get("deep") == "1"
-			return doctorForWeb(buildDoctorReport(cwd, doctorOpts{Deep: deep, Probe: probeModel}))
+			opts := doctorOpts{Deep: deep, Probe: probeModel}
+			if h.engine != nil {
+				opts.Board = h.engine
+			}
+			return doctorForWeb(buildDoctorReport(cwd, opts))
 		},
 	})
 	if err != nil {

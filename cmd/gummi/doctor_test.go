@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/config"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/worktree"
 )
@@ -1122,6 +1123,75 @@ func TestLockCheckNamesTheWebHost(t *testing.T) {
 	}
 	if strings.Contains(c.Detail+c.Remediation, "TUI holds") || !strings.Contains(c.Remediation, "http://127.0.0.1:4711/") {
 		t.Fatalf("lockCheck = %+v, want a remediation that points at the web board", c)
+	}
+}
+
+// gummi web's own Doctor view runs doctor inside the process that holds
+// the lock. It used to warn the reader to "stop gummi web before opening
+// the TUI" — about the page they were reading. The board's own lock is
+// expected, and says so.
+func TestLockCheckHeldByThisBoardIsOK(t *testing.T) {
+	t.Setenv("GUMMI_MCP_SOCK", "")
+	ws := state.Workspace{Root: t.TempDir()}
+	release, err := state.AcquireInstance(ws, state.InstanceHolder{Host: state.HostWeb, URL: "http://127.0.0.1:4711/"})
+	if err != nil {
+		t.Fatalf("AcquireInstance: %v", err)
+	}
+	defer release()
+
+	c := lockCheck(ws)
+	if c.Status != statusOK || !strings.Contains(c.Detail, "held by this board") || !strings.Contains(c.Detail, "http://127.0.0.1:4711/") {
+		t.Fatalf("lockCheck = %+v, want ok, held by this board, naming where it serves", c)
+	}
+	if strings.Contains(c.Remediation, "stop gummi web") {
+		t.Fatalf("lockCheck still tells the web board to stop itself: %+v", c)
+	}
+}
+
+// A claude-backed role spelled the way another CLI spells the model
+// (claude-haiku-4.5) is refused by the claude CLI on its first turn. The
+// checklist says so without --deep, and names the spelling that works.
+func TestDoctorFlagsAClaudeModelIDTheCLIRefuses(t *testing.T) {
+	clearDoctorEnv(t)
+	t.Setenv("GUMMI_AGENT", "claude")
+	root := gitRepo(t)
+	if err := os.MkdirAll(filepath.Join(root, ".gummi"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	prof := "default: std\nprofiles:\n  std:\n    architect: {model: claude-sonnet-5}\n    implementer: {model: claude-sonnet-5}\n" +
+		"    reviewer: {model: claude-sonnet-5}\n    scribe: {model: claude-haiku-4.5}\n"
+	if err := os.WriteFile(filepath.Join(root, ".gummi", "profiles.yaml"), []byte(prof), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r := buildDoctorReport(root, doctorOpts{})
+	var scribe, architect doctorCheck
+	for _, c := range r.Checks {
+		switch c.Name {
+		case "reach:std/scribe":
+			scribe = c
+		case "reach:std/architect":
+			architect = c
+		}
+	}
+	if scribe.Status != statusFail || !strings.Contains(scribe.Remediation, "claude-haiku-4-5") {
+		t.Fatalf("scribe reach = %+v, want a failure naming claude-haiku-4-5", scribe)
+	}
+	if architect.Status != statusUnknown {
+		t.Errorf("architect reach = %+v, want the ordinary not-probed line for a well-formed id", architect)
+	}
+	if r.Ready {
+		t.Error("doctor reports ready while the scribe's model id is one the backend refuses")
+	}
+}
+
+// The running board's own view of profiles.yaml, for a doctor it serves.
+func TestProfilesLiveCheck(t *testing.T) {
+	if c := profilesLiveCheck(engine.ProfilesState{Reloads: 2}); c.Status != statusOK || !strings.Contains(c.Detail, "2 edits picked up") {
+		t.Errorf("clean state = %+v", c)
+	}
+	c := profilesLiveCheck(engine.ProfilesState{Refused: "parsing: bad"})
+	if c.Status != statusWarn || !strings.Contains(c.Detail, "did not apply") {
+		t.Errorf("refused state = %+v, want a warning saying the edit was not applied", c)
 	}
 }
 
