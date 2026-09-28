@@ -1896,7 +1896,7 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if r, ok := m.selected(); ok {
 			cmds = append(cmds, m.ensureNarration(r))
 		}
-		cmds = append(cmds, m.measureToday(), m.resumeDependencyParked())
+		cmds = append(cmds, m.measureToday(), m.resumeHeldGates())
 		return m, tea.Batch(cmds...)
 
 	case openDecisionsMsg:

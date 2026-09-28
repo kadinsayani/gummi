@@ -647,7 +647,7 @@ type autopilotGateBlockedMsg struct {
 }
 
 // unmetDependencyClause is the words a gate blocked on a dependency parks
-// with. resumeDependencyParked (autopilot.go) finds such a park by them
+// with. resumeHeldGates (autopilot.go) finds such a park by them
 // once the dependency is done, so the phrase is written in one place.
 const unmetDependencyClause = "blocked by unmet dependency"
 

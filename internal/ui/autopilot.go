@@ -450,7 +450,7 @@ func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool
 	return autopilotSettled(f.ID, m.advanceStageAs(f.ID, state.ActorAutopilot)), true
 }
 
-// resumeDependencyParked revisits every gate parked on an unmet
+// resumeHeldGates revisits every gate parked on an unmet
 // dependency once a board reload shows that dependency done. It runs on
 // every rowsMsg, which is what a landing — here, from the web page, or
 // from another process — ends in.
@@ -467,17 +467,29 @@ func (m *Shell) autopilotCrossGate(f domain.Feature, text string) (tea.Cmd, bool
 // The park is found by its words (unmetDependencyClause) rather than
 // held in a map, so a park a previous process made — seeded back from
 // its decision row — is revisited the same way.
-func (m *Shell) resumeDependencyParked() tea.Cmd {
+//
+// A gate held by open comments is revisited the same way once the last of
+// them is resolved (heldByComments): its reason named comments that are
+// no longer there.
+func (m *Shell) resumeHeldGates() tea.Cmd {
 	var cmds []tea.Cmd
 	for _, it := range m.inbox.list() {
-		if it.Kind != attnGate || !strings.Contains(it.Text, unmetDependencyClause) {
+		if it.Kind != attnGate {
 			continue
 		}
 		r, ok := m.rowByID(it.Feature)
-		if !ok || r.DepBlocked || r.watchOnly() {
+		if !ok || r.watchOnly() {
 			continue
 		}
-		text := string(r.F.Stage) + " is no longer waiting on a dependency — review & approve"
+		var text string
+		switch {
+		case strings.Contains(it.Text, unmetDependencyClause) && !r.DepBlocked:
+			text = string(r.F.Stage) + " is no longer waiting on a dependency — review & approve"
+		case heldByComments(it.Text) && r.OpenSpecQs == 0 && r.OpenDiffComments == 0 && !r.DepBlocked:
+			text = string(r.F.Stage) + " is clear of the comments that held it — review & approve"
+		default:
+			continue
+		}
 		it.Text = text
 		m.inbox.put(it)
 		m.rewordGateDecision(r.F.ID, text)
@@ -491,6 +503,40 @@ func (m *Shell) resumeDependencyParked() tea.Cmd {
 		cmds = append(cmds, autopilotSettled(r.F.ID, m.advanceStageAs(r.F.ID, state.ActorAutopilot)))
 	}
 	return tea.Batch(cmds...)
+}
+
+// heldByCommentsText is a clean critique's gate reason when open comments
+// hold that gate shut anyway, or "" when none do: how many, where, and
+// that they are what stands between the reader and the approval.
+func heldByCommentsText(noun string, kind domain.Kind, inArtifact, onDiff int) string {
+	var where []string
+	if inArtifact > 0 {
+		where = append(where, itoa(inArtifact)+" open comment"+plural(inArtifact)+" in the "+artifactNoun(kind))
+	}
+	if onDiff > 0 {
+		where = append(where, itoa(onDiff)+" open comment"+plural(onDiff)+" on the diff")
+	}
+	if len(where) == 0 {
+		return ""
+	}
+	n := inArtifact + onDiff
+	return noun + " critiqued: clean, but " + joinList(where) + " " + blockVerb(n) + " the gate — resolve " +
+		objectFor(n) + " before approving"
+}
+
+// objectFor is "it" for one, "them" for more.
+func objectFor(n int) string {
+	if n == 1 {
+		return "it"
+	}
+	return "them"
+}
+
+// heldByComments reports whether a gate reason names open comments as
+// what holds it: heldByCommentsText's, or a refused crossing's
+// (advanceOutcome's "open comment(s) block approval").
+func heldByComments(text string) bool {
+	return strings.Contains(text, "open comment") || strings.Contains(text, "open diff comment")
 }
 
 // autopilotSettledMsg wraps whatever an autopilot-dispatched command

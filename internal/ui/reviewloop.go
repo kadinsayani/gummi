@@ -320,6 +320,15 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		}
 		m.setRound(id, kind, 0)
 		text := noun + " critiqued: clean — review & approve"
+		// A clean critique is not a clean gate when a person's comment is
+		// still open on it (a re-entry writes the line it was sent back
+		// with as one, and the rerun need not resolve it): the gate is
+		// shut, and a reason inviting an approval the gate then refuses
+		// sent the reader round in a circle.
+		if held := heldByCommentsText(noun, snap.Feature.Kind, m.openQuestionsBlockingGate(snap.Feature),
+			m.openDiffCommentsBlockingGate(context.Background(), id)); held != "" {
+			text = held
+		}
 		if cmd, attempted := m.autopilotCrossGate(snap.Feature, text); attempted {
 			return cmd
 		}
