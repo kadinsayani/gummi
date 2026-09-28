@@ -256,6 +256,28 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 	}
 	gateLabel, gateWhy := gateLabelWhy(r.F.GateApproval, r.baseBranch())
 
+	// A landing is offered only where one would go through: the floor
+	// every landing door reads (merge.go's landingRefusal, carried in as
+	// in.landRefused) and the one order a stack imposes (the card below
+	// lands first). A card at verify that never finished a verify pass
+	// lists no landing — the refusal would only tell the reader to run
+	// verify, which the menu offers beside it — while a failed verify's
+	// overrule stays: the floor lets "land anyway" through, so the menu's
+	// landing is that overrule. Each withheld entry still answers its key
+	// with the refusal's own sentence (boardVerb), and the decision says
+	// why nothing lands yet ("lands after …").
+	landable := in.landRefused == "" && in.stackBlocker == ""
+	// "next stage" out of verify is that same landing (advanceStageAs),
+	// and into implement it is the approval an unmet dependency refuses
+	// (engine.Advance) — the decision leads with "waits on …" there.
+	advanceOffered := (!doneStage || research) && !freeform
+	switch {
+	case advanceLands(r.F, r.Landed) && !landable:
+		advanceOffered = false
+	case in.stage == domain.StagePlan && len(in.depBlockers) > 0 && in.kind != domain.KindGoal:
+		advanceOffered = false
+	}
+
 	bounceWhy := "send it back to " + string(work) + " for rework"
 	if in.stage == domain.StagePlan {
 		bounceWhy = "send it back for a fresh, human-triggered replan round"
@@ -323,7 +345,7 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		},
 		{
 			"advance", "g", advanceLabel, advanceWhy, false,
-			(!doneStage || research) && !freeform,
+			advanceOffered,
 		},
 		{
 			// the label is "send back", not "bounce": the decision block
@@ -413,9 +435,12 @@ func cardActionsFor(in nextInput, r featureRow) []cardAction {
 		{
 			// offered where a landing may happen (merge.go's
 			// landingRefusal): at verify, on a freeform card, and after
-			// a hand-off — never before the branch has been verified
+			// a hand-off — never before the branch has been verified, and
+			// never on a card linked to a pull request, which lands there
+			// (prepareMerge refuses it with the two ways that do)
 			"merge", "m", "merge", mergeHelp(r.F.Kind, r.baseBranch()), false,
-			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy && (in.stage == domain.StageVerify || freeform || r.F.HandedOff()),
+			needsWT && r.HasWorktree && !r.Landed && !in.freeformBusy && (in.stage == domain.StageVerify || freeform || r.F.HandedOff()) &&
+				landable && r.F.PullRequest.Empty(),
 		},
 		{
 			"squash", "z", "squash", "collapse the branch to one commit in place (review & approve the drafted message)", false,

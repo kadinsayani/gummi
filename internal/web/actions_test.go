@@ -162,7 +162,9 @@ func (h *cardBoard) verifyCard(title string, passed bool) (webapi.Card, string) 
 		t.Fatal(err)
 	}
 	c = h.waitCard(c.ID, "the verified card", func(c webapi.Card) bool {
-		return c.Stage == string(domain.StageVerify) && hasAction(c.Actions, "merge")
+		// a card that never finished a verify pass lists no landing
+		// (landingRefusal), so the worktree's own squash says it is up
+		return c.Stage == string(domain.StageVerify) && hasAction(c.Actions, "squash") && hasAction(c.Actions, "merge") == passed
 	})
 	return c, wt
 }
@@ -184,15 +186,19 @@ func TestActionLandsAVerifiedCard(t *testing.T) {
 }
 
 // The menu's landing asks for the floor the verify stop's own landing
-// does: a card at verify that never finished a verify pass is refused,
-// by the land entry and by "next stage" alike, and its branch stays off
-// main. (Squash collapses the branch in place and lands nothing.)
+// does: a card at verify that never finished a verify pass lists neither
+// the land entry nor "next stage", and either sent anyway is refused and
+// its branch stays off main. (Squash collapses the branch in place and
+// lands nothing.)
 func TestActionRefusesToLandAnUnverifiedCard(t *testing.T) {
 	h := newCardBoard(t, agent.NewFake("ok"))
 	c, _ := h.verifyCard("Dark mode", false)
 	for _, action := range []string{"merge", "advance"} {
+		if hasAction(c.Actions, action) {
+			t.Errorf("the menu offers %s on a card that never ran verify", action)
+		}
 		st, raw := h.actionRaw(c.ID, action, webapi.ActionRequest{Message: "FD-001: dark mode", Against: h.card(c.ID).Decision.Against.Token})
-		if st == http.StatusOK || !strings.Contains(string(raw), "verify") {
+		if st != http.StatusConflict {
 			t.Errorf("%s on a card that never ran verify = %d %s, want a refusal", action, st, raw)
 		}
 	}

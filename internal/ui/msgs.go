@@ -719,8 +719,7 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 	// by "next stage" any more than by the land entry (landingRefusal).
 	// A research card lands nothing (its floor is the document's), and a
 	// branch already on main has nothing left to land.
-	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot &&
-		r.F.Stage == domain.StageVerify && r.F.Kind != domain.KindResearch && !r.F.IsFreeform() && !r.F.HandedOff() && !r.Landed {
+	if r, ok := m.rowByID(id); ok && actor != state.ActorAutopilot && advanceLands(r.F, r.Landed) {
 		if why := m.landingRefusal(r.F); why != "" {
 			return func() tea.Msg { return noticeMsg{text: why, isErr: true, id: id} }
 		}
@@ -731,6 +730,15 @@ func (m *Shell) advanceStageAs(id domain.FeatureID, actor string) tea.Cmd {
 			return m.advanceOutcome(id, actor, res, err)
 		})
 	}
+}
+
+// advanceLands reports whether crossing f out of its stage by hand is a
+// landing: leaving verify on a workflow card whose branch has not reached
+// its base yet. A research card lands nothing (its floor is the
+// document's), a handed-off card has already ended, and a freeform card
+// has no stage to leave.
+func advanceLands(f domain.Feature, landed bool) bool {
+	return f.Stage == domain.StageVerify && f.Kind != domain.KindResearch && !f.IsFreeform() && !f.HandedOff() && !landed
 }
 
 // withEngine runs fn against the board's engine, standing a transient

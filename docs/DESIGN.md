@@ -3734,7 +3734,13 @@ other side of that trade and contains the risk with four rules instead.
   verify pass the floor the verify stop's own landing answer does
   (`domain.Feature.MayLand`, or the stop's "land anyway" — a person's
   overrule of a verify pass that finished and failed). A card that has
-  not finished a verify pass does not land from any door.
+  not finished a verify pass does not land from any door. Nor does the
+  menu offer a door that would refuse: on both faces it lists merge and
+  "next stage" out of verify only where that floor lets a landing
+  through and no unlanded card sits below it in its stack, lists no
+  local merge on a card linked to a pull request, and no "next stage"
+  into implement while an unmet dependency holds the design gate — the
+  decision leads with what the card waits on instead.
 - **Drift fails a test.** The read models are golden-tested from the
   same fixtures as the TUI's goldens, and a test asserts that the answers
   served for each fixture's open decision are the answers the TUI draws.

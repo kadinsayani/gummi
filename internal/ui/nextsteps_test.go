@@ -260,6 +260,10 @@ func TestNextInputForAssembly(t *testing.T) {
 		// ends landed even with no LandedSHA — the branch reached the base
 		// branch by some route gummi did not perform.
 		ending: domain.EndingLanded,
+		// the landing floor is read at assembly as well (landingRefusal),
+		// so the menu lists a landing only where one goes through: this
+		// card never finished a verify pass
+		landRefused: "FD-001 has not finished a verify pass — run verify first; a failed verify is overruled from its own answer (land anyway)",
 	}
 	// undrafted is a slice (one blocker per blank section), so the struct
 	// no longer compares with ==; DeepEqual keeps the assembly pinned.

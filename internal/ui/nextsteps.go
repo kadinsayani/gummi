@@ -234,6 +234,12 @@ type nextInput struct {
 	// landConflicts are the files the last landing attempt conflicted
 	// in; non-nil once a landing hit conflicts, until a rebase clears it.
 	landConflicts []string
+	// landRefused is why a landing would be refused right now (merge.go's
+	// landingRefusal — the floor every landing door reads), "" when the
+	// card may land. The action menu offers its landing entries only when
+	// it is "" (cardActionsFor), so no door lists a landing the same
+	// board would then refuse.
+	landRefused string
 
 	// attnText is the attention item's own sentence — for a failure, the
 	// cause, which the decision's question names rather than leaving it
@@ -513,6 +519,9 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		}
 	}
 	in.verdict = escalatedGateVerdict(in.verdict, in.escalated)
+	// last, since the floor reads the answer set this input yields (a
+	// failed verify's "land anyway" is a landing it lets through)
+	in.landRefused = m.landingRefusalIn(r.F, r, true, &in)
 	return in
 }
 

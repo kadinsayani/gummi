@@ -65,8 +65,17 @@ type mergeReadyMsg struct {
 // way it was asked for. A card that has not finished a verify pass at all
 // has nothing to overrule, and does not land.
 func (m *Shell) landingRefusal(f domain.Feature) string {
+	r, ok := m.rowByID(f.ID)
+	return m.landingRefusalIn(f, r, ok, nil)
+}
+
+// landingRefusalIn is landingRefusal for a caller that already holds the
+// card's board row (ok false when the board has none) and, optionally,
+// the answer set's input built from it: nextInputFor reads the floor
+// this way, so the menu offers a landing exactly when this lets one
+// through (nextInput.landRefused). in nil builds it from r on demand.
+func (m *Shell) landingRefusalIn(f domain.Feature, r featureRow, ok bool, in *nextInput) string {
 	if f.IsFreeform() {
-		r, ok := m.rowByID(f.ID)
 		if !ok {
 			return ""
 		}
@@ -86,12 +95,16 @@ func (m *Shell) landingRefusal(f domain.Feature) string {
 	case f.MayLand() == nil:
 		return ""
 	}
-	if r, ok := m.rowByID(f.ID); ok {
+	if ok {
 		if !r.F.VerifiedAt.IsZero() {
 			// the row read the stamp the copy passed in predates
 			return ""
 		}
-		if slices.ContainsFunc(stageActions(m.nextInputFor(r)), func(a nextAction) bool { return a.id == "advance" }) {
+		if in == nil {
+			built := m.nextInputFor(r)
+			in = &built
+		}
+		if slices.ContainsFunc(stageActions(*in), func(a nextAction) bool { return a.id == "advance" }) {
 			// the verify stop offers the landing: a pass the stamp has
 			// not reached yet, or a failure a person may overrule
 			return ""
