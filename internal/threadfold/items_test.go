@@ -361,3 +361,22 @@ func TestItemsReadTheStoresOwnLog(t *testing.T) {
 		t.Errorf("call = %+v, want Bash make test, failed in 950ms with its output", call)
 	}
 }
+
+// A line a named person typed is headed with their name, and the
+// terminal's own lines with none, so a shared board never shows one
+// person's words under another's name (or under the viewer's own).
+func TestAYouLineCarriesWhoTypedIt(t *testing.T) {
+	plan := domain.StagePlan
+	log := newLog().enter(plan, "architect", "stage").
+		add(plan, state.EventMessage, "", MessagePayload{Author: "user", Content: "cover the settings page", By: state.PersonActor("Ana")}, "").
+		say(plan, "user", "and the footer")
+	var got []string
+	for _, it := range Items(log.evs, Options{}) {
+		if it.T == ItemYou {
+			got = append(got, it.By+"|"+it.Text)
+		}
+	}
+	if want := []string{"Ana|cover the settings page", "|and the footer"}; strings.Join(got, ";") != strings.Join(want, ";") {
+		t.Errorf("you lines = %q, want %q", got, want)
+	}
+}

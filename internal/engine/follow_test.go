@@ -243,7 +243,7 @@ func TestFollowerFinalizesAcrossInterleavedActivity(t *testing.T) {
 	s.appendDelta("Baseline is clean. Two decisions remain. ")
 	s.appendDelta("First:")
 	s.appendToolCall("call-1", "gummi_ask_user", "tool", "")
-	s.appendUser("Presenter unit tests")
+	s.appendUser("Presenter unit tests", "")
 	s.finishAssistant("Baseline is clean. Two decisions remain. First:")
 	s.stop()
 

@@ -1582,6 +1582,9 @@ func (e *Engine) startToolEndpoint(ctx context.Context, id domain.FeatureID, lab
 		return "", nil, err
 	}
 	_ = os.Remove(path)
+	if err := sockPathErr(path); err != nil {
+		return "", nil, fmt.Errorf("%s mcp listen: %w", label, err)
+	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", path)
 	if err != nil {
 		return "", nil, fmt.Errorf("%s mcp listen %s: %w", label, path, err)

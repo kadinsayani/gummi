@@ -195,10 +195,8 @@ func (e *Engine) StackTick(ctx context.Context, id domain.StackID) (StackTickRes
 				res.Conflict = conflict
 				return res, nil
 			}
-			for _, m := range view.Snapshot.Members {
-				if m.ID == a.Card && m.Branch != "" {
-					res.Push = PushCommand(m.Branch)
-				}
+			if f, ok := view.Card(a.Card); ok {
+				res.Push = e.replayPushCommand(ctx, &f)
 			}
 			e.noteReplay(id, a.Card, res.Push)
 			// A replay rewrites what the cards above fork from, so their
@@ -275,6 +273,23 @@ func sessionHoldsTree(s *Session) bool {
 	return s.Live()
 }
 
+// freeformHoldsTree is sessionHoldsTree for a freeform card, whose
+// conversation lives in e.freeform rather than in the stage sessions'
+// map. The same rule applies to its current backend: a turn in flight,
+// or an agent still attached between turns, may write to the worktree,
+// and this process holding the card's lock for it is exactly why
+// stackRestackOne's own lock would not keep the replay out.
+func (e *Engine) freeformHoldsTree(id domain.FeatureID) bool {
+	ff := e.Freeform(id)
+	if ff == nil {
+		return false
+	}
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+	return sessionHoldsTree(sess) || (sess != nil && sess.Busy())
+}
+
 // StackSnapshot builds the policy's view of one stack: the members in
 // order, and for each the git facts the policy needs.
 func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackView, error) {
@@ -299,7 +314,7 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 			ID:      f.ID,
 			Pos:     f.StackPos,
 			Branch:  f.BranchName(),
-			Running: sessionHoldsTree(live[f.ID]) || e.oneShotBusy(f.ID),
+			Running: sessionHoldsTree(live[f.ID]) || e.freeformHoldsTree(f.ID) || e.oneShotBusy(f.ID),
 		}
 		mgr, merr := e.pool.ManagerFor(ctx, &f)
 		if merr == nil {

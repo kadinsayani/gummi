@@ -427,7 +427,7 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 	if a == nil {
 		return fmt.Errorf("%s's freeform session has no live agent", ff.id)
 	}
-	sess.appendUser(msg)
+	sess.appendUser(msg, actorOf(ctx))
 	ff.engine.persist(sess)
 	sess.setBusy(true)
 	ff.armIdleTimer()
@@ -503,6 +503,27 @@ func (e *Engine) InterruptFreeform(ctx context.Context, id domain.FeatureID) err
 	e.persist(sess)
 	e.send(Event{Feature: id, Stage: domain.StageOpen, Kind: EventUpdated})
 	return nil
+}
+
+// Busy reports whether the card's agent is mid-turn, without copying the
+// conversation the way Snapshot does.
+func (ff *FreeformSession) Busy() bool {
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+	return sess != nil && sess.Busy()
+}
+
+// CardSpent is the card's running spend as the session has booked it
+// (Session.CardSpent), or 0 with no backend up.
+func (ff *FreeformSession) CardSpent() float64 {
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+	if sess == nil {
+		return 0
+	}
+	return sess.CardSpent()
 }
 
 // Snapshot returns a render-safe copy of the session's current backend

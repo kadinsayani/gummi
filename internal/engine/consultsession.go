@@ -308,7 +308,7 @@ func (c *ConsultSession) Send(ctx context.Context, msg string) error {
 	if a == nil {
 		return errors.New("consult session has no live agent")
 	}
-	sess.appendUser(msg)
+	sess.appendUser(msg, actorOf(ctx))
 	sess.setBusy(true)
 	c.armIdleTimer()
 	c.engine.send(Event{Feature: c.id, Kind: EventUpdated})

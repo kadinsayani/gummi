@@ -312,7 +312,7 @@ func (b *BoardSession) Send(ctx context.Context, msg string) error {
 	if a == nil {
 		return errors.New("board session has no live agent")
 	}
-	b.sess.appendUser(msg)
+	b.sess.appendUser(msg, actorOf(ctx))
 	b.sess.setBusy(true)
 	b.engine.send(Event{Kind: EventBoard})
 	if err := a.Send(ctx, msg); err != nil {

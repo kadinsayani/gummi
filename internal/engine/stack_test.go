@@ -474,3 +474,57 @@ func TestAFinishedSessionDoesNotHoldAReplay(t *testing.T) {
 		t.Error("a running session no longer holds its card's replay")
 	}
 }
+
+// A freeform card's conversation lives in the engine's freeform map, not
+// among the stage sessions, and a turn in flight there writes to the
+// card's worktree like any stage does. It must hold the card's replay the
+// same way — and, like a stage session, stop holding it once no backend
+// is left to write.
+func TestALiveFreeformTurnHoldsAReplay(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+	aTree := filepath.Join(f.root, ".gummi", "worktrees", string(a.ID))
+	if werr := os.WriteFile(filepath.Join(aTree, "a.txt"), []byte("a fixed\n"), 0o600); werr != nil {
+		t.Fatal(werr)
+	}
+	f.gitIn(aTree, "commit", "-q", "-a", "--amend", "-m", "A: work, fixed")
+
+	sctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	sess := &Session{Feature: b, Role: "implementer", Interactive: true, state: StateInteractive, done: make(chan struct{}), ctx: sctx, cancel: cancel, busy: true}
+	f.eng.mu.Lock()
+	f.eng.freeform[b.ID] = &FreeformSession{engine: f.eng, id: b.ID, sess: sess}
+	f.eng.mu.Unlock()
+
+	view, err := f.eng.StackSnapshot(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !view.Snapshot.Members[1].Running {
+		t.Fatal("a freeform turn in flight does not hold its card's replay")
+	}
+	res, err := f.eng.Restack(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Replayed) != 0 {
+		t.Fatalf("restack replayed %v under a live freeform turn", res.Replayed)
+	}
+
+	// the turn ends and no agent is attached (idled out, or restored from
+	// a process that is gone): nothing is writing, so nothing holds it
+	sess.mu.Lock()
+	sess.busy = false
+	sess.mu.Unlock()
+	view, err = f.eng.StackSnapshot(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.Snapshot.Members[1].Running {
+		t.Error("a freeform conversation with no backend still holds its card's replay")
+	}
+}

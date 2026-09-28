@@ -151,9 +151,11 @@ func (e *Engine) mirrorEvents(s *Session, snap Snapshot) error {
 		if m.Author == AuthorUser && m.AnsweredBy == state.ActorAutopilot {
 			continue
 		}
-		payload, _ := json.Marshal(map[string]string{
-			"author": string(m.Author), "content": m.Content,
-		})
+		fields := map[string]string{"author": string(m.Author), "content": m.Content}
+		if m.By != "" {
+			fields["by"] = m.By
+		}
+		payload, _ := json.Marshal(fields)
 		evs = append(evs, state.CardEvent{
 			Feature: snap.Feature.ID, Stage: snap.Feature.Stage,
 			Kind: state.EventMessage, At: eventTime(m.At), Payload: string(payload),

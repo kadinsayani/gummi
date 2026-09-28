@@ -1903,3 +1903,15 @@ func migrateMergedStages(db *sql.DB) error {
 	}
 	return nil
 }
+
+// DataVersion is SQLite's data_version for the store's connection: it
+// moves when another connection — another gummi process, a headless verb
+// beside a board — commits to the database, and never for this
+// connection's own writes. A board polls it to learn that the store moved
+// under it (a card minted or driven from the CLI) without re-reading
+// everything on every tick.
+func (s *Store) DataVersion(ctx context.Context) (int64, error) {
+	var v int64
+	err := s.db.QueryRowContext(ctx, "PRAGMA data_version").Scan(&v)
+	return v, err
+}

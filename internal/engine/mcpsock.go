@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 
 	"github.com/morphis/gummi/internal/domain"
@@ -84,6 +85,9 @@ func (e *Engine) startMCPEndpoint(ctx context.Context, f domain.Feature, flavor 
 	// a stale socket from a crashed run would clash with net.Listen; drop
 	// it. The 0o600 chmod below restores owner-only access.
 	_ = os.Remove(path)
+	if err := sockPathErr(path); err != nil {
+		return "", nil, fmt.Errorf("mcp listen: %w", err)
+	}
 	ln, err := (&net.ListenConfig{}).Listen(ctx, "unix", path)
 	if err != nil {
 		return "", nil, fmt.Errorf("mcp listen %s: %w", path, err)
@@ -278,4 +282,23 @@ func (ep *mcpEndpoint) callTool(req *mcp.Request) (json.RawMessage, error) {
 		return nil, err
 	}
 	return json.Marshal(map[string]any{"result": result})
+}
+
+// maxSockPath is the longest path a unix socket can bind here: sun_path
+// is 108 bytes on Linux and 104 on the BSDs and macOS, NUL included.
+func maxSockPath() int {
+	if runtime.GOOS == "linux" {
+		return 107
+	}
+	return 103
+}
+
+// sockPathErr says why path cannot be a socket, before net.Listen gives
+// the bare "bind: invalid argument" a path too long produces — which names
+// neither the cause nor the fix.
+func sockPathErr(path string) error {
+	if limit := maxSockPath(); len(path) > limit {
+		return fmt.Errorf("socket path %s is %d bytes, longer than a unix socket allows (%d) — point TMPDIR at a shorter directory", path, len(path), limit)
+	}
+	return nil
 }

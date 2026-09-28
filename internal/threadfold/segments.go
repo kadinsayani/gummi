@@ -47,6 +47,9 @@ type (
 	MessagePayload struct {
 		Author  string `json:"author"`
 		Content string `json:"content"`
+		// By is who typed a user line (state.PersonActor), when a
+		// person's name came with it.
+		By string `json:"by,omitempty"`
 	}
 )
 

@@ -86,6 +86,9 @@ type Item struct {
 	Author string `json:"author,omitempty"`
 	Text   string `json:"text,omitempty"`
 	Via    string `json:"via,omitempty"`
+	// By names the person who typed an ItemYou, when the line carried a
+	// name (a web viewer); empty for the terminal's own "you".
+	By string `json:"by,omitempty"`
 
 	Tools    []ToolCall   `json:"tools,omitempty"`
 	Receipt  *Receipt     `json:"receipt,omitempty"`
@@ -271,7 +274,7 @@ func Items(events []state.CardEvent, opt Options) []Item {
 			it := Item{Seq: ev.Seq, Key: "ev:" + seqKey(ev.Seq), At: ev.At, Stage: ev.Stage,
 				Author: AuthorLabel(p.Author, seg.Role), Text: Sanitize(p.Content)}
 			if p.Author == string(engine.AuthorUser) {
-				it.T, it.Via = ItemYou, ViaSteered
+				it.T, it.Via, it.By = ItemYou, ViaSteered, state.PersonName(p.By)
 				if echoes[k][p.Content] {
 					it.Via = ViaAnswer
 				}

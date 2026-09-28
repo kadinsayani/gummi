@@ -2044,7 +2044,7 @@ func (e *Engine) Send(ctx context.Context, id domain.FeatureID, msg string) erro
 	if nudge != "" {
 		msg = nudge + "\n\n" + msg
 	}
-	s.appendUser(msg)
+	s.appendUser(msg, actorOf(ctx))
 	s.setBusy(true)
 	e.persist(s)
 	e.send(Event{Feature: id, Stage: s.Feature.Stage, Kind: EventUpdated})

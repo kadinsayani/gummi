@@ -32,7 +32,7 @@ func TestReattachCarriesTheBackendConversationID(t *testing.T) {
 	}
 	// the shape a restored session has: a transcript from the process that
 	// is gone, the backend conversation id it ran under, and no agent.
-	s.appendUser("how should this be configured?")
+	s.appendUser("how should this be configured?", "")
 	s.setAgentSessionID("conv-42")
 	s.agent().Close()
 	s.clearAgent()
@@ -76,7 +76,7 @@ func TestReattachDoesNotResumeAnotherRolesConversation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.appendUser("a question")
+	s.appendUser("a question", "")
 	s.setAgentSessionID("critique-conv")
 	// the row the critique pass left behind: same card, same stage, a
 	// different role doing a different job

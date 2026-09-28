@@ -79,7 +79,34 @@ func (e *Engine) Restack(ctx context.Context, id domain.StackID) (RestackResult,
 }
 
 // PushCommand is the command a person runs to publish a branch gummi
-// rewrote. gummi never pushes; it says what to push.
+// rewrote, when nothing says where the branch lives: origin, under its own
+// name. gummi never pushes; it says what to push.
 func PushCommand(branch string) string {
-	return "git push --force-with-lease origin " + branch
+	return PushCommandTo("origin", branch, branch)
+}
+
+// PushCommandTo is PushCommand for a branch whose remote is known — the
+// one git's own branch config says it tracks, and the name it has there.
+func PushCommandTo(remote, branch, remoteBranch string) string {
+	if remoteBranch == "" || remoteBranch == branch {
+		return "git push --force-with-lease " + remote + " " + branch
+	}
+	return "git push --force-with-lease " + remote + " " + branch + ":" + remoteBranch
+}
+
+// replayPushCommand is the push a replayed card's branch needs: to the
+// remote and branch it tracks when it tracks one (someone pushed it with
+// -u, or gummi adopted it from a PR), so the line is right to copy for a
+// fork or a second remote; to origin under its own name otherwise.
+func (e *Engine) replayPushCommand(ctx context.Context, f *domain.Feature) string {
+	branch := f.BranchName()
+	if branch == "" {
+		return ""
+	}
+	if mgr, err := e.pool.ManagerFor(ctx, f); err == nil {
+		if remote, rb, ok := mgr.Upstream(ctx, f); ok {
+			return PushCommandTo(remote, branch, rb)
+		}
+	}
+	return PushCommand(branch)
 }

@@ -246,3 +246,17 @@ func GoalSentence(p state.GoalPayload) string {
 	}
 	return Sanitize(line)
 }
+
+// ActorWord is how any recorded actor is named to a reader: a person by
+// their name, the terminal's bare "user" as "you", and a loop ("goal",
+// "autopilot", "lead") by its own word — the rule GateCrosser applies,
+// for records that are not a crossing (a goal's log). No actor is no word.
+func ActorWord(actor string) string {
+	if name := state.PersonName(actor); name != "" {
+		return name
+	}
+	if actor == state.ActorUser {
+		return "you"
+	}
+	return actor
+}

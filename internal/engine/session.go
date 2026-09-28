@@ -122,7 +122,11 @@ const (
 
 // Message is one transcript turn.
 type Message struct {
-	Author    Author
+	Author Author
+	// By is who typed an AuthorUser line, as the store records a person
+	// (state.PersonActor): set when the line came with an actor on its
+	// context (WithActor), empty for the terminal's own.
+	By        string
 	Content   string
 	Streaming bool // true while assistant text is still arriving
 
@@ -607,10 +611,10 @@ func (s *Session) releaseSlot() (held bool, pool lanePool) {
 	return held, s.pool
 }
 
-func (s *Session) appendUser(text string) {
+func (s *Session) appendUser(text, by string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, At: time.Now()})
+	s.transcript = append(s.transcript, Message{Author: AuthorUser, Content: text, By: by, At: time.Now()})
 	s.err = nil
 	s.live.Emit(livelog.Record{Kind: livelog.KindUser, Text: text})
 }

@@ -133,3 +133,37 @@ func TestARestackAnswersForTheWalkTheBoardBegan(t *testing.T) {
 		t.Fatalf("restack = replayed %v push %v, want B then C with both pushes", res.Replayed, res.Push)
 	}
 }
+
+// A branch that tracks a remote — pushed with -u to a fork, or adopted
+// from a PR — is pushed back there, under the name it has there. Only a
+// branch that tracks nothing falls back to origin under its own name.
+func TestAReplayPushNamesTheBranchsOwnRemote(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	c := f.card(3, "cli", "chain", 2)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+	f.cut(c, "c.txt", "c\n")
+	f.git("config", "branch."+b.BranchName()+".remote", "fork")
+	f.git("config", "branch."+b.BranchName()+".merge", "refs/heads/eval-upstream")
+
+	aTree := filepath.Join(f.root, ".gummi", "worktrees", string(a.ID))
+	if err := os.WriteFile(filepath.Join(aTree, "a.txt"), []byte("a fixed\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f.gitIn(aTree, "commit", "-q", "-a", "--amend", "-m", "A: work, fixed")
+
+	res, err := f.eng.Restack(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"git push --force-with-lease fork " + b.BranchName() + ":eval-upstream",
+		"git push --force-with-lease origin " + c.BranchName(),
+	}
+	if len(res.Push) != 2 || res.Push[0] != want[0] || res.Push[1] != want[1] {
+		t.Fatalf("push = %v, want %v", res.Push, want)
+	}
+}

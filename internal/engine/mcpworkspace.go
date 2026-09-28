@@ -125,6 +125,9 @@ func (e *Engine) StartWorkspaceMCPEndpoint() (string, func(), error) {
 	// unique among live processes, so removing a stale file here only
 	// ever clears this same pid's own leftover from a past crash.
 	_ = os.Remove(path)
+	if err := sockPathErr(path); err != nil {
+		return "", nil, fmt.Errorf("workspace mcp listen: %w", err)
+	}
 	ln, err := (&net.ListenConfig{}).Listen(context.Background(), "unix", path)
 	if err != nil {
 		return "", nil, fmt.Errorf("workspace mcp listen %s: %w", path, err)
