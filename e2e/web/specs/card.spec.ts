@@ -87,7 +87,7 @@ test('the decision points only at what the card has', async ({ pairedPage: page 
   await page.reload();
   if (info.project.name === 'phone') await page.getByTestId('mnav-thread').click();
   await expect(page.getByTestId('decision-jump')).toHaveText('read the document');
-  await page.unrouteAll({ behavior: 'wait' });
+  await page.unrouteAll({ behavior: 'ignoreErrors' });
 
   // comments on a diff go with an answer only when one carries them
   const { options } = decision;

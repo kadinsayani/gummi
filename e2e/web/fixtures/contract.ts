@@ -105,11 +105,26 @@ export const stats = {
 
 export async function mockCard(page: Page, id: string, opts: { kind?: string; decision?: any } = {}): Promise<MockHandle> {
   const m: MockHandle = { answers: [], annotations: [{ id: 1, file: 'wave.go', idx: 8, excerpt: 'func Wave', comment: 'Name it WaveAt?', by: 'Yuki', source: 'gummi', resolved: false }], nextAnswer: null, diffRev: 'a41c9e2' };
-  const json = (route: Route, body: any, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+  // A request the page gave up on (a reload, or a card change the board
+  // pushed while the card's own fetch was in flight) is already settled by
+  // the time its handler answers; answering it again is not the test's
+  // failure, so a settled route is let go.
+  const json = async (route: Route, body: any, status = 200) => {
+    try {
+      await route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+    } catch (err) {
+      if (!/already handled|Target .*closed|has been closed/.test(String(err))) throw err;
+    }
+  };
   const base = `**/api/cards/${id}`;
   await page.route(base, async (route) => {
-    const res = await route.fetch();
-    const card = await res.json();
+    let card: any;
+    try {
+      card = await (await route.fetch()).json();
+    } catch (err) {
+      if (/already handled|Target .*closed|has been closed|Request context disposed/.test(String(err))) return;
+      throw err;
+    }
     card.stage = 'verify';
     if (opts.kind) card.kind = opts.kind;
     card.decision = opts.decision ?? decision;
