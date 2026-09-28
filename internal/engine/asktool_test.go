@@ -1322,6 +1322,10 @@ func TestDispatchClientToolContextCancel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// the kickoff turn ends first: an ask raised while it is still running
+	// would be one its idle leaves open, and the outlived path releases
+	// the dispatch with a reply instead of letting the cancel reach it
+	waitFor(t, e, EventIdle)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
