@@ -1344,6 +1344,9 @@ have.
 - Not a second driver — a hosted agent acts on the running board through
   the board-level tool contract (§16); it never reaches gummi by invoking
   another `gummi` process.
+- Not a second board — the web face (§20) is another view of the one
+  process driving the cards, never a process of its own beside it, and
+  a board has one interactive host at a time.
 
 ## 8. Prior art & differentiation
 
@@ -1727,6 +1730,18 @@ Decided in the design interview (2026-07-03):
       card changes anything, which for an adopted card is precisely the
       state it inherited — so verify holds it to what the rework broke
       and no more, and the hand-off says plainly what was red on arrival.
+
+23. **The board has a second face, and neither face owns logic**, decided
+    2026-09-27. `gummi web` draws the board as HTML for a browser rather
+    than streaming the TUI through a pty (§20). What made the earlier
+    refusal right — two implementations drifting apart — is answered by
+    running the TUI's own conductor headless in the web host, so there is
+    one implementation of what happens to a card; by moving the read side
+    into packages both faces call; by one answer path; and by a golden
+    test that fails when the two faces offer different answers to the
+    same decision. One board has one interactive host at a time, held by the
+    instance lock the TUI already takes; the headless verbs are not hosts
+    and do not take it.
 
 Still open:
 
@@ -3576,3 +3591,131 @@ checks" is a number on a screen rather than a feeling; and a
 **since-I-last-looked** toggle in the diff tab, since a freeform card
 checkpoint-commits every turn and by the fourth cycle most of the diff
 against base is already read.
+
+## 20. The web face — the board in a browser
+
+`gummi web` serves the board to a browser as a page of its own: cards on
+the left, the open card's conversation in the middle, and its spec, diff,
+pull request and stats on the right. It exists for two situations the
+terminal serves badly. The board runs on a machine you are not sitting
+at, all day, and a card wants a gate crossed from a phone. And a person
+answering a gate wants to read the thing the gate is about *while*
+answering it, which a terminal that mounts the spec or the diff over the
+thread (§6, `cardtabs.go`) cannot offer.
+
+### 20.1 A second face, not a second model
+
+An earlier attempt hosted the TUI in a pty and streamed it to xterm.js,
+on the argument that an HTML board would be "a second implementation of
+the card page, permanently one release behind the TUI". The risk is real
+and the pty paid for avoiding it: one screen shared by every viewer and
+sized to the smallest, nothing linkable or selectable, no reading beside
+answering, and no alt chords on a phone keyboard. The web face takes the
+other side of that trade and contains the risk with four rules instead.
+
+- **It renders projections and derives nothing.** Every route marshals a
+  value the TUI also renders: the board rows, the folded thread, the
+  open decisions and their answers, the spec with its checks, the diff
+  with its annotations, the card's run (`cardrun`) and the fleet's
+  (`fleetrun`). When the page needs a value the TUI does not compute,
+  the value moves into the shared read model first.
+- **It runs the board's own conductor.** What happens after a stage
+  ends — the critique and verify loops, autopilot crossing gates, the
+  goal and stack ticks, landing, the needs-you queue, which answers a
+  decision offers — lives in the TUI's model, not in the engine. The web
+  host does not reimplement it: it runs that same model without a
+  screen, and the page acts on it through the same messages a keypress
+  sends. Read-side pieces the page needs in structured form (the thread
+  fold, the board rows, a decision's answers) move into UI-free packages
+  as the page needs them; the conductor itself moves out when there is a
+  reason beyond the web face, and not before.
+- **There is one answer path.** A decision is answered with a decision
+  id, an option id and optional words, and the server runs the function
+  the TUI's `enter` runs. Options are regenerated on every read and never
+  stored (decision 18). A composer line is classified and routed on the
+  server, so a line typed in a browser is a steer, a consult or a command
+  exactly when the same line typed in the terminal would be.
+- **An answer names what it was given against.** Every open decision
+  carries the revision it was raised on — the spec commit for a design
+  gate, the verify run and branch head for a failure — and the page shows
+  it under the question. An answer sends it back and is refused with
+  `409` if the card has moved, or if another viewer answered first. A
+  running card's diff announces a new commit rather than replacing what
+  the reader is looking at.
+- **Drift fails a test.** The read models are golden-tested from the
+  same fixtures as the TUI's goldens, and a test asserts that the answers
+  served for each fixture's open decision are the answers the TUI draws.
+
+### 20.2 One process hosts the board, and one board has one host
+
+Live sessions, open asks and per-card locks belong to the process that
+drives the cards, so the web server cannot be a separate process reading
+the store beside a TUI: it would see no live stream and could answer no
+live ask. `gummi web` is therefore a **board host without a terminal**: it
+builds the board exactly as the TUI builds it — store, engine, worktree
+pool, card locks, hooks — runs the TUI's model with no renderer attached,
+and serves the page from that process. The TUI does not
+serve the page. This keeps the web face off §16's list of second drivers:
+it acts on the running board the way the TUI's own keys do.
+
+The TUI and the web face are both first-class, and **one board has one
+interactive host at a time**. Both take the lock the TUI has always
+taken, `.gummi/state/instance.lock`, and the holder now writes who it is
+beside it (TUI or web, pid, host, URL, start time), so the second to start
+exits naming the holder and how to reach it instead of a bare lock error. The headless verbs do not take the board lock. `run`, `resume`,
+`status` and the rest keep working card by card as they do beside a TUI
+today, and a card the host is driving stays protected by its card lock
+(decision 11).
+
+### 20.3 Who is at the board
+
+The web face is for one person on several devices, or two or three
+people who trust each other. A device is paired with a six-digit code
+printed in the terminal running the server and redeemed once for a
+long-lived device token (an `HttpOnly; SameSite=Strict` cookie, stored by
+gummi only as a hash). Pairing asks for a **name**, and devices paired
+under one name are one person. Every paired person may do everything a
+person at the TUI may do: answer, cross gates, land, raise envelopes.
+Receipts, comments and spec notes carry the name, and the page shows who
+else is viewing. There are no accounts; a board that needs roles has
+outgrown what a local tool should decide.
+
+Every write route checks the request's `Origin` against the host on top
+of the cookie, since a JSON API has many doors where the pty face had one
+websocket upgrade. Landing and gate-crossing are available on the web
+because a person is answering: §16 withholds them from *agents*, and
+the web face is a human at the board.
+
+### 20.4 Running unattended
+
+An always-on host is the expected deployment. Autopilot keeps moving
+cards while nobody is watching and stops only where it always stops: a
+gate, a question, an exhausted envelope. There is no board-wide daily
+ceiling; each card's envelope is the brake, and today's spend stays
+visible in the header. When a card stops for a person, every paired
+device that allowed it gets a **Web Push** notification, sent by the host
+itself with its own VAPID key — no third-party relay. Tapping it opens
+that card with the decision pinned and the tab it is about already
+showing. Answers are never given from a notification: an answer should
+be read before it is given.
+
+Web Push and the installed page need a secure origin. The host serves
+HTTPS when given a certificate (`--tls-cert`, `--tls-key`) and plain HTTP
+on loopback otherwise; on a tailnet, `tailscale serve` in front of it
+provides the certificate.
+
+### 20.5 Scope guards
+
+The web face is bound by §7 rather than excused from it. It is not a
+cloud service: one binary, your machine, state in your repo, listening on
+loopback unless told otherwise. It never writes to GitHub: the PR tab
+reads, and shows the push command for a person to run. It never runs a
+workflow the TUI would not run, and it has no surface an agent can reach
+that the board-level tools (§16) withhold.
+
+### 20.6 Deferred
+
+An embedded tailnet node (`tsnet`) in place of `tailscale serve`. A
+daily ceiling for the whole board, if unattended nights prove expensive.
+Holding a line typed mid-turn until the turn ends (open question 3): the
+web face does whatever the TUI does, and will change when it does.
