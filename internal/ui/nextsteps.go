@@ -491,7 +491,12 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 		snap := sess.Snapshot()
 		in.busy = snap.Busy
 		in.hasAsk = snap.PendingAsk != nil
-		if in.sess == engine.StateDone {
+		// A session paused after its run ended (stop here at the gate, a
+		// park, a restart that restored it paused) still holds the run's
+		// conclusion: the pause took the done state, not the verdict, and
+		// a passed verify parked by hand was headed "verify failed". One
+		// paused mid-turn has no verdict line yet and reads as unclear.
+		if in.sess == engine.StateDone || (in.sess == engine.StatePaused && !snap.Busy) {
 			in.verdict = sessionVerdict(snap)
 		}
 		in.verdictFloorReason = snap.VerdictFloorReason

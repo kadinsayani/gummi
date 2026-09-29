@@ -439,3 +439,62 @@ func TestANoticeFromADetachedFlowIsToasted(t *testing.T) {
 		time.Sleep(20 * time.Millisecond)
 	}
 }
+
+// A passed verify the person stops at ("stop here", a park) is still a
+// passed verify: the pause took the session's done state, which the
+// verdict was read from, and the page headed the card "verify failed"
+// over "land on main" while `gummi status` said verified.
+func TestAPassedVerifyStoppedByHandStillReadsPassed(t *testing.T) {
+	ag := verdictAgent(func(opts agent.SessionOpts) string {
+		if isVerify(opts) {
+			return "All checks green.\nVERDICT: pass"
+		}
+		return "done"
+	})
+	b, _, _, f, _ := headlessBoardFor(t, ag, domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageVerify})
+	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
+	withWorktree(t, b, f)
+	ctx := context.Background()
+	if err := b.Do(ctx, func(m *Shell) tea.Cmd { return m.runStage(f) }); err != nil {
+		t.Fatal(err)
+	}
+	c := waitCard(t, b, "FD-001", "verify passed", func(c webapi.Card) bool {
+		return c.Decision != nil && c.Decision.Word == "verify passed"
+	})
+	// the gate settles a beat after it is raised (the stamp, the diff):
+	// an answer against a token that moved is read again and resent
+	for try := 0; ; try++ {
+		_, err := b.Answer(ctx, "FD-001", webapi.AnswerRequest{Ref: c.Decision.Ref, Option: "pause", Against: c.Decision.Against.Token}, "Simon")
+		if err == nil {
+			break
+		}
+		if try == 50 || !strings.Contains(err.Error(), "moved") {
+			t.Fatal(err)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if c, err = b.Card(ctx, "FD-001"); err != nil || c.Decision == nil {
+			t.Fatalf("re-reading the gate: %v", err)
+		}
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for paused := false; !paused; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the stop never paused the session")
+		}
+		_ = b.Do(ctx, func(m *Shell) tea.Cmd {
+			s := m.sessionFor(f.ID)
+			paused = s != nil && s.State() == engine.StatePaused
+			return nil
+		})
+	}
+	c, err := b.Card(ctx, "FD-001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Decision == nil || c.Decision.Word != "verify passed" || c.Decision.Tone != "ok" {
+		t.Fatalf("a passed verify stopped by hand reads %+v; want \"verify passed\"", c.Decision)
+	}
+	if !strings.HasPrefix(c.Decision.Question, "verification passed") {
+		t.Errorf("its question reads %q", c.Decision.Question)
+	}
+}
