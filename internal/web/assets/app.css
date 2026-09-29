@@ -278,7 +278,13 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .checks .d{font-family:var(--mono);font-size:11px;color:var(--fg3)}
 .checks pre{grid-column:1/-1;margin:2px 0 0;padding:8px 10px;background:var(--sunk);border-radius:6px;font:12px/1.45 var(--mono);color:var(--err);overflow-x:auto;white-space:pre}
 .okc{color:var(--ok)} .badc{color:var(--err)} .nonec{color:var(--fg3)}
-.live{display:flex;align-items:center;gap:10px;font-size:13px;padding:4px 0}
+/* the live turn is spaced as the settled items above it are, and its
+   status line stands in the message grid: the spinner centred in the
+   avatar column and on the first line, the words in the text column */
+#thread-live{display:flex;flex-direction:column;gap:14px}
+#thread-live:empty{display:none}
+.live{display:flex;align-items:flex-start;gap:10px;font-size:13px;line-height:20px;padding:4px 0}
+.live > .spinner{margin:3px 7px 0}
 .live .spent{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--fg3)}
 .live-msg .body{color:var(--fg2)}
 .shimmer{background:linear-gradient(90deg,var(--fg3) 0%,var(--s-plan) 30%,var(--accent) 50%,var(--s-verify) 70%,var(--fg3) 100%);background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sh 2.4s linear infinite;font-weight:500}
