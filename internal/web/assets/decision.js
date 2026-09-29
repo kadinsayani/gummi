@@ -38,6 +38,9 @@ let answering = false
 // or words typed for it are read, and answer at once.
 const SETTLE_MS = 800
 let shownAt = 0
+// held: the decision changed under words typed for the one before it.
+// The next enter only says so; the one after sends them to the new one.
+let held = false
 
 export function initDecision (c) {
   ctx = c
@@ -56,14 +59,25 @@ export function initDecision (c) {
     if (r !== ref) {
       // a decision that changed under an answer the person had chosen is
       // said, not silently swapped: what they chose was for the old one
-      const chose = state.hiUser && ref !== null && refCard === state.sel && !answering
+      const sameCard = refCard === state.sel
+      const same = ref !== null && sameCard && !answering
+      const chose = same && state.hiUser
+      // words typed for the old decision are aimed at whichever answer
+      // takes words in the new one: a reply to a question someone else
+      // answered would go as a rework of the plan, say, unannounced
+      const wrote = same && !chose && !!state.draft.trim()
       ref = r
       refCard = state.sel
       shownAt = Date.now()
       set({ picked: [], decConfirm: null, hi: 0, hiUser: false })
       if (chose) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
+      else if (wrote) note(`${state.sel} moved while you were writing — read it again; your words are still here.`, { tone: 'warn', testid: 'decision-moved' })
+      // kept across the card's next moves (it may run a while before its
+      // next decision), dropped with the card
+      held = wrote || (held && sameCard)
     }
   })
+  on(['draft'], () => { if (!state.draft.trim()) held = false })
   window.addEventListener('resize', renderMdec)
 }
 
@@ -339,6 +353,12 @@ export async function answer ({ picked = false } = {}) {
   const d = openDecision()
   if (!d || answering) return
   if (state.conn !== 'live') { toast('Answers wait until the board reconnects'); return }
+  if (held && !picked && state.draft.trim()) {
+    held = false
+    note(`${state.sel} moved while you were writing — enter again sends your words as “${enterSays(d)}”.`, { tone: 'warn', testid: 'decision-moved' })
+    return
+  }
+  held = false
   if (!picked && !state.hiUser && !state.draft.trim() && Date.now() - shownAt < SETTLE_MS) {
     note(`${state.sel} has a new decision — read it, then press enter again.`, { tone: 'warn', testid: 'decision-fresh' })
     return

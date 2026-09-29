@@ -279,6 +279,31 @@ test.describe('an agent’s question', () => {
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
   });
 
+  // A reply being written to the question while another device answers
+  // it: the words stay, the page says the card moved, and the first enter
+  // does not send them on to whatever the next decision's words go to (a
+  // rework of the plan) without saying so.
+  test('words typed for a question someone else answered are not re-aimed unannounced', async ({ pairedPage: page, server, api }, info) => {
+    test.skip(isPhone(info), 'enter answers from the composer on a keyboard');
+    const id = await ask(api);
+    await open(page, server, id);
+    await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask');
+    await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
+    await expect(page.getByTestId('composer-says')).toHaveText('Chat about this');
+    // the other device picks an option
+    const d = (await api('GET', `/api/cards/${id}`)).json.decision;
+    await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: '0', against: d.against.token });
+    await expect(page.getByTestId('decision')).not.toHaveAttribute('data-kind', 'ask', { timeout: 30_000 });
+    await expect(page.getByTestId('decision-moved')).toContainText('while you were writing');
+    await expect(page.getByTestId('composer-input')).toHaveValue('Put it beside Greet, in greet.go');
+    const before = (await api('GET', `/api/cards/${id}`)).json.decision?.ref;
+    await page.getByTestId('composer-input').press('Enter');
+    await expect(page.getByTestId('decision-moved')).toContainText('enter again sends your words');
+    await page.waitForTimeout(300);
+    expect((await api('GET', `/api/cards/${id}`)).json.decision?.ref).toBe(before);
+    await expect(page.getByTestId('composer-input')).toHaveValue('Put it beside Greet, in greet.go');
+  });
+
   // Enter pressed twice on "start the architect" meets the question the
   // architect asks within a moment of the first: the second press must not
   // give that question its first answer before anyone has read it.
