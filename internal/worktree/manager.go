@@ -1054,18 +1054,77 @@ func (m *Manager) squashLanded(ctx context.Context, f *domain.Feature) (bool, er
 	return gitOK(ctx, m.repo, "merge-base", "--is-ancestor", sha, m.baseRev(ctx, f))
 }
 
-// RebaseConflictError reports that a rebase stopped on conflicts and was
-// aborted (the worktree is left clean, on its original tip). Files lists
-// the paths that conflicted, so the UI can tell the user what to resolve.
+// RebaseConflictError reports that a rebase stopped short of finishing and
+// was undone (the worktree is left as it was, on its original tip). Files
+// lists the paths that conflicted, so the UI can tell the user what to
+// resolve.
+//
+// A conflict is the usual stop and not the only one. git also stops on
+// an untracked file the rebase would overwrite — work an agent left
+// uncommitted, which a drifted card could not checkpoint, now arriving
+// from the rewritten base as well — and then nothing is unmerged. That
+// stop used to read "hit conflicts" with no file named, and the one
+// before the rebase started was not typed at all, so neither was offered
+// to the agent that can sort it out. Reason carries git's own words for
+// any stop, and Files the paths it named.
 type RebaseConflictError struct {
 	Files []string
+	// Reason is git's account of the stop when it was not a plain
+	// conflict (Files then names the paths in the way); empty for one.
+	Reason string
 }
 
 func (e *RebaseConflictError) Error() string {
+	if e.Reason != "" {
+		return "rebase stopped: " + e.Reason + " — undone, worktree as it was"
+	}
 	if len(e.Files) == 0 {
 		return "rebase hit conflicts and was aborted (worktree clean)"
 	}
 	return "rebase conflicts in " + strings.Join(e.Files, ", ") + " — aborted, worktree clean"
+}
+
+// rebaseStop reads why git stopped a rebase out of its error: the
+// "error:"/"fatal:" lines, and the tab-indented paths git lists under
+// them. Empty when err says nothing of the kind.
+func rebaseStop(err error) (reason string, files []string) {
+	var ge *gitError
+	if !errors.As(err, &ge) {
+		return "", nil
+	}
+	var said []string
+	for _, line := range strings.Split(ge.stderr, "\n") {
+		// progress ("Rebasing (1/2)") shares its line with what follows,
+		// separated by a carriage return
+		if i := strings.LastIndex(line, "\r"); i >= 0 {
+			line = line[i+1:]
+		}
+		switch {
+		case strings.HasPrefix(line, "\t"):
+			if f := strings.TrimSpace(line); f != "" {
+				files = append(files, f)
+			}
+		case strings.HasPrefix(line, "error: "), strings.HasPrefix(line, "fatal: "):
+			msg := strings.TrimSpace(line[strings.Index(line, ":")+1:])
+			// git's own bookkeeping lines say nothing a reader can use
+			if strings.HasPrefix(msg, "could not detach HEAD") || strings.HasPrefix(msg, "could not apply") {
+				continue
+			}
+			said = append(said, msg)
+		}
+	}
+	reason = strings.Join(said, "; ")
+	if len(files) > 0 {
+		reason = strings.TrimSuffix(reason, ":") + ": " + strings.Join(files, ", ")
+	}
+	return reason, files
+}
+
+// blockedByUntracked reports whether a rebase that never started was
+// stopped by untracked files it would have overwritten — a stop an agent
+// can sort out, unlike a missing worktree or a dirty tree refused.
+func blockedByUntracked(reason string) bool {
+	return strings.Contains(reason, "untracked working tree files would be overwritten")
 }
 
 // RebaseOnMain rebases the feature branch onto the main checkout's
@@ -1107,14 +1166,25 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 	args = append(args, target.args()...)
 	if _, err := runGit(ctx, p, args...); err != nil {
 		if !m.rebaseInProgress(ctx, p) {
+			if reason, files := rebaseStop(err); blockedByUntracked(reason) {
+				return &RebaseConflictError{Files: files, Reason: reason}
+			}
 			return fmt.Errorf("rebase of %s did not start: %w", f.ID, err)
 		}
 		// capture what conflicted before we abort and lose the state
 		conflicts := m.conflictedFiles(ctx, p)
+		stop := &RebaseConflictError{Files: conflicts}
+		if len(conflicts) == 0 {
+			// stopped with nothing unmerged: say what git said instead
+			stop.Reason, stop.Files = rebaseStop(err)
+			if stop.Reason == "" {
+				stop.Reason = "git stopped the rebase with nothing unmerged"
+			}
+		}
 		if _, abortErr := runGit(ctx, p, "rebase", "--abort"); abortErr != nil {
 			return fmt.Errorf("rebase failed AND abort failed, worktree %s needs manual attention: %w (abort: %v)", p, err, abortErr)
 		}
-		return &RebaseConflictError{Files: conflicts}
+		return stop
 	}
 	return nil
 }
@@ -1364,6 +1434,16 @@ func (m *Manager) RebasedOnBase(ctx context.Context, f *domain.Feature) (bool, e
 		return false, err
 	}
 	return gitOK(ctx, p, "merge-base", "--is-ancestor", mainHead, "HEAD")
+}
+
+// Unmerged lists the unmerged paths in f's worktree — what a finished
+// rebase must not leave behind, dirty or not.
+func (m *Manager) Unmerged(ctx context.Context, f *domain.Feature) ([]string, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return nil, err
+	}
+	return m.conflictedFiles(ctx, p), nil
 }
 
 // conflictedFiles lists the unmerged paths in wt (empty on any error, so

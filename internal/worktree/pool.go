@@ -529,6 +529,15 @@ func (p *Pool) AssertNoForkDrift(ctx context.Context, f *domain.Feature) error {
 	return wt.AssertNoForkDrift(ctx, f)
 }
 
+// Unmerged mirrors Manager.Unmerged, resolving f's repository manager first.
+func (p *Pool) Unmerged(ctx context.Context, f *domain.Feature) ([]string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return wt.Unmerged(ctx, f)
+}
+
 // Drift mirrors Manager.Drift, resolving f's repository manager first.
 func (p *Pool) Drift(ctx context.Context, f *domain.Feature) (*ForkDriftError, error) {
 	wt, err := p.ManagerFor(ctx, f)

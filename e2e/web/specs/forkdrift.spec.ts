@@ -91,3 +91,62 @@ test.describe('a card whose base was rewritten under it', () => {
     expect(after.decision.question).not.toContain('fork drift');
   });
 });
+
+// The same card, but its own work really conflicts with the rewritten base,
+// and it carries uncommitted work the drift kept it from checkpointing: the
+// board's rebase stops, and the page offers the agent — which replays the
+// card's commits, sorts the conflict, and hands the uncommitted work back.
+test.describe('a rewritten base the card really conflicts with', () => {
+  let id: string;
+  let tree: string;
+  test.use({
+    seed: {
+      run: async (ws) => {
+        id = await ws.seedVerifyFailed('Add a shout helper');
+        const file = `${id.toLowerCase().replace('-', '')}.go`;
+        tree = path.join(ws.repo, '.gummi', 'worktrees', id);
+        // what the drift kept from being checkpointed
+        fs.writeFileSync(path.join(tree, 'NOTES.md'), 'unfinished\n');
+        fs.appendFileSync(path.join(tree, 'README.md'), '\nuncommitted line\n');
+        // the base rewritten under the card, adding the card's own file
+        fs.writeFileSync(path.join(ws.repo, file), 'package tiny\n\n// from the rewritten base\n');
+        await ws.git('add', file);
+        await ws.git('commit', '-q', '--amend', '--no-edit');
+      },
+    },
+  });
+
+  test('is handed to the agent from the page', async ({ pairedPage: page, server, api, workspace }, info) => {
+    const phone = isPhone(info);
+    await open(page, server, id);
+    const opts = async () => (await api('GET', `/api/cards/${id}`)).json.decision?.options?.map((o: any) => o.id).join(',');
+    await expect.poll(opts).toMatch(/^rebase,/);
+    await page.waitForTimeout(1000);
+    await (await option(page, phone, 'rebase')).click();
+
+    const confirm = page.getByTestId(phone ? 'mdec-confirm' : 'decision-confirm');
+    await expect(confirm).toBeVisible();
+    await expect(confirm).toContainText('let the agent resolve them');
+    await expect(confirm).toContainText('carrying the uncommitted work across');
+    await shot(page, info, 'drift-agent-offer');
+    await page.getByTestId(phone ? 'mdec-confirm-yes' : 'decision-confirm-yes').click();
+
+    // the agent's rebase settles onto main's new tip; at verify the
+    // resolution is unreviewed agent work, so verify runs again (and this
+    // seed's check fails again — the scripted card's, not the drift's)
+    const branch = (await api('GET', `/api/cards/${id}`)).json.branch;
+    await expect.poll(async () => {
+      try { await workspace.git('merge-base', '--is-ancestor', 'main', branch); return true; } catch { return false; }
+    }, { timeout: 30_000 }).toBe(true);
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.question ?? '', { timeout: 30_000 })
+      .toContain('verification stopped here');
+    const after = (await api('GET', `/api/cards/${id}`)).json;
+    expect(after.decision.options[0].id).not.toBe('rebase');
+    // the card's own file on top of the base's, the conflict taking the card's side
+    const file = `${id.toLowerCase().replace('-', '')}.go`;
+    expect(await workspace.git('show', `${branch}:${file}`)).not.toContain('from the rewritten base');
+    expect(fs.readFileSync(path.join(tree, 'NOTES.md'), 'utf8')).toBe('unfinished\n');
+    expect(fs.readFileSync(path.join(tree, 'README.md'), 'utf8')).toContain('uncommitted line');
+    await shot(page, info, 'drift-agent-done');
+  });
+});

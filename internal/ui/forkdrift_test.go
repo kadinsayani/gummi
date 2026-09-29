@@ -3,10 +3,15 @@ package ui
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/morphis/gummi/internal/agent"
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/worktree"
@@ -181,5 +186,101 @@ func TestOnlyAStoppedCardIsProbedForDrift(t *testing.T) {
 	var want *worktree.ForkDriftError
 	if r.Drift == want {
 		t.Fatal("a stopped, drifted card was not probed")
+	}
+}
+
+// The FD-025 path past the first fix: a drifted card whose rebase really
+// conflicts, carrying uncommitted work it could not checkpoint. The dirty
+// path's rebase stopped with a bare notice and never offered the agent;
+// and an agent that did finish was judged a failure for the uncommitted
+// work the autostash put back. Now the agent is offered, is told the same
+// command the board ran, and a rebase that resolves the conflict and
+// keeps that work clears the drift and puts the failure back with "try
+// again" leading.
+func TestADriftedConflictGoesToTheAgentWithItsUncommittedWork(t *testing.T) {
+	cmdRe := regexp.MustCompile("run `(git rebase [^`]+)`")
+	var kicked string
+	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, msg string) []agent.Event {
+		c := cmdRe.FindStringSubmatch(msg)
+		if c == nil {
+			return []agent.Event{{Kind: agent.EventMessage, Text: "ok"}, {Kind: agent.EventIdle}}
+		}
+		kicked = msg
+		run := func(args ...string) {
+			_, _ = exec.CommandContext(context.Background(), "git", append([]string{"-C", opts.WorkDir}, args...)...).CombinedOutput()
+		}
+		run(strings.Fields(c[1])[1:]...) // stops on the conflict
+		if err := os.WriteFile(filepath.Join(opts.WorkDir, "README.md"), []byte("both versions\n"), 0o600); err != nil {
+			t.Error(err)
+		}
+		run("add", "README.md")
+		run("-c", "core.editor=true", "rebase", "--continue")
+		return []agent.Event{{Kind: agent.EventMessage, Text: "rebased"}, {Kind: agent.EventIdle}}
+	}}
+	m, eng := chatWorkspace(t, ag)
+	m = advanceTo(t, m, domain.StageImplement)
+	if eng.Get("FD-001") != nil {
+		settleChat(t, eng)
+		m = drainEngineLoop(t, m)
+	}
+	root := m.wt.Root()
+	wt := filepath.Join(root, ".gummi", "worktrees", "FD-001")
+	if err := os.WriteFile(filepath.Join(wt, "README.md"), []byte("card version\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "add", "README.md")
+	git(t, wt, "commit", "-qm", "card edit")
+	// work the drift kept from being checkpointed: a tracked edit and a new file
+	if err := os.WriteFile(filepath.Join(wt, "notes.txt"), []byte("unfinished\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// the base rewritten under the card, touching the same file
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("rewritten base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "README.md")
+	git(t, root, "commit", "-q", "--amend", "-m", "rewritten")
+
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	driftErr := m.wt.AssertNoForkDrift(ctx, &f)
+	if driftErr == nil {
+		t.Fatal("want drift")
+	}
+	m = pump(t, m, m.handleEngineEvent(engine.Event{Feature: f.ID, Stage: f.Stage, Kind: engine.EventError, Err: driftErr}))
+
+	fork, _ := m.store.ForkPoint(ctx, f.ID)
+	m = pump(t, m, m.rebaseFeature(f))
+	top := m.Overlay.Top()
+	if top == nil || top.ID() != "agent-rebase" {
+		t.Fatalf("the conflicted rebase of a dirty drifted card offered no agent (notice %q)", m.notice.text)
+	}
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	settleChat(t, eng)
+	m = drainEngineLoop(t, m)
+
+	if !strings.Contains(kicked, "--onto") {
+		t.Errorf("kickoff does not replay from the fork:\n%s", kicked)
+	}
+	if m.notice.isErr {
+		t.Fatalf("agent rebase judged a failure: %q", m.notice.text)
+	}
+	if d, _ := m.wt.Drift(ctx, &f); d != nil {
+		t.Fatalf("still drifted: %v", d)
+	}
+	if got, _ := m.store.ForkPoint(ctx, f.ID); got == fork {
+		t.Error("fork not re-anchored")
+	}
+	if b, _ := os.ReadFile(filepath.Join(wt, "notes.txt")); string(b) != "unfinished\n" {
+		t.Errorf("uncommitted work lost: %q", b)
+	}
+	it, ok := m.inbox.get(f.ID)
+	if !ok || it.Kind != attnFailure || !strings.Contains(it.Text, "try again") {
+		t.Fatalf("the failure did not come back cleared: %+v %v", it, ok)
+	}
+	m = pump(t, m, m.loadRows)
+	r, _ := m.selected()
+	if got := answerIDs(stageActions(m.nextInputFor(r))); !strings.HasPrefix(got[0], "run:") {
+		t.Errorf("answers = %v, want try again first", got)
 	}
 }

@@ -50,6 +50,10 @@ artifact):
                    kind. Its plan stage writes Questions/Constraints/Direction;
                    the keyword just makes a test's intent readable.
 
+A rebase-resolve pass (the board's "let the agent resolve them") runs
+the command its kickoff names; a conflicted path takes the card's side,
+and an untracked file in the way is moved aside and folded back in.
+
 A goal (GL-*) is started from a complete doc (`gummi goal --plan-file`):
 its plan stage agrees it untouched, its critique and review pass, and its
 lead's turns are acknowledged; the cards the doc names take their own
@@ -462,6 +466,53 @@ def stage_implement(turn):
     turn.say("Implemented `%s` and its test, and committed." % name)
 
 
+def stage_rebase(turn, kickoff):
+    """Run the rebase the kickoff names and resolve what stops it, the way
+    the contract asks: a conflicted path takes this card's side, and an
+    untracked file in the way is moved aside and folded back in after."""
+    wd = turn.ctx["workdir"]
+    m = re.search(r"run `(git rebase [^`]+)`", kickoff)
+    if not m:
+        turn.say("The kickoff names no rebase command; nothing to do.")
+        return
+
+    def out(*args):
+        return subprocess.run(["git", "-C", wd] + list(args), check=False,
+                              capture_output=True, text=True)
+
+    def in_progress():
+        for d in ("rebase-merge", "rebase-apply"):
+            p = out("rev-parse", "--git-path", d).stdout.strip()
+            if p and os.path.exists(p if os.path.isabs(p) else os.path.join(wd, p)):
+                return True
+        return False
+
+    aside = {}
+    res = out(*m.group(1).split()[1:])
+    for _ in range(12):
+        blocked = re.findall(r"^\t(\S+)$", res.stderr, re.M) if "would be overwritten" in res.stderr else []
+        for f in blocked:
+            src = os.path.join(wd, f)
+            if os.path.exists(src):
+                aside[f] = open(src, encoding="utf-8").read()
+                os.remove(src)
+        if blocked and not in_progress():
+            res = out(*m.group(1).split()[1:])
+            continue
+        if not in_progress():
+            break
+        for f in out("diff", "--name-only", "--diff-filter=U").stdout.split():
+            out("checkout", "--theirs", "--", f)
+            out("add", "--", f)
+        res = out("-c", "core.editor=true", "rebase", "--continue")
+    for f, text in aside.items():
+        path = os.path.join(wd, f)
+        base = open(path, encoding="utf-8").read() if os.path.exists(path) else ""
+        write_file(wd, f, base + text if text not in base else base)
+    turn.say("Rebased with `%s`; conflicts took this card's side%s." % (
+        m.group(1), "" if not aside else ", and %s was folded back in" % ", ".join(sorted(aside))))
+
+
 def verdict(turn, value, summary, text):
     turn.say(text + "\n\nVERDICT: " + value)
     if turn.ctx["has_verdict_tool"]:
@@ -610,7 +661,10 @@ def detect(frame):
         m = re.search(r"\b((FD|BG|RS|FF)-\d+)\b", hints)
         if m:
             ctx["card"], ctx["kind"] = m.group(1), m.group(2)
-    if "a freeform card" in hints:
+    if "Task: Rebase onto" in hints:
+        # the rebase-resolve pass borrows the card's stage; it is its own job
+        ctx["stage"] = "rebase"
+    elif "a freeform card" in hints:
         ctx["stage"] = "open"
     elif re.search(r"^(Stage: Plan critique|Stage: Goal plan critique|Research critique)", hints, re.M):
         ctx["stage"] = "critique"
@@ -657,6 +711,8 @@ def handle_send(ctx, text, first):
         stage_plan(turn, answered.group(1) if answered else None)
     elif stage == "critique":
         stage_critique(turn)
+    elif stage == "rebase":
+        stage_rebase(turn, text)
     elif stage == "implement":
         stage_implement(turn)
     elif stage == "review":

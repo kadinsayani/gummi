@@ -25,6 +25,12 @@ import (
 type rebaseConflictMsg struct {
 	f     domain.Feature
 	files []string
+	// reason is git's account of a stop that was not a plain conflict
+	// (an untracked file in the way, a stop with nothing unmerged)
+	reason string
+	// dirty: the worktree carried uncommitted work into the rebase
+	// (autostash), which the agent's rebase has to carry back out
+	dirty bool
 }
 
 // rebaseSettledMsg carries the judged outcome of a finished
@@ -41,25 +47,38 @@ type rebaseSettledMsg struct {
 func (m *Shell) offerAgentRebase(msg rebaseConflictMsg) {
 	f, files := msg.f, msg.files
 	detail := "runs an agent session in the worktree"
+	if msg.dirty {
+		detail += ", carrying the uncommitted work across"
+	}
 	if f.Stage == domain.StageVerify {
 		detail += "; verify re-runs after"
 	}
-	if len(files) > 0 {
-		// git-derived file names; sanitize like every other notice
+	question := "rebase " + string(f.ID) + " onto " + m.baseBranch(f) + " hit conflicts — let the agent resolve them?"
+	switch {
+	case msg.reason != "":
+		// git-derived; sanitize like every other notice
+		detail = sanitize("git stopped: "+msg.reason) + " — " + detail
+		question = "rebase " + string(f.ID) + " onto " + m.baseBranch(f) + " stopped — let the agent sort it out?"
+	case len(files) > 0:
 		detail = sanitize("conflicts: "+strings.Join(files, ", ")) + " — " + detail
 	}
 	m.Overlay.Push(&confirmDialog{
 		card:      f.ID,
 		id:        "agent-rebase",
-		question:  "rebase " + string(f.ID) + " onto main hit conflicts — let the agent resolve them?",
+		question:  question,
 		detail:    detail,
-		onConfirm: func() tea.Cmd { return m.agentRebase(f, files) },
+		onConfirm: func() tea.Cmd { return m.agentRebase(msg) },
 	})
 }
 
 // agentRebase dispatches the engine's rebase-resolve session, holding the
 // stop the card waits at so an unresolved rebase can put it back.
-func (m *Shell) agentRebase(f domain.Feature, files []string) tea.Cmd {
+func (m *Shell) agentRebase(msg rebaseConflictMsg) tea.Cmd {
+	f, files, reason := msg.f, msg.files, msg.reason
+	if m.rebaseDirty == nil {
+		m.rebaseDirty = map[domain.FeatureID]bool{}
+	}
+	m.rebaseDirty[f.ID] = msg.dirty
 	if it, ok := m.inbox.get(f.ID); ok {
 		if m.rebaseHeld == nil {
 			m.rebaseHeld = map[domain.FeatureID]attnItem{}
@@ -67,10 +86,10 @@ func (m *Shell) agentRebase(f domain.Feature, files []string) tea.Cmd {
 		m.rebaseHeld[f.ID] = it
 	}
 	return func() tea.Msg {
-		if err := m.engine.RunRebase(context.Background(), f, files); err != nil {
+		if err := m.engine.RunRebaseStopped(context.Background(), f, files, reason); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + ": agent dispatched to rebase onto main"}
+		return noticeMsg{text: string(f.ID) + ": agent dispatched to rebase onto " + m.baseBranch(f)}
 	}
 }
 
@@ -78,16 +97,27 @@ func (m *Shell) agentRebase(f domain.Feature, files []string) tea.Cmd {
 // left behind. The engine has already aborted anything mid-flight, so a
 // clean worktree whose branch now carries main's HEAD is success — the
 // agent's own claims are never consulted.
+//
+// A worktree that went in carrying uncommitted work comes out carrying it
+// again — the autostash puts it back — so dirty is only a failure for one
+// that went in clean. Unmerged paths are a failure either way: that is a
+// resolution left half done.
 func (m *Shell) judgeRebase(id domain.FeatureID) tea.Cmd {
+	wasDirty := m.rebaseDirty[id]
 	return func() tea.Msg {
 		ctx := context.Background()
 		f, err := m.store.GetFeature(ctx, id)
 		if err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
+		if left, err := m.wt.Unmerged(ctx, &f); err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true}
+		} else if len(left) > 0 {
+			return rebaseSettledMsg{f: f, problem: "unmerged paths were left behind (" + strings.Join(left, ", ") + ")"}
+		}
 		if dirty, err := m.wt.Dirty(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
-		} else if dirty {
+		} else if dirty && !wasDirty {
 			return rebaseSettledMsg{f: f, problem: "the worktree was left dirty"}
 		}
 		if rebased, err := m.wt.RebasedOnBase(ctx, &f); err != nil {
@@ -107,6 +137,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 	id := msg.f.ID
 	held, wasHeld := m.rebaseHeld[id]
 	delete(m.rebaseHeld, id)
+	delete(m.rebaseDirty, id)
 	if !msg.ok {
 		// The resolve session took the stage session's place on the engine,
 		// and it carries no verdict of its own: left standing, it made the
@@ -149,11 +180,19 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
 	}
+	if f.Stage != domain.StageVerify && wasHeld {
+		// The stop the card was waiting at still stands — a failed stage
+		// has still not run, a gate is still unanswered — and the resolve
+		// session, which carries no verdict, must not read as the stage
+		// having ended: the same reasoning as the failure arm above.
+		m.dropSession(id)
+		m.inbox.put(held)
+	}
 	if drifted != nil {
 		m.driftCleared(id)
 	}
 	if f.Stage != domain.StageVerify {
-		m.notice = noticeMsg{text: string(id) + " rebased onto main"}
+		m.notice = noticeMsg{text: string(id) + " rebased onto " + m.baseBranch(f)}
 		// the base moved: re-measure what its baseline excused (at
 		// verify, the re-run below does it as the stage starts)
 		return tea.Batch(m.loadRows, m.rebaselineCmd(id))
@@ -163,7 +202,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
-		return noticeMsg{text: string(f.ID) + " rebased onto main → re-verifying", reload: true}
+		return noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f) + " → re-verifying", reload: true}
 	}
 }
 

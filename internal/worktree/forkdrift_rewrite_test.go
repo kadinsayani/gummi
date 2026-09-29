@@ -319,3 +319,76 @@ func TestADriftedRebaseThatConflictsStillAbortsClean(t *testing.T) {
 		t.Fatalf("worktree dirty after abort: %q", st)
 	}
 }
+
+// Uncommitted work a drifted card could not checkpoint can meet the same
+// path arriving from its rewritten base: git refuses before the rebase
+// starts, because an untracked file would be overwritten. That used to
+// come back untyped ("did not start"), so the board never offered the
+// agent. It is a typed stop now, naming the file and git's reason, with
+// the worktree exactly as it was.
+func TestAnUntrackedFileInTheWayIsATypedStop(t *testing.T) {
+	root, m, _ := baseRepo(t)
+	f, p := cardWithCommit(t, m, 15, "feat.txt")
+	writeFile(t, p, "notes.txt", "card's unfinished notes\n")
+	writeFile(t, p, "feat.txt", "uncommitted edit\n")
+	writeFile(t, root, "notes.txt", "the base's notes\n")
+	mustGit(t, root, "add", "notes.txt")
+	mustGit(t, root, "commit", "-q", "--amend", "-m", "D1'")
+	before := mustGit(t, p, "rev-parse", "HEAD")
+
+	err := m.RebaseOnMainAutostash(ctx, f)
+	var ce *RebaseConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *RebaseConflictError, got %T: %v", err, err)
+	}
+	if len(ce.Files) != 1 || ce.Files[0] != "notes.txt" || !strings.Contains(ce.Reason, "untracked working tree files would be overwritten") {
+		t.Fatalf("stop = %+v", ce)
+	}
+	if !strings.Contains(ce.Error(), "notes.txt") || strings.Contains(ce.Error(), "hit conflicts") {
+		t.Errorf("message %q", ce.Error())
+	}
+	if after := mustGit(t, p, "rev-parse", "HEAD"); after != before {
+		t.Fatal("tip moved")
+	}
+	for name, want := range map[string]string{"notes.txt": "card's unfinished notes\n", "feat.txt": "uncommitted edit\n"} {
+		if b, _ := os.ReadFile(filepath.Join(p, name)); string(b) != want {
+			t.Errorf("%s = %q after the stop", name, b)
+		}
+	}
+}
+
+// A rebase can stop mid-way with nothing unmerged — here the card's own
+// history added a file, removed it again, and the worktree holds an
+// untracked copy the first replayed commit would overwrite. It read "hit
+// conflicts" with no file named; it names git's reason and the path now,
+// and the worktree comes back as it was.
+func TestAMidRebaseStopWithNothingUnmergedSaysWhy(t *testing.T) {
+	root, m, _ := baseRepo(t)
+	f := feature(17, "card")
+	p, err := m.Create(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, p, "gen.txt", "generated\n")
+	mustGit(t, p, "add", ".")
+	mustGit(t, p, "commit", "-q", "-m", "add gen")
+	mustGit(t, p, "rm", "-q", "gen.txt")
+	mustGit(t, p, "commit", "-q", "-m", "drop gen")
+	writeFile(t, p, "gen.txt", "regenerated, uncommitted\n")
+	amendBase(t, root)
+
+	err = m.RebaseOnMainAutostash(ctx, f)
+	var ce *RebaseConflictError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want *RebaseConflictError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ce.Reason, "untracked working tree files would be overwritten by merge: gen.txt") || strings.Contains(ce.Error(), "hit conflicts") {
+		t.Fatalf("stop with nothing unmerged says nothing: %q", ce.Error())
+	}
+	if m.rebaseInProgress(ctx, p) {
+		t.Fatal("rebase left in flight")
+	}
+	if b, _ := os.ReadFile(filepath.Join(p, "gen.txt")); string(b) != "regenerated, uncommitted\n" {
+		t.Errorf("gen.txt = %q", b)
+	}
+}

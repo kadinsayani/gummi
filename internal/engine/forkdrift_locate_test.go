@@ -415,3 +415,30 @@ func TestTheRebasePassStartsOnADriftedCard(t *testing.T) {
 		t.Fatalf("kickoff does not replay from the recorded fork %s:\n%s", fork, kicked)
 	}
 }
+
+// A rebase that stopped on something other than a conflict hands the
+// agent git's own account of the stop, so it starts from what happened
+// rather than hunting for conflict markers that are not there.
+func TestTheRebasePassIsToldWhyTheRebaseStopped(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	var kicked string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		kicked = msg
+		return []agent.Event{{Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+	f := feature(1, "stopped", domain.StageImplement)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	reason := "The following untracked working tree files would be overwritten by merge: notes.txt"
+	if err := e.RunRebaseStopped(context.Background(), f, []string{"notes.txt"}, reason); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, f.ID, StateDone)
+	if !strings.Contains(kicked, "stopped: "+reason) || strings.Contains(kicked, "Expect conflicts") {
+		t.Fatalf("kickoff:\n%s", kicked)
+	}
+}

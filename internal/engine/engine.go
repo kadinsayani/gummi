@@ -982,6 +982,15 @@ func CritiqueRoundKind(stage domain.Stage) (domain.RoundKind, bool) {
 // critique, it borrows the current stage without advancing it; the
 // caller judges success by the resulting git state, not the transcript.
 func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string) error {
+	return e.RunRebaseStopped(ctx, f, files, "")
+}
+
+// RunRebaseStopped is RunRebase for a rebase that stopped on something
+// other than a plain conflict: reason is git's own account of the stop
+// (worktree.RebaseConflictError.Reason), put in the kickoff so the agent
+// starts from what actually happened instead of looking for conflict
+// markers that are not there.
+func (e *Engine) RunRebaseStopped(ctx context.Context, f domain.Feature, files []string, reason string) error {
 	wt, err := e.mgr(ctx, &f)
 	if err != nil {
 		return err
@@ -999,7 +1008,10 @@ func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string
 		base = wt.BaseBranch(ctx)
 	}
 	note := "Rebase this branch onto " + base + "'s current tip: run `" + cmd + "`."
-	if len(files) > 0 {
+	switch {
+	case reason != "":
+		note += "\nThe board's own run of it stopped: " + reason + "."
+	case len(files) > 0:
 		note += "\nExpect conflicts in: " + strings.Join(files, ", ") + "."
 	}
 	return e.run(f, note, flavorRebase)

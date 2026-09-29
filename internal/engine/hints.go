@@ -607,7 +607,17 @@ file and run ` + "`git rebase --continue`" + ` until the rebase completes; when
 files were deleted or renamed on one side, honor main's structure and
 carry this branch's changes into it. Never use ` + "`git rebase --skip`" + `
 (it drops this branch's commits), never force-push, and never touch the
-main checkout. When the rebase completes, run a quick build check to catch resolution
+main checkout.
+Not every stop is a conflict, and uncommitted work in this worktree is
+this card's too — never discard it. If git refuses because untracked
+files would be overwritten, they are this card's unfinished work
+meeting the same paths in the base: move each aside (outside the
+repository or under a new name), run the rebase, then fold its content
+back into the file the base now carries — keeping both intents — and
+leave the result uncommitted, as it was. If applying the autostash
+conflicts at the end, git keeps the stash: resolve the markers, unstage
+with ` + "`git restore --staged .`" + `, and only then ` + "`git stash drop`" + ` the
+entry you folded in. When the rebase completes, run a quick build check to catch resolution
 fallout: prefer the repo's standard build (Go: ` + "`go build ./...`" + `;
 Node: ` + "`npm run build`" + `; Make: ` + "`make`" + `) if discoverable, and
 fix fallout your resolution caused. Skip if the repo has no such

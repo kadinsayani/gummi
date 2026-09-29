@@ -1183,15 +1183,19 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 				return noticeMsg{text: string(f.ID) + ": worktree has uncommitted changes — commit them before rebasing", isErr: true}
 			}
 		}
+		rebase := m.wt.RebaseOnMain
 		if autostash {
-			if err := m.wt.RebaseOnMainAutostash(ctx, &f); err != nil {
-				return noticeMsg{text: sanitize(err.Error()), isErr: true}
-			}
-		} else if err := m.wt.RebaseOnMain(ctx, &f); err != nil {
+			rebase = m.wt.RebaseOnMainAutostash
+		}
+		if err := rebase(ctx, &f); err != nil {
+			// The dirty (autostash) path used to stop here with a bare
+			// notice: a drifted card carrying uncommitted work — which it
+			// could not checkpoint — was never offered the agent, the one
+			// thing that can sort the two histories and that work out.
 			var ce *worktree.RebaseConflictError
 			if errors.As(err, &ce) {
 				if m.engine != nil {
-					return rebaseConflictMsg{f: f, files: ce.Files}
+					return rebaseConflictMsg{f: f, files: ce.Files, reason: ce.Reason, dirty: autostash}
 				}
 				// ce carries git-derived file names; sanitize like every
 				// other notice before it reaches the terminal.

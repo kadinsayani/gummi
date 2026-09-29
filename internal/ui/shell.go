@@ -158,6 +158,10 @@ type Shell struct {
 	// that ends without resolving puts it back, since that decision still
 	// stands.
 	rebaseHeld map[domain.FeatureID]attnItem
+	// rebaseDirty: the agent rebase in flight for a card carried its
+	// uncommitted work across (autostash), so the judge accepts a dirty
+	// worktree afterwards (rebase.go's judgeRebase)
+	rebaseDirty map[domain.FeatureID]bool
 	// landConflicts are the files a card's last landing conflicted in
 	// (merge.go's squashMergeFeature), so its decision offers the rebase
 	// that resolves them rather than the landing that just failed. A
