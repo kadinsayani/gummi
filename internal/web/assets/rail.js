@@ -14,7 +14,7 @@ const GROUPS = [
   ['paused', 'Paused'],
   ['idle', 'Open'],
   ['todo', 'Backlog'],
-  ['done', 'Landed']
+  ['done', 'Done']
 ]
 const DONE_SHOWN = 3
 

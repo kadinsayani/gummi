@@ -146,6 +146,10 @@ test.describe('a verified card', () => {
     await expect(page.getByTestId('action-dialog')).toHaveCount(0, { timeout: 30_000 });
     if (phone(info)) await page.getByTestId('mnav-cards').click();
     await expect(page.getByTestId('rail-group-done').getByTestId(`rail-row-${id}`)).toBeVisible();
+    // the group holds every closed card, landed or handed off: it is not
+    // headed as if each one landed
+    await expect(page.getByTestId('rail-group-done')).toContainText('Done');
+    await expect(page.getByTestId('rail-group-done')).not.toContainText('Landed');
     expect(await workspace.git('log', '-1', '--format=%s', 'main')).toMatch(/^feat: land /);
     await shot(page, info, 'landed');
   });
