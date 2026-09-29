@@ -45,6 +45,19 @@ function place (box) {
   box.style.setProperty('--toast-bottom', Math.max(16, Math.round(vh - top + 8)) + 'px')
 }
 
+// A decision redrawn taller (or a docked bar opened) under a notice
+// already up would leave it standing over the answers: follow what is
+// docked while any notice is showing.
+let watched = null
+function follow (box) {
+  if (watched || typeof ResizeObserver === 'undefined') return
+  watched = new ResizeObserver(() => { if (box.children.length) place(box) })
+  for (const s of ['.dock', '#mdec', '#mnav']) {
+    const el = document.querySelector(s)
+    if (el) watched.observe(el)
+  }
+}
+
 function isHushed (text) {
   const k = norm(text)
   const until = hushed.get(k)
@@ -88,6 +101,7 @@ export function toast (text, opts = {}) {
     el.append(h('span', { class: 'toast-acts' }, show, copy, close))
   }
   place(box)
+  follow(box)
   box.append(el)
   // an overflow evicts the oldest notice that will go on its own first;
   // one waiting for its command to be copied goes only when all are
