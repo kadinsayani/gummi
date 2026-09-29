@@ -13,6 +13,7 @@ import (
 	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/verdict"
+	"github.com/morphis/gummi/internal/workflow"
 	"github.com/morphis/gummi/internal/worktree"
 )
 
@@ -74,15 +75,31 @@ func nextStep(id, key, label, detail string) nextAction {
 	return nextAction{id: id, key: key, label: label, why: detail, detail: detail}
 }
 
-// sendBackStep is the answer set's "send it back" row. One label, one
-// flag, three deliveries — the whole point of merging bounce, "request
-// changes" and re-run-with-a-note into one answer (PROPOSAL §4) is that
-// a reader never has to know which edge it takes, so the row is built
-// once here rather than spelled out at each of the arms that offer it.
-func sendBackStep(id, key, detail string) nextAction {
-	a := nextStep(id, key, "send it back", detail)
+// sendBackStep is the answer set's "send it back" row. One flag, three
+// deliveries — the whole point of merging bounce, "request changes" and
+// re-run-with-a-note into one answer (PROPOSAL §4) is that a reader never
+// has to know which edge it takes, so the row is built once here rather
+// than spelled out at each of the arms that offer it.
+//
+// The label still says where the bare answer goes: to is the stage a
+// rewind lands on or re-runs in place, or who takes the turn. "send it
+// back" alone left the reader to guess between plan and implement at
+// exactly the stop where the difference is the whole decision. A typed
+// line can still be read as belonging elsewhere (internal/reentry); the
+// chip that follows names that destination before anything moves.
+func sendBackStep(id, key, to, detail string) nextAction {
+	a := nextStep(id, key, "send it back to "+to, detail)
 	a.sendBack = true
 	return a
+}
+
+// reworkStage is where a bare send-back from s rewinds to: the target of
+// the rerun edge the graph declares from it.
+func reworkStage(s domain.Stage) string {
+	if back, ok := workflow.RerunTarget(s); ok {
+		return string(back)
+	}
+	return string(s)
 }
 
 // nextInput is the in-memory state the suggestions derive from. All
@@ -1039,7 +1056,7 @@ func stageActions(in nextInput) []nextAction {
 				// is attached: with a conversation on screen the send-back
 				// is a turn in it, and talkAction withholds its own row
 				// there rather than offering to start what is running.
-				sendBack = append(sendBack, sendBackStep("changes", "",
+				sendBack = append(sendBack, sendBackStep("changes", "", "the architect",
 					"say what is wrong — your line goes to the architect as the turn asking for it"))
 			}
 			crossed := "the card"
@@ -1074,7 +1091,7 @@ func stageActions(in nextInput) []nextAction {
 		// Only worth offering while the architect is here to receive it —
 		// with no session the "start" row above is the way in.
 		if in.live {
-			acts = append(acts, sendBackStep("changes", "",
+			acts = append(acts, sendBackStep("changes", "", "the architect",
 				"say what is wrong — your line goes to the architect as the turn asking for it"))
 		}
 		return append(acts, stopHere(in)...)
@@ -1108,7 +1125,7 @@ func stageActions(in nextInput) []nextAction {
 				return []nextAction{
 					nextStep("advance", "g", "take it to verify",
 						"cross the gate — its done-when checks run and it comes back as your hand-over"),
-					sendBackStep("bounce", "b", "send it back to its cards — your line goes to its lead"),
+					sendBackStep("bounce", "b", "its cards", "your line goes to its lead"),
 					nextStep("goalpage", "P", "open the goal page",
 						"the done-when list, the cards (enter watches one), the budget and the lead's log"),
 				}
@@ -1159,7 +1176,7 @@ func stageActions(in nextInput) []nextAction {
 		// work stage's critique iterates the stage, so there is no edge
 		// to take. The bigger hammer — the whole plan, not this pass — is
 		// /bounce.
-		rework := sendBackStep("run", "",
+		rework := sendBackStep("run", "", string(in.stage),
 			"re-runs "+string(in.stage)+" with what is wrong — your line goes with it")
 		if critiqueUnsettled(in) {
 			// "the critique passed" is the one thing this stop is not, so
@@ -1188,14 +1205,14 @@ func stageActions(in nextInput) []nextAction {
 			// "enter", so this stays stopHere rather than stopOrResume.
 			return append([]nextAction{
 				*b,
-				sendBackStep("bounce", "b", "or send the open items back as rework"),
+				sendBackStep("bounce", "b", reworkStage(in.stage), "or send the open items back as rework"),
 			}, stopHere(in)...)
 		}
 		if in.failedCheck != "" {
 			// re-running the checks alone is /verify: it re-evaluates the
 			// gate rather than answering it, so it is not one of the four.
 			return append([]nextAction{
-				sendBackStep("bounce", "b", "the failure is the implementation's fault — your line goes with it"),
+				sendBackStep("bounce", "b", reworkStage(in.stage), "the failure is the implementation's fault — your line goes with it"),
 				nextStep("advance", "g", "land anyway", "overrule if the failure does not hold up"),
 			}, stopOrResume(in)...)
 		}
@@ -1223,14 +1240,14 @@ func stageActions(in nextInput) []nextAction {
 		if in.verdict == verdictFail || in.verdict == verdictChanges ||
 			(in.verdict == verdictUnclear && in.escalated) {
 			return append([]nextAction{
-				sendBackStep("bounce", "b", "send the failures back as rework — your line goes with them"),
+				sendBackStep("bounce", "b", reworkStage(in.stage), "send the failures back as rework — your line goes with them"),
 				nextStep("advance", "g", "land anyway", "overrule if the failures do not hold up"),
 			}, stopOrResume(in)...)
 		}
 		if in.kind == domain.KindGoal {
 			out := []nextAction{
 				nextStep("advance", "g", "land on "+in.landBase(), "one merge commit over its cards' commits, after a last catch-up with "+in.landBase()),
-				sendBackStep("bounce", "b", "send it back to its cards — your line goes to its lead"),
+				sendBackStep("bounce", "b", "its cards", "your line goes to its lead"),
 			}
 			// reversing takes a decision to reverse: offered only when the
 			// lead logged one for review, which is exactly the set the
@@ -1247,7 +1264,7 @@ func stageActions(in nextInput) []nextAction {
 		if in.kind == domain.KindResearch {
 			return append([]nextAction{
 				nextStep("advance", "g", "mark done", "verify passed — advance to done"),
-				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
+				sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it"),
 			}, stopOrResume(in)...)
 		}
 		// The card is finished and the question is no longer "is this
@@ -1290,7 +1307,7 @@ func stageActions(in nextInput) []nextAction {
 			return append([]nextAction{
 				keep,
 				gate,
-				sendBackStep("bounce", "b", "not convinced — your line goes back with it"),
+				sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it"),
 			}, stopOrResume(in)...)
 		}
 		if in.stackBlocker != "" {
@@ -1301,7 +1318,7 @@ func stageActions(in nextInput) []nextAction {
 				"it sits on "+string(in.stackBlocker)+" in its stack — "+string(in.stackBlocker)+
 					" lands first, or its commits would ride in under this card")
 		}
-		acts := []nextAction{gate, keep, sendBackStep("bounce", "b", "not convinced — your line goes back with it")}
+		acts := []nextAction{gate, keep, sendBackStep("bounce", "b", reworkStage(in.stage), "not convinced — your line goes back with it")}
 		if in.landConflicts != nil {
 			// the last landing hit conflicts with the base: landing again
 			// would hit them again, so the rebase that resolves them leads

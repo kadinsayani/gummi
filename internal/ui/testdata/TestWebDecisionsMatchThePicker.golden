@@ -84,10 +84,10 @@
     "options": [
       {
         "id": "bounce",
-        "label": "send it back",
+        "label": "send it back to implement",
         "detail": "send the failures back as rework — your line goes with them",
         "words": true,
-        "relabel": "send it back with your words"
+        "relabel": "send it back to implement with your words"
       },
       {
         "id": "advance",

@@ -169,23 +169,27 @@ func TestNextActionsProseDetails(t *testing.T) {
 		return nextAction{}
 	}
 
-	// the merged answer wears one label wherever it appears, whichever
-	// edge it happens to take underneath
-	for _, in := range []nextInput{
-		{stage: domain.StageVerify, kind: domain.KindBug, attn: attnGate},
-		{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictFail},
-		{stage: domain.StageImplement, kind: domain.KindFeature, attn: attnGate},
+	// the merged answer is one row wherever it appears, whichever edge it
+	// happens to take underneath — and its label names where the bare
+	// answer sends the card, so the reader is not left to guess
+	for _, c := range []struct {
+		in    nextInput
+		label string
+	}{
+		{nextInput{stage: domain.StageVerify, kind: domain.KindBug, attn: attnGate}, "send it back to implement"},
+		{nextInput{stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate, verdict: verdictFail}, "send it back to implement"},
+		{nextInput{stage: domain.StageImplement, kind: domain.KindFeature, attn: attnGate}, "send it back to implement"},
 	} {
-		acts := nextActions(in)
-		var back int
+		acts := nextActions(c.in)
+		var back []string
 		for _, a := range acts {
-			if a.label == "send it back" {
-				back++
+			if a.sendBack {
+				back = append(back, a.label)
 			}
 		}
-		if back != 1 {
-			t.Errorf("%s/%s: %d rows labelled \"send it back\", want exactly 1 — bounce, changes and re-run-with-note are one answer now (keys %q)",
-				in.stage, in.verdict, back, keysOf(acts))
+		if len(back) != 1 || back[0] != c.label {
+			t.Errorf("%s/%s: send-back rows %q, want exactly [%q] — bounce, changes and re-run-with-note are one answer now (keys %q)",
+				c.in.stage, c.in.verdict, back, c.label, keysOf(acts))
 		}
 	}
 
