@@ -278,6 +278,29 @@ test.describe('an agent’s question', () => {
     await expect(page.getByTestId('thread-items')).toContainText('Put it beside Greet, in greet.go');
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
   });
+
+  // Enter pressed twice on "start the architect" meets the question the
+  // architect asks within a moment of the first: the second press must not
+  // give that question its first answer before anyone has read it.
+  test('a second enter does not answer a question that has just arrived', async ({ pairedPage: page, server, api }, info) => {
+    test.skip(isPhone(info), 'enter answers from the composer on a keyboard');
+    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask] Add a hasty helper' })).json;
+    const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+    await open(page, server, c.id);
+    await expect(page.getByTestId('decision')).toHaveAttribute('data-ref', card.decision.ref);
+    await page.getByTestId('composer-input').focus();
+    await page.keyboard.press('1');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('decision')).toHaveAttribute('data-kind', 'ask');
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('decision-fresh')).toContainText('new decision');
+    await page.waitForTimeout(300);
+    expect((await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
+    // read, it answers as ever
+    await page.waitForTimeout(800);
+    await page.keyboard.press('Enter');
+    await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).not.toBe('ask');
+  });
 });
 
 // A backend's own MCP client bounds a tool call (a minute, on several of

@@ -31,6 +31,14 @@ import { runAction } from './actions.js?v=__ASSET_V__'
 let ctx = {}
 let answering = false
 
+// A decision that has just appeared is not a bare enter's to answer yet: a
+// second press meant for the answer before it (a double enter, a key held
+// a moment too long) would otherwise give the new question its first
+// answer unread. A person's own choice on it (a click, an arrow, a digit)
+// or words typed for it are read, and answer at once.
+const SETTLE_MS = 800
+let shownAt = 0
+
 export function initDecision (c) {
   ctx = c
   on(['card', 'hi', 'conn', 'diffPending', 'sel', 'picked', 'decNote', 'decConfirm'], renderDecision)
@@ -51,6 +59,7 @@ export function initDecision (c) {
       const chose = state.hiUser && ref !== null && refCard === state.sel && !answering
       ref = r
       refCard = state.sel
+      shownAt = Date.now()
       set({ picked: [], decConfirm: null, hi: 0, hiUser: false })
       if (chose) note(`${state.sel} moved while you were choosing — read it again, then answer.`, { tone: 'warn', testid: 'decision-moved' })
     }
@@ -330,6 +339,10 @@ export async function answer ({ picked = false } = {}) {
   const d = openDecision()
   if (!d || answering) return
   if (state.conn !== 'live') { toast('Answers wait until the board reconnects'); return }
+  if (!picked && !state.hiUser && !state.draft.trim() && Date.now() - shownAt < SETTLE_MS) {
+    note(`${state.sel} has a new decision — read it, then press enter again.`, { tone: 'warn', testid: 'decision-fresh' })
+    return
+  }
   let o = chosen(d)
   const text = state.draft.trim()
   if (text && !o.words && !picked && !(d.multi && state.picked?.length)) {
