@@ -1,6 +1,8 @@
 package domain
 
 import (
+	"crypto/sha1" // #nosec G505 -- names a slug, secures nothing
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"path"
@@ -9,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // Gate approval modes: who crosses a feature's gates on an unattended
@@ -1136,11 +1139,17 @@ var (
 
 // Slugify derives a branch- and filename-safe slug from a feature
 // title: lowercase, [a-z0-9-] only, single dashes, max 40 chars.
-// Titles that yield an empty slug (e.g. all punctuation) are an error —
-// slugs flow into git branch names and paths, so gummi refuses to
-// invent one silently.
+//
+// Latin letters with marks fold to their plain letters ("Café résumé" is
+// cafe-resume, not caf-r-sum). A title written in a script with no such
+// folding (Cyrillic, CJK, …) still names a card: its slug is "card-"
+// and a short hash of the title, which the card's head shows as its
+// branch. Only a title with no letter or digit in any script is an error
+// — slugs flow into git branch names and paths, and there is nothing in
+// "!!!" to name one after.
 func Slugify(title string) (string, error) {
 	s := strings.ToLower(strings.TrimSpace(title))
+	s = foldMarks(s)
 	s = nonSlugRune.ReplaceAllString(s, "-")
 	s = strings.Trim(s, "-")
 	if len(s) > maxSlugLen {
@@ -1148,10 +1157,35 @@ func Slugify(title string) (string, error) {
 		s = strings.Trim(s, "-")
 	}
 	if s == "" {
-		return "", fmt.Errorf("title %q yields an empty slug; use at least one ASCII letter or digit", title)
+		if !strings.ContainsFunc(title, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) }) {
+			return "", fmt.Errorf("title %q yields an empty slug; use at least one letter or digit", title)
+		}
+		sum := sha1.Sum([]byte(strings.TrimSpace(title))) // #nosec G401 -- a name, not a secret
+		return "card-" + hex.EncodeToString(sum[:4]), nil
 	}
 	return s, nil
 }
+
+// markFolds are the Latin letters with marks (and the ligatures) a title
+// is likely to carry, as the plain letters a slug keeps.
+var markFolds = strings.NewReplacer(
+	"à", "a", "á", "a", "â", "a", "ã", "a", "ä", "a", "å", "a", "ā", "a", "ă", "a", "ą", "a",
+	"ç", "c", "ć", "c", "č", "c", "ĉ", "c", "ċ", "c",
+	"ď", "d", "đ", "d", "ð", "d",
+	"è", "e", "é", "e", "ê", "e", "ë", "e", "ē", "e", "ė", "e", "ę", "e", "ě", "e",
+	"ğ", "g", "ģ", "g", "ĝ", "g",
+	"ì", "i", "í", "i", "î", "i", "ï", "i", "ī", "i", "į", "i", "ı", "i",
+	"ķ", "k", "ł", "l", "ľ", "l", "ļ", "l", "ĺ", "l",
+	"ñ", "n", "ń", "n", "ň", "n", "ņ", "n",
+	"ò", "o", "ó", "o", "ô", "o", "õ", "o", "ö", "o", "ø", "o", "ō", "o", "ő", "o",
+	"ŕ", "r", "ř", "r", "ś", "s", "š", "s", "ş", "s", "ș", "s", "ß", "ss",
+	"ť", "t", "ţ", "t", "ț", "t", "þ", "th",
+	"ù", "u", "ú", "u", "û", "u", "ü", "u", "ū", "u", "ů", "u", "ű", "u", "ų", "u",
+	"ý", "y", "ÿ", "y", "ź", "z", "ż", "z", "ž", "z",
+	"æ", "ae", "œ", "oe",
+)
+
+func foldMarks(s string) string { return markFolds.Replace(s) }
 
 // SlugVariant is the nth alternative to a slug, for when the branch a
 // slug wants is already taken.

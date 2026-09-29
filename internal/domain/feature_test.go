@@ -73,7 +73,11 @@ func TestSlugify(t *testing.T) {
 		{"`touch pwned`; git push --force", "touch-pwned-git-push-force", false},
 		{"---", "", true},
 		{"", "", true},
-		{"日本語のみ", "", true},
+		// a title in a script that does not fold still names a card
+		{"日本語のみ", "card-81ae33d4", false},
+		{"Café résumé", "cafe-resume", false},
+		{"Übergröße prüfen", "ubergrosse-prufen", false},
+		{"¿¡…!?", "", true},
 		{strings.Repeat("very long title ", 10), "very-long-title-very-long-title-very-lon", false},
 	}
 	for _, c := range cases {

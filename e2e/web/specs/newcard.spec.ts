@@ -120,3 +120,17 @@ test('create & autopilot hands the new card to autopilot', async ({ pairedPage: 
   const id = (await page.getByTestId('card-id').textContent())!;
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.autopilot).toBe(true);
 });
+
+// A title in any script names a card: Latin letters with marks fold into
+// the branch name, and a script that does not fold still gets one.
+test('a title in any script makes a card', async ({ pairedPage: page, api }, info) => {
+  for (const [title, branch] of [['Привет мир', /\/card-[0-9a-f]{8}$/], ['Café résumé', /\/cafe-resume$/]] as const) {
+    await openForm(page, phone(info));
+    await page.getByTestId('newcard-title').fill(title);
+    await page.getByTestId('newcard-desc').fill('Say hello in the reader’s own words.');
+    await page.getByTestId('newcard-create').click();
+    await expect(page.getByTestId('card-title')).toHaveText(title);
+    const id = (await page.getByTestId('card-id').innerText()).trim();
+    expect((await api('GET', `/api/cards/${id}`)).json.branch).toMatch(branch);
+  }
+});
