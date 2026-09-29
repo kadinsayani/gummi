@@ -72,11 +72,15 @@ function render () {
   gs.push(g)
   // the open decision is pinned above the composer; its raising is not
   // repeated in the thread until it has an answer
+  // (a stop's log id is its ref and the moment it was raised,
+  // "gate:FD-001:plan:<ns>", and its log line — "stopped early at …" — is
+  // not the pinned question, so the ref is matched as a prefix)
   const pinned = state.card?.decision
   if (pinned) {
+    const same = (id) => !!id && (id === pinned.ref || id.startsWith(pinned.ref + ':'))
     for (const grp of gs) {
       grp.items = grp.items.filter(it => !(it.t === 'decision' && !it.decision?.answer &&
-        (it.decision?.id === pinned.ref || it.decision?.question === pinned.question)))
+        (same(it.decision?.id) || it.decision?.question === pinned.question)))
     }
   }
 
