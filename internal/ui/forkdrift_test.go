@@ -1,0 +1,185 @@
+package ui
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/worktree"
+)
+
+// A stage that failed on fork drift was offered "try again" and "change
+// profile" — both refused by the same drift before any session starts —
+// and "stop here", with the rebase that clears it nowhere on the card. The
+// rebase leads now, the two retries are gone, and stop here stays.
+func TestADriftedFailureLeadsWithTheRebase(t *testing.T) {
+	in := nextInput{
+		stage: domain.StageImplement, kind: domain.KindFeature, attn: attnFailure,
+		profiles: true, drifted: true, base: "simon/dev", hasWorktree: true,
+	}
+	acts := stageActions(in)
+	ids := answerIDs(acts)
+	if len(acts) == 0 || acts[0].id != "rebase" || acts[0].key != "r" {
+		t.Fatalf("answers = %v, want the rebase first", ids)
+	}
+	if !strings.Contains(acts[0].label, "simon/dev") {
+		t.Errorf("rebase row %q does not name the card's base", acts[0].label)
+	}
+	for _, a := range acts {
+		if a.id == "run" || a.id == "profile" {
+			t.Errorf("answers = %v still offer %q, which the drift refuses", ids, a.id)
+		}
+	}
+	if acts[len(acts)-1].id != "settle" {
+		t.Errorf("answers = %v, want stop here kept", ids)
+	}
+	if said := whyItStopped(in); !strings.Contains(said, "simon/dev no longer carries") {
+		t.Errorf("narration %q does not say why nothing runs", said)
+	}
+
+	// the same failure on a card that is not drifted keeps its retries
+	in.drifted = false
+	if got := answerIDs(stageActions(in)); !strings.HasPrefix(got[0], "run:") {
+		t.Errorf("an ordinary failure = %v, want try again first", got)
+	}
+}
+
+// Drift is not only met by failing: a card can come back to a gate after
+// its base was rewritten. The stop keeps its own answers — each is refused
+// or allowed on its own terms — with the rebase in front of them, and a
+// running stage is left to meet the drift itself.
+func TestADriftedStopKeepsItsAnswersBehindTheRebase(t *testing.T) {
+	gate := nextInput{
+		stage: domain.StageVerify, kind: domain.KindFeature, attn: attnGate,
+		sess: engine.StateDone, verdict: verdictPass, drifted: true, hasWorktree: true,
+	}
+	plain := gate
+	plain.drifted = false
+	want := append([]string{"rebase:rebase onto main"}, answerIDs(stageActions(plain))...)
+	if got := answerIDs(stageActions(gate)); strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("drifted gate = %v, want %v", got, want)
+	}
+
+	running := nextInput{stage: domain.StageImplement, kind: domain.KindFeature, sess: engine.StateRunning, drifted: true}
+	if got := stageActions(running); len(got) != 0 {
+		t.Errorf("a running stage = %v, want nothing on offer", answerIDs(got))
+	}
+
+	// a landing that conflicted already leads with its own rebase row: one
+	// rebase, not two
+	conflicted := gate
+	conflicted.landConflicts = []string{"a.go"}
+	n := 0
+	for _, a := range stageActions(conflicted) {
+		if a.id == "rebase" {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Errorf("rebase offered %d times", n)
+	}
+}
+
+// When the card really forked from another branch that has not landed,
+// the row says so rather than calling the base rewritten.
+func TestADriftedRowNamesTheBranchItForkedFrom(t *testing.T) {
+	in := nextInput{
+		stage: domain.StageImplement, kind: domain.KindFeature, attn: attnFailure,
+		drifted: true, driftForkedFrom: "goal/ship-it", hasWorktree: true,
+	}
+	acts := stageActions(in)
+	if acts[0].id != "rebase" || !strings.Contains(acts[0].why, "goal/ship-it") {
+		t.Fatalf("lead = %+v", acts[0])
+	}
+}
+
+// amendMain rewrites main's tip under every card cut from it.
+func amendMain(t *testing.T, root string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(root, "amended.txt"), []byte("amended\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "amended.txt")
+	git(t, root, "commit", "-q", "--amend", "-m", "amended")
+}
+
+// The whole FD-025 path through the board: a stage refused on drift, the
+// failure it raises, the answer set offering the rebase, choosing it, and
+// the card coming back with the drift gone, its failure saying so, and
+// "try again" — which now works — back on offer.
+func TestADriftedFailureIsAnsweredFromTheCard(t *testing.T) {
+	m, root, wt := rebaseFeatureFixture(t)
+	if err := os.WriteFile(filepath.Join(wt, "feat.go"), []byte("package x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "add", ".")
+	git(t, wt, "commit", "-qm", "feature work")
+	amendMain(t, root)
+
+	ctx := context.Background()
+	f, _ := m.store.GetFeature(ctx, "FD-001")
+	driftErr := m.wt.AssertNoForkDrift(ctx, &f)
+	if driftErr == nil {
+		t.Fatal("want drift")
+	}
+	// the engine's refusal, as the board receives it: the failure is
+	// raised and the rows reload, so the stop knows it is drifted
+	m = pump(t, m, m.handleEngineEvent(engine.Event{Feature: f.ID, Stage: f.Stage, Kind: engine.EventError, Err: driftErr}))
+
+	r, ok := m.selected()
+	if !ok || r.F.ID != f.ID {
+		t.Fatal("card not selected")
+	}
+	if r.Drift == nil {
+		t.Fatal("row carries no drift after the failure")
+	}
+	acts := stageActions(m.nextInputFor(r))
+	if acts[0].id != "rebase" {
+		t.Fatalf("answers = %v, want the rebase first", answerIDs(acts))
+	}
+
+	m = pump(t, m, m.runCardAction(cardAction{id: acts[0].id, key: acts[0].key, label: acts[0].label}))
+	if m.notice.isErr || !strings.Contains(m.notice.text, "rebased onto main") {
+		t.Fatalf("notice = %q (err=%v)", m.notice.text, m.notice.isErr)
+	}
+	if err := m.wt.AssertNoForkDrift(ctx, &f); err != nil {
+		t.Fatalf("still drifted: %v", err)
+	}
+	m = pump(t, m, m.loadRows)
+	r, _ = m.selected()
+	if r.Drift != nil {
+		t.Fatalf("row still drifted: %v", r.Drift)
+	}
+	it, ok := m.inbox.get(f.ID)
+	if !ok || it.Kind != attnFailure {
+		t.Fatalf("the stop went away: %+v, %v — the stage still has not run", it, ok)
+	}
+	if strings.Contains(it.Text, "fork drift —") || !strings.Contains(it.Text, "try again") {
+		t.Errorf("failure text %q still reports the drift the rebase cleared", it.Text)
+	}
+	if got := answerIDs(stageActions(m.nextInputFor(r))); !strings.HasPrefix(got[0], "run:") {
+		t.Errorf("answers after the rebase = %v, want try again first", got)
+	}
+}
+
+// Asking whether a stopped card drifted must stay off every other card:
+// only a card stopped on a person is probed.
+func TestOnlyAStoppedCardIsProbedForDrift(t *testing.T) {
+	m, root, _ := rebaseFeatureFixture(t)
+	amendMain(t, root)
+	m = pump(t, m, m.loadRows)
+	if r, _ := m.selected(); r.Drift != nil {
+		t.Fatalf("an unstopped card was probed: %v", r.Drift)
+	}
+	m.raiseAttention("FD-001", attnFailure, "boom")
+	m = pump(t, m, m.loadRows)
+	r, _ := m.selected()
+	var want *worktree.ForkDriftError
+	if r.Drift == want {
+		t.Fatal("a stopped, drifted card was not probed")
+	}
+}

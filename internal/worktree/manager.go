@@ -1096,7 +1096,7 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 	if err != nil {
 		return err
 	}
-	mainHead, err := runGit(ctx, m.repo, "rev-parse", m.baseRev(ctx, f))
+	target, err := m.rebaseTarget(ctx, f, p)
 	if err != nil {
 		return err
 	}
@@ -1104,7 +1104,7 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 	if autostash {
 		args = append(args, "--autostash")
 	}
-	args = append(args, mainHead)
+	args = append(args, target.args()...)
 	if _, err := runGit(ctx, p, args...); err != nil {
 		if !m.rebaseInProgress(ctx, p) {
 			return fmt.Errorf("rebase of %s did not start: %w", f.ID, err)
@@ -1117,6 +1117,81 @@ func (m *Manager) rebaseOnMain(ctx context.Context, f *domain.Feature, autostash
 		return &RebaseConflictError{Files: conflicts}
 	}
 	return nil
+}
+
+// rebaseTarget is what a rebase of a card replays and where to.
+//
+// Ordinarily that is everything since the branch parted from its base,
+// onto the base's tip: `git rebase <tip>`. That is wrong once the base
+// itself was rewritten under the card — an amend, a rebase, a reset. The
+// branch still carries the base's commits as they were, and a plain rebase
+// replays those old versions onto their own rewrites: it conflicts on
+// commits the card never authored (and hands them to an agent to
+// "resolve"), or, where it applies, smuggles commits the base deliberately
+// dropped into the card's diff. The recorded fork says exactly where the
+// card's own work starts, so a drifted card replays only that:
+// `git rebase --onto <tip> <fork>`.
+//
+// A card whose fork is still carried by some other live branch it forked
+// from (ForkDriftError.ForkedFrom — a goal branch that has not landed)
+// keeps the plain rebase: its base never had those commits to rewrite, and
+// dropping them would strip work the card was built on.
+type rebaseTarget struct {
+	// Tip is the base's current tip, the commit the branch lands on.
+	Tip string
+	// From is the recorded fork when only the card's own commits are
+	// replayed; empty for the plain rebase.
+	From string
+}
+
+func (t rebaseTarget) args() []string {
+	if t.From != "" {
+		return []string{"--onto", t.Tip, t.From}
+	}
+	return []string{t.Tip}
+}
+
+// rebaseTarget resolves f's rebase in its worktree p.
+func (m *Manager) rebaseTarget(ctx context.Context, f *domain.Feature, p string) (rebaseTarget, error) {
+	tip, err := m.BaseHead(ctx, f)
+	if err != nil {
+		return rebaseTarget{}, err
+	}
+	t := rebaseTarget{Tip: tip}
+	drift, err := m.Drift(ctx, f)
+	if err != nil || drift == nil || drift.ForkedFrom != "" {
+		// a probe that failed is a reason to behave as before, not to
+		// refuse a rebase git itself would run
+		return t, nil //nolint:nilerr // best effort: fall back to the plain rebase
+	}
+	// The fork must still be the root of the card's own work: a branch
+	// someone rebased by hand no longer carries it, and --onto from a
+	// commit outside the branch would replay the wrong range.
+	if ok, _ := gitOK(ctx, p, "merge-base", "--is-ancestor", drift.Recorded, "HEAD"); ok {
+		t.From = drift.Recorded
+	}
+	return t, nil
+}
+
+// RebaseCommand is the git command that rebases f onto its base, as
+// rebaseOnMain would run it — for the agent hand-off, which is told to
+// run the same rebase that stopped on conflicts rather than a different
+// one. A drifted card's command carries --autostash: the board's own
+// rebase of a drifted card stashes uncommitted work across it, and the
+// agent's has to be able to start on the same tree.
+func (m *Manager) RebaseCommand(ctx context.Context, f *domain.Feature) (string, error) {
+	p, err := m.requireWorktree(f)
+	if err != nil {
+		return "", err
+	}
+	t, err := m.rebaseTarget(ctx, f, p)
+	if err != nil {
+		return "", err
+	}
+	if t.From != "" {
+		return "git rebase --autostash --onto " + t.Tip + " " + t.From, nil
+	}
+	return "git rebase " + t.Tip, nil
 }
 
 // ResolveConflicts is handed an in-progress rebase's conflicted files to
@@ -1156,11 +1231,11 @@ func (m *Manager) RebaseOnMainResolving(ctx context.Context, f *domain.Feature, 
 	if err != nil {
 		return err
 	}
-	mainHead, err := runGit(ctx, m.repo, "rev-parse", m.baseRev(ctx, f))
+	target, err := m.rebaseTarget(ctx, f, p)
 	if err != nil {
 		return err
 	}
-	if _, rerr := runGit(ctx, p, "rebase", mainHead); rerr == nil {
+	if _, rerr := runGit(ctx, p, append([]string{"rebase"}, target.args()...)...); rerr == nil {
 		return nil
 	} else if !m.rebaseInProgress(ctx, p) {
 		return fmt.Errorf("rebase of %s did not start: %w", f.ID, rerr)
@@ -1430,12 +1505,22 @@ func (m *Manager) SquashMerge(ctx context.Context, f *domain.Feature, message st
 	return sha, nil
 }
 
-// ForkDriftRemedy is the single recovery phrase quoted verbatim by both
-// ForkDriftError.Error() and the doctor remediation line, so the two never
-// drift apart: pressing r rebases the branch onto main and re-anchors the
-// fork, and if main was rewound (not just rebased) restoring it from its
-// reflog undoes the accidental rewind.
-const ForkDriftRemedy = "press r in the board to rebase onto main and re-anchor this work item to it, or if main was accidentally rewound restore it from its reflog"
+// ForkDriftRemedy is the recovery phrase for a reader who has no single
+// card's base to name — the doctor line, which reports every drifted card
+// at once. ForkDriftError.Error() says the same thing through
+// forkDriftRemedy, naming the card's own base, so the two never drift
+// apart: r rebases the card's own commits onto its base and re-anchors
+// the fork, and if the base was rewound (not just rewritten on purpose)
+// restoring it from its reflog undoes the accident.
+const ForkDriftRemedy = "press r on the board (or answer rebase on the card) to rebase each card onto its base and re-anchor it there, or if a base was accidentally rewound restore it from its reflog"
+
+// forkDriftRemedy is ForkDriftRemedy for one card, naming its base: the
+// literal "main" sent a reader of a card based on another branch to the
+// wrong one.
+func forkDriftRemedy(base string) string {
+	return "press r on the board (or answer rebase on the card) to replay this card's own commits onto " + base +
+		" and re-anchor it there, or if " + base + " was accidentally rewound restore it from its reflog"
+}
 
 // ForkDriftError reports that the feature's recorded fork point is no
 // longer an ancestor of main's current HEAD — i.e. main was rewound past
@@ -1483,7 +1568,7 @@ func (e *ForkDriftError) Error() string {
 			e.FeatureID, e.Branch, e.Recorded, e.base(), e.ForkedFrom, e.base(), e.MainHead, e.ForkedFrom, e.base())
 	}
 	return fmt.Sprintf("%s (%s): fork drift — recorded fork %s is no longer in %s's history; %s now points at %s (likely a rebase, amend, or reset on %s). %s",
-		e.FeatureID, e.Branch, e.Recorded, e.base(), e.base(), e.MainHead, e.base(), ForkDriftRemedy)
+		e.FeatureID, e.Branch, e.Recorded, e.base(), e.base(), e.MainHead, e.base(), forkDriftRemedy(e.base()))
 }
 
 // AssertNoForkDrift refuses a diff-based operation when the feature's
@@ -1532,24 +1617,88 @@ func (m *Manager) AssertNoForkDrift(ctx context.Context, f *domain.Feature) erro
 	// into a caller's own merge-base computation: drift is defined against
 	// main HEAD, not the live merge-base, so reusing the latter would flag
 	// a legitimate branch rebase as drift.
+	drift, err := m.driftFrom(ctx, f, recorded)
+	if err != nil {
+		return err
+	}
+	if drift != nil {
+		return drift
+	}
+	return nil
+}
+
+// Drift is AssertNoForkDrift as a question rather than a refusal, and
+// without its side effect: it reports the card's drift, or nil when it has
+// none — including when no fork was ever recorded, which AssertNoForkDrift
+// would backfill and Drift leaves alone. It is what a reader that only
+// wants to know asks (the board, deciding what a stopped card may be
+// offered; the rebase, deciding what to replay), so asking never stamps a
+// fork as a by-product.
+func (m *Manager) Drift(ctx context.Context, f *domain.Feature) (*ForkDriftError, error) {
+	recorded, err := m.forkStore.ForkPoint(ctx, f.ID)
+	if err != nil || recorded == "" {
+		return nil, err
+	}
+	return m.driftFrom(ctx, f, recorded)
+}
+
+// driftFrom is the drift check proper against an already-known recorded
+// fork.
+func (m *Manager) driftFrom(ctx context.Context, f *domain.Feature, recorded string) (*ForkDriftError, error) {
 	base := m.baseRev(ctx, f)
 	ok, err := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", recorded, base)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if ok {
-		return nil
+		return nil, nil
 	}
 	mainHead, err := runGit(ctx, m.repo, "rev-parse", base)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	baseName := base
 	if base == "HEAD" {
 		baseName = m.BaseBranch(ctx)
 	}
-	return &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead,
-		ForkedFrom: m.branchCarrying(ctx, recorded, f.BranchName()), Base: baseName}
+	drift := &ForkDriftError{FeatureID: f.ID, Branch: f.BranchName(), Recorded: recorded, MainHead: mainHead, Base: baseName}
+	// The base once carried the fork and no longer does: it was
+	// rewritten under the card. Any other branch still carrying the old
+	// commit is a sibling cut from the same old base, not a branch this
+	// card forked from, so naming it would send the reader off to land
+	// the wrong thing.
+	if !m.baseOnceCarried(ctx, baseName, recorded) {
+		drift.ForkedFrom = m.branchCarrying(ctx, recorded, f.BranchName())
+	}
+	return drift, nil
+}
+
+// maxReflogProbe bounds how far back baseOnceCarried reads a base's
+// reflog. It runs only on the drift path, and a base rewritten under a
+// live card was rewritten recently.
+const maxReflogProbe = 200
+
+// baseOnceCarried reports whether the branch named base had sha in its
+// history at some point its reflog still remembers. False when it never
+// did, when the reflog is gone or expired, or when base is not a local
+// branch — every one of which leaves the older reading in place.
+func (m *Manager) baseOnceCarried(ctx context.Context, base, sha string) bool {
+	out, err := runGit(ctx, m.repo, "log", "-g", "--format=%H", "-n", strconv.Itoa(maxReflogProbe), "refs/heads/"+base, "--")
+	if err != nil || strings.TrimSpace(out) == "" {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, entry := range strings.Split(out, "\n") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" || seen[entry] {
+			continue
+		}
+		seen[entry] = true
+		if ok, _ := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", sha, entry); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // branchCarrying names a local branch that still has sha in its history,

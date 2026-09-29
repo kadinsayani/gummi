@@ -268,6 +268,12 @@ type nextInput struct {
 	// cutByQuit marks a paused run the last quit stopped (a host
 	// restart), so its decision says so instead of "the run is paused".
 	cutByQuit bool
+	// drifted is the card's fork drift (featureRow.Drift): its base no
+	// longer carries the commit it forked from, so every stage session is
+	// refused until a rebase clears it. driftForkedFrom names the unlanded
+	// branch the card really forked from, when that is the cause.
+	drifted         bool
+	driftForkedFrom string
 }
 
 // closed reports whether the card has ended — landed, or at done by any
@@ -491,6 +497,9 @@ func (m *Shell) nextInputFor(r featureRow) nextInput {
 	}
 	in.profiles = m.engine != nil && len(m.engine.BoardProfiles()) > 0
 	in.cutByQuit = m.quitCut[r.F.ID]
+	if r.Drift != nil {
+		in.drifted, in.driftForkedFrom = true, r.Drift.ForkedFrom
+	}
 	in.cardOpen = m.cardOpen
 	if r.F.IsFreeform() && m.engine != nil {
 		if ff := m.engine.Freeform(r.F.ID); ff != nil {
@@ -856,6 +865,51 @@ func appendPullReviewSuggestion(acts []nextAction, in nextInput) []nextAction {
 // anywhere near it (DESIGN §6.3: the options are deterministic even
 // though the narration above them is not).
 func stageActions(in nextInput) []nextAction {
+	acts := stageAnswers(in)
+	if !in.drifted || in.closed() {
+		return acts
+	}
+	switch in.sess {
+	case engine.StateQueued, engine.StateRunning:
+		// the run owns the screen; it will stop on the drift by itself
+		return acts
+	}
+	if in.freeformBusy {
+		return acts
+	}
+	return driftActions(in, acts)
+}
+
+// driftActions leads a drifted card's stop with the one answer that can
+// work. Every stage session refuses a drifted card before it starts, so a
+// failure caused by the drift was offered "try again" and "change
+// profile" — two retries of the refusal — and nothing that cleared it:
+// the remedy its own sentence named was a board key the page does not
+// have. The rebase replaces those; every other answer the stop has (an
+// approve, a landing, stop here) stays behind it, since each is refused
+// or allowed on its own terms.
+func driftActions(in nextInput, acts []nextAction) []nextAction {
+	why := in.landBase() + " no longer carries the commit this card forked from — nothing runs until this card's own commits are replayed onto it"
+	if in.driftForkedFrom != "" {
+		why = "this card forked from " + in.driftForkedFrom + ", which has not landed on " + in.landBase() +
+			" — nothing runs until it is rebased onto " + in.landBase() + " (or " + in.driftForkedFrom + " lands)"
+	}
+	out := []nextAction{nextStep("rebase", "r", "rebase onto "+in.landBase(), why)}
+	for _, a := range acts {
+		switch {
+		case a.id == "rebase":
+			continue // already leading
+		case in.attn == attnFailure && (a.id == "run" || a.id == "profile"):
+			continue // a retry, under any profile, hits the same refusal
+		}
+		out = append(out, a)
+	}
+	return out
+}
+
+// stageAnswers is stageActions before a drifted card's rebase is put in
+// front of it.
+func stageAnswers(in nextInput) []nextAction {
 	// A card that has ended answers for its ending, not for its stage.
 	// Both halves of this used to be a bare return — see closedActions.
 	if in.closed() {

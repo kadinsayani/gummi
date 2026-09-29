@@ -529,6 +529,15 @@ func (p *Pool) AssertNoForkDrift(ctx context.Context, f *domain.Feature) error {
 	return wt.AssertNoForkDrift(ctx, f)
 }
 
+// Drift mirrors Manager.Drift, resolving f's repository manager first.
+func (p *Pool) Drift(ctx context.Context, f *domain.Feature) (*ForkDriftError, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return nil, err
+	}
+	return wt.Drift(ctx, f)
+}
+
 func (p *Pool) ReanchorOnMain(ctx context.Context, f *domain.Feature) error {
 	wt, err := p.ManagerFor(ctx, f)
 	if err != nil {

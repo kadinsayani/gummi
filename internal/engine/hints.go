@@ -596,7 +596,10 @@ func rebaseHint() string {
 	return strings.TrimSpace(`
 Task: Rebase onto main (autonomous). This branch no longer applies
 cleanly on main — a plain rebase stops on conflicts, and your job is to
-resolve them. Run the rebase command from the kickoff. For each
+resolve them. Run the rebase command from the kickoff exactly as given;
+when it carries --onto, the base was rewritten under this card and only
+the card's own commits are replayed — the base's older commits are gone
+from it on purpose, so never bring them back. For each
 conflicted file, reconcile BOTH sides: keep this branch's intent (the
 design artifact is the reference) and the changes that landed on main —
 never resolve by discarding one side wholesale. Stage each resolved

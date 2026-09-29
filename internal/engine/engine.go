@@ -986,11 +986,19 @@ func (e *Engine) RunRebase(ctx context.Context, f domain.Feature, files []string
 	if err != nil {
 		return err
 	}
-	head, err := wt.MainHead(ctx)
+	// the same rebase the board's r ran and saw stop on conflicts, against
+	// the card's own base — which is not always what the checkout has out,
+	// and for a card whose base was rewritten under it replays only the
+	// card's own commits (worktree.rebaseTarget)
+	cmd, err := wt.RebaseCommand(ctx, &f)
 	if err != nil {
 		return err
 	}
-	note := "Rebase this branch onto main's current HEAD: run `git rebase " + head + "`."
+	base := wt.BaseRevFor(ctx, &f)
+	if base == "HEAD" {
+		base = wt.BaseBranch(ctx)
+	}
+	note := "Rebase this branch onto " + base + "'s current tip: run `" + cmd + "`."
 	if len(files) > 0 {
 		note += "\nExpect conflicts in: " + strings.Join(files, ", ") + "."
 	}
@@ -1811,7 +1819,10 @@ func (e *Engine) trackAgentPID(id domain.FeatureID, sess agent.Session) {
 // used to mean. It is a property of the SESSION, not of the stage — chat
 // is available against any stage now, and no stage is a chat by nature.
 func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role agent.Role, budget float64, flavor runFlavor, attached bool, resumeID string) (agent.Session, string, func(), error) {
-	workDir, specPath, err := e.locate(ctx, f)
+	// The rebase pass is the one session a drifted card may start: it
+	// exists to clear the drift, and the refusal every other session gets
+	// would leave the board's own remedy unable to run.
+	workDir, specPath, err := e.locateFor(ctx, f, flavor == flavorRebase)
 	if err != nil {
 		return nil, "", nil, err
 	}
@@ -2029,6 +2040,12 @@ func (e *Engine) recoverMissingWorktree(ctx context.Context, wt *worktree.Manage
 // outside every working directory — is reached through gummi's spec
 // tools, not the filesystem.
 func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPath string, err error) {
+	return e.locateFor(ctx, f, false)
+}
+
+// locateFor is locate, with allowDrift skipping the fork-drift refusal —
+// for the rebase-resolve pass alone (newAgentSession).
+func (e *Engine) locateFor(ctx context.Context, f domain.Feature, allowDrift bool) (workDir, specPath string, err error) {
 	wt, err := e.mgr(ctx, &f)
 	if err != nil {
 		return "", "", err
@@ -2097,8 +2114,10 @@ func (e *Engine) locate(ctx context.Context, f domain.Feature) (workDir, specPat
 	// on-disk branch's base incoherent with main; refuse before promoting
 	// the artifact or handing the agent a workdir it can only deepen the
 	// divergence in.
-	if err := wt.AssertNoForkDrift(ctx, &f); err != nil {
-		return "", "", err
+	if !allowDrift {
+		if err := wt.AssertNoForkDrift(ctx, &f); err != nil {
+			return "", "", err
+		}
 	}
 	// A freeform card has no artifact to promote: there is no draft, no
 	// workspace home, and no document any stage was told to read (DESIGN

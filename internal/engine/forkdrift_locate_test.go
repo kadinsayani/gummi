@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/morphis/gummi/internal/agent"
@@ -355,4 +356,62 @@ func scratchPath(t *testing.T, wt *worktree.Manager, f *domain.Feature) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// The rebase pass is the one session a drifted card may start. It is the
+// remedy the drift refusal names, and it went through that same refusal:
+// the board's agent hand-off for a conflicted rebase of a drifted card
+// failed at once with the drift it was dispatched to clear. Its kickoff
+// replays only the card's own commits, and every other session on the
+// same card is still refused.
+func TestTheRebasePassStartsOnADriftedCard(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	var kicked string
+	ag := &agent.Fake{Responder: func(_ agent.SessionOpts, msg string) []agent.Event {
+		kicked = msg
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}}
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m", MaxActive: 1})
+	t.Cleanup(func() { e.Close() })
+
+	f := feature(1, "rebase drift", domain.StageImplement)
+	if err := store.CreateFeature(context.Background(), &f); err != nil {
+		t.Fatal(err)
+	}
+	withWorktree(t, wt, f)
+	p := filepath.Join(ws.Root, f.WorktreePath())
+	if err := os.WriteFile(filepath.Join(p, "feat.txt"), []byte("card\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, p, "add", ".")
+	gitIn(t, p, "commit", "-qm", "card work")
+	// amend main's tip: the base rewritten under the card
+	if err := os.WriteFile(filepath.Join(ws.Root, "amended.txt"), []byte("x\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, ws.Root, "add", "amended.txt")
+	gitIn(t, ws.Root, "commit", "-q", "--amend", "-m", "amended")
+
+	if err := e.Run(f); err != nil {
+		t.Fatal(err)
+	}
+	var fe *worktree.ForkDriftError
+	if s := e.Get(f.ID); s == nil || !errors.As(s.Snapshot().Err, &fe) {
+		t.Fatal("a stage run on a drifted card was not refused with the drift")
+	}
+
+	if err := e.RunRebase(context.Background(), f, []string{"feat.txt"}); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, e, f.ID, StateDone)
+	if s := e.Get(f.ID); s.Snapshot().Err != nil {
+		t.Fatalf("rebase pass refused: %v", s.Snapshot().Err)
+	}
+	fork, err := wt.ForkPoint(context.Background(), &f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(kicked, "git rebase --autostash --onto ") || !strings.Contains(kicked, " "+fork+"`") {
+		t.Fatalf("kickoff does not replay from the recorded fork %s:\n%s", fork, kicked)
+	}
 }

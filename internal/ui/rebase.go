@@ -140,6 +140,7 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		return m.loadRows
 	}
 	f := msg.f
+	drifted, _ := m.wt.Drift(context.Background(), &f)
 	// The rebase resolved cleanly; re-anchor the recorded fork to main's
 	// HEAD so a drifted feature is cleared in the same gesture and the
 	// resolution does not go stale under the next rewrite of main.
@@ -147,6 +148,9 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		return func() tea.Msg {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
+	}
+	if drifted != nil {
+		m.driftCleared(id)
 	}
 	if f.Stage != domain.StageVerify {
 		m.notice = noticeMsg{text: string(id) + " rebased onto main"}
@@ -161,4 +165,38 @@ func (m *Shell) rebaseSettled(msg rebaseSettledMsg) tea.Cmd {
 		}
 		return noticeMsg{text: string(f.ID) + " rebased onto main → re-verifying", reload: true}
 	}
+}
+
+// driftCleared rewrites a failure the fork drift caused once a rebase has
+// cleared it. The stop itself stands — the stage still has not run — but
+// its sentence was the drift, and left in place it went on telling the
+// reader to rebase a card that just was, above a "try again" that will
+// now work.
+func (m *Shell) driftCleared(id domain.FeatureID) {
+	// the row too, in the same update: its answers must not go on
+	// offering the rebase under a sentence that says it happened
+	for i := range m.rows {
+		if m.rows[i].F.ID == id {
+			m.rows[i].Drift = nil
+		}
+	}
+	it, ok := m.inbox.get(id)
+	if !ok || it.Kind != attnFailure {
+		return
+	}
+	stage := "the stage"
+	if f, err := m.store.GetFeature(context.Background(), id); err == nil {
+		stage = string(f.Stage)
+	}
+	it.Text = "rebased onto " + m.baseBranchOf(id) + " — the fork drift that stopped " + stage + " is cleared; try again to run it"
+	m.inbox.put(it)
+}
+
+// inboxIDs is the set of cards with a stop in the inbox right now.
+func (m *Shell) inboxIDs() map[domain.FeatureID]bool {
+	ids := map[domain.FeatureID]bool{}
+	for _, it := range m.inbox.list() {
+		ids[it.Feature] = true
+	}
+	return ids
 }

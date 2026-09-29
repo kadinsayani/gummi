@@ -355,6 +355,13 @@ func whyItStopped(in nextInput) string {
 			// will report a healthy workspace.
 			return "The " + stage + " session's backend could not serve the turn: " + sanitize(in.backendUnavailable) + ". Nothing is wrong with the card or the setup — pick it back up when the backend is available again."
 		}
+		if in.drifted {
+			// Not the backend and not the card's work: the branch its
+			// base was cut from is gone from under it, and every session
+			// is refused until the rebase replays the card onto it again.
+			// A profile or a retry cannot help, so neither is suggested.
+			return "The " + stage + " session never started: " + in.landBase() + " no longer carries the commit this card forked from, so every run is refused until the card's own commits are rebased onto it."
+		}
 		if in.backendNeverStarted {
 			// The failure a first-time user hits most and can act on
 			// least: the coding CLI died before producing a single turn,

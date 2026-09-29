@@ -446,6 +446,14 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 		// The cause goes in the question: in the thread alone it was one
 		// scroll away from the options that answer it, and a reader who
 		// opened the card on its decision never saw why it failed.
+		if in.drifted {
+			// The drift's own sentence carries two full SHAs and both
+			// remedies; quoted here it filled the decision box and pushed
+			// the one answer that works below the fold. The thread above
+			// already prints it whole, so the question says what matters.
+			return string(r.F.Stage) + " cannot run: " + in.landBase() +
+				" no longer carries the commit this card forked from — rebase it, or choose what happens next."
+		}
 		if cause := strings.TrimSpace(in.attnText); cause != "" {
 			return string(r.F.Stage) + " failed: " + cause + " — choose what happens next."
 		}

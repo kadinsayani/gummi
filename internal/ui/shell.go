@@ -1570,6 +1570,20 @@ func (m *Shell) handleEngineEvent(ev engine.Event) tea.Cmd {
 			// a one-shot pass not bound to a feature (ingest) has no card
 			// to queue behind; the notice alone carries it
 			if ev.Feature != "" {
+				// a drifted card is only probed for its drift once it is
+				// stopped on a person (stoppedDrift). The error already
+				// says so: mark the row before the stop is raised, so the
+				// failure is never shown — and answered — with the
+				// retries the drift refuses, only to change under the
+				// reader when the rows reload.
+				var drift *worktree.ForkDriftError
+				if errors.As(ev.Err, &drift) {
+					for i := range m.rows {
+						if m.rows[i].F.ID == ev.Feature {
+							m.rows[i].Drift = drift
+						}
+					}
+				}
 				m.raiseAttention(ev.Feature, attnFailure, text)
 			}
 		}
@@ -1948,16 +1962,25 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reconstructInbox()
 			return m, nil
 		}
-		if msg.refresh {
+		before := m.inboxIDs()
+		switch {
+		case msg.refresh:
 			m.refreshInboxFromDecisions(msg.decisions)
-			return m, nil
-		}
-		if msg.reseed {
+		case msg.reseed:
 			m.seedInboxFromDecisions(msg.decisions)
-			return m, nil
+		default:
+			m.seedInboxFromDecisions(msg.decisions)
+			m.reconstructInbox()
 		}
-		m.seedInboxFromDecisions(msg.decisions)
-		m.reconstructInbox()
+		// A card is probed for fork drift only once it is stopped on a
+		// person (stoppedDrift), and the rows may have loaded before this
+		// seeding put its stop back — at startup they always do. Reload
+		// when a card newly stopped here, so its answers know.
+		for _, it := range m.inbox.list() {
+			if !before[it.Feature] {
+				return m, m.loadRows
+			}
+		}
 		return m, nil
 
 	case noticeMsg:
@@ -2245,6 +2268,9 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.rebaseSettled(msg)
 
 	case rebasedMsg:
+		if msg.cleared {
+			m.driftCleared(msg.id)
+		}
 		model, cmd := m.Update(msg.notice)
 		return model, tea.Batch(cmd, m.rebaselineCmd(msg.id))
 

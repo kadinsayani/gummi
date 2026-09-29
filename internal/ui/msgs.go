@@ -100,6 +100,13 @@ type featureRow struct {
 	// feature and can therefore read the goal's stage; false for a card in
 	// no goal, and in a scaffold that builds rows by hand. See conducted().
 	GoalLive bool
+	// Drift is the card's fork drift as its worktree stands at load — its
+	// base no longer carries the commit it forked from — nil when there is
+	// none or no worktree. Every stage session refuses a drifted card
+	// before it starts, so a stop on one has exactly one answer that can
+	// work (the rebase), and the answer set has to know that without
+	// reading it back out of an error sentence.
+	Drift *worktree.ForkDriftError
 }
 
 // baseBranch names the branch r's card lands on, for prose that only has
@@ -352,6 +359,7 @@ func (m *Shell) loadRows() tea.Msg {
 			// worktree — flag it so the board can offer cleanup.
 			if ok {
 				row.Landed = m.canHaveLanded(ctx, &f)
+				row.Drift = m.stoppedDrift(ctx, &f, row.Landed)
 			}
 		}
 		row.OpenSpecQs = m.openQuestionsBlockingGate(f)
@@ -385,6 +393,28 @@ func (m *Shell) loadRows() tea.Msg {
 	// because they ask git (is this card stale? has it landed?) and the
 	// render path may not. Keyed by card, so cardLine is a map lookup.
 	return rowsMsg{rows: rows, stacks: m.stackRowsForFeatures(ctx, feats), seq: seq, changes: changes}
+}
+
+// stoppedDrift is a card's fork drift, asked only of a card stopped on a
+// person — the one whose answer set is on screen and has to know that
+// every run will be refused. The rest of the board pays nothing for it:
+// loadRows runs on every refresh, and its git spawns are budgeted
+// (TestReloadGitCount). A card that meets its drift by running raises a
+// failure, and that failure reloads the rows (handleEngineEvent), so it
+// is asked then. Read-only: Drift never backfills a fork the way the
+// refusing check does, so loading the board stamps nothing.
+func (m *Shell) stoppedDrift(ctx context.Context, f *domain.Feature, landed bool) *worktree.ForkDriftError {
+	if landed {
+		return nil
+	}
+	if _, ok := m.inbox.get(f.ID); !ok {
+		return nil
+	}
+	d, err := m.wt.Drift(ctx, f)
+	if err != nil {
+		return nil
+	}
+	return d
 }
 
 // dependencyBlockers reports the direct dependencies that would block the
@@ -1092,6 +1122,8 @@ func (m *Shell) rebaseFeature(f domain.Feature) tea.Cmd {
 type rebasedMsg struct {
 	id     domain.FeatureID
 	notice noticeMsg
+	// cleared: the card was drifted before this rebase and is not now
+	cleared bool
 }
 
 // rebaselineCmd re-measures a card's excused checks when its base moved
@@ -1128,6 +1160,7 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 		} else if !ok {
 			return noticeMsg{text: noWorktreeYet(f), isErr: true}
 		}
+		drifted, _ := m.wt.Drift(ctx, &f)
 		// a rebase stranded mid-flight (a crash, a killed agent session)
 		// blocks any new rebase and reads as dirty; abort it first so r
 		// always recovers the worktree before retrying.
@@ -1172,7 +1205,8 @@ func (m *Shell) rebaseFeatureLocked(f domain.Feature) tea.Cmd {
 		if err := m.wt.ReanchorOnMain(ctx, &f); err != nil {
 			return noticeMsg{text: sanitize(fmt.Sprintf("%s: rebased but fork not re-anchored: %v", f.ID, err)), isErr: true}
 		}
-		return rebasedMsg{id: f.ID, notice: noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true}}
+		return rebasedMsg{id: f.ID, cleared: drifted != nil,
+			notice: noticeMsg{text: string(f.ID) + " rebased onto " + m.baseBranch(f), reload: true}}
 	})
 }
 
