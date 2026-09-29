@@ -454,6 +454,12 @@ func (m *Manager) createAt(ctx context.Context, f *domain.Feature, start string)
 			return "", err
 		}
 	}
+	if err := relinkGitFile(p); err != nil {
+		if _, rmErr := runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p); rmErr == nil {
+			_, _ = runGit(ctx, m.repo, "branch", "-D", "--", branch)
+		}
+		return "", fmt.Errorf("linking new worktree: %w", err)
+	}
 	// The checkout tracks whatever HEAD carries, including .gummi content
 	// the launch untracking only removed from main's index. Untrack it
 	// here too, or agent adds in this worktree sweep .gummi churn in.
