@@ -41,7 +41,7 @@ func TestWriterKickoffCarriesOpenSpecComments(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	compiled := CompileSpecComments(spec.Parse(body))
+	compiled := CompileSpecComments(f, spec.Parse(body))
 	if compiled == "" {
 		t.Fatal("setup: the comment did not compile as open")
 	}

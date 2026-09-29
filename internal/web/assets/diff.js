@@ -2,7 +2,8 @@
 // with the review comments anchored in it. Clicking a line number opens a
 // comment box (POST …/diff/annotations with the line's raw-diff index);
 // comments can be resolved or deleted, and "Request changes" sends the open
-// ones to the implementer (POST …/diff/changes). "Viewed" ticks are kept per card in
+// ones to the implementer (POST …/diff/changes) — asking first when that
+// sends the card back. "Viewed" ticks are kept per card in
 // this browser. When the branch moves while someone reads, the new diff is
 // announced with a banner, never swapped in under the reader.
 
@@ -103,7 +104,7 @@ function render (pane, entry, ctx) {
     pane.append(h('div', { class: 'pending' }, h('span', { testid: 'diff-pending' }, carried
       ? `${plural(d.pendingComments, 'comment')} will go with your next answer.`
       : `${plural(d.pendingComments, 'comment')} on this diff ${d.pendingComments === 1 ? 'is' : 'are'} still open.`),
-    h('button', { class: 'btn', type: 'button', testid: 'diff-request-changes', title: 'Send the open comments to the implementer now', onclick: (e) => requestChanges(ctx.id, 'diff', e.currentTarget) }, 'Request changes')))
+    h('button', { class: 'btn', type: 'button', testid: 'diff-request-changes', title: 'Send the open comments to the implementer, or back to plan with a design note', onclick: (e) => requestChanges(ctx.id, 'diff', e.currentTarget) }, 'Request changes')))
   }
 
   if (onlySince && !files.length) pane.append(h('div', { class: 'empty' }, h('b', null, 'Nothing new'), `No file changed after ${since.slice(0, 7)}.`))

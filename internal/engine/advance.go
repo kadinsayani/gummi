@@ -169,7 +169,7 @@ func (e *Engine) Advance(ctx context.Context, id domain.FeatureID, actor string)
 			return res, nil
 		}
 		// so do unresolved diff annotations, the gate's other backend.
-		if n := e.openDiffCommentsBlockingGate(ctx, id); n > 0 {
+		if n := e.openDiffCommentsBlockingGate(ctx, f); n > 0 {
 			res.Status, res.Blockers = StatusBlockedDiff, n
 			return res, nil
 		}
@@ -449,7 +449,7 @@ func (e *Engine) GateBlockers(ctx context.Context, id domain.FeatureID) (specOpe
 		return 0, 0, nil, err
 	}
 	specOpen = e.openQuestionsBlockingGate(f)
-	diffOpen = e.openDiffCommentsBlockingGate(ctx, id)
+	diffOpen = e.openDiffCommentsBlockingGate(ctx, f)
 	if e.nextStage(f) == domain.StageImplement {
 		if deps, err = e.unmetDeps(ctx, id); err != nil {
 			return 0, 0, nil, err
@@ -775,12 +775,13 @@ func (e *Engine) openQuestionsBlockingGate(f domain.Feature) int {
 	if err != nil {
 		return 0
 	}
-	return len(spec.Parse(string(raw)).UserOpenThreads())
+	return len(SpecCommentsHolding(domain.CardTypeOf(&f), f.Stage, spec.Parse(string(raw))))
 }
 
-// openSpecComments compiles an item's open user annotations into the turn
-// its stage writer addresses them from (CompileSpecComments). Empty for a
-// missing or unreadable artifact, or when nothing is open.
+// openSpecComments compiles the open user annotations f's current stage
+// answers into the turn its writer addresses them from
+// (CompileSpecComments). Empty for a missing or unreadable artifact, or
+// when nothing is open for this stage.
 func (e *Engine) openSpecComments(f domain.Feature) string {
 	path := e.artifactFile(&f)
 	if path == "" {
@@ -790,7 +791,7 @@ func (e *Engine) openSpecComments(f domain.Feature) string {
 	if err != nil {
 		return ""
 	}
-	return CompileSpecComments(spec.Parse(string(raw)))
+	return CompileSpecComments(f, spec.Parse(string(raw)))
 }
 
 // CompileSpecComments builds the instruction listing a spec's open user
@@ -799,15 +800,24 @@ func (e *Engine) openSpecComments(f domain.Feature) string {
 // writer run carries it in its kickoff, so a comment left while a critique
 // held the card still reaches the writer. Empty when the human has no open
 // comments.
-func CompileSpecComments(doc spec.Doc) string {
-	threads := doc.UserOpenThreads()
+//
+// It lists only the comments f's current stage answers
+// (SpecCommentsAnswered): a comment an earlier stage owns is that stage's,
+// and the resolution line names the role actually receiving the turn,
+// rather than an architect who may not be there.
+func CompileSpecComments(f domain.Feature, doc spec.Doc) string {
+	threads := SpecCommentsAnswered(domain.CardTypeOf(&f), f.Stage, doc)
 	if len(threads) == 0 {
 		return ""
+	}
+	role := "architect"
+	if r, ok := roleForStage(f); ok {
+		role = string(r)
 	}
 	var b strings.Builder
 	b.WriteString("Please address these review comments in the spec. ")
 	b.WriteString("For each, edit the relevant section and mark it resolved with a line like ")
-	b.WriteString("`%% @architect: resolved — <how>`:\n\n")
+	fmt.Fprintf(&b, "`%%%% @%s: resolved — <how>`:\n\n", role)
 	for _, t := range threads {
 		mk := spec.UnresolvedUserMarker(t)
 		q := mk.Text
@@ -850,9 +860,13 @@ func (e *Engine) omissionGateBlocksAdvance(ctx context.Context, f domain.Feature
 // openDiffCommentsBlockingGate returns the number of unresolved diff
 // annotations on an item — the diff-backend half of §6.1's gate check.
 // Zero on any store error: like an unreadable artifact, a failed read never
-// wedges the gate shut.
-func (e *Engine) openDiffCommentsBlockingGate(ctx context.Context, id domain.FeatureID) int {
-	anns, err := e.cfg.Store.ListDiffAnnotations(ctx, id)
+// wedges the gate shut. Zero, too, at a stage before implement, which owns
+// them (DiffCommentsHold).
+func (e *Engine) openDiffCommentsBlockingGate(ctx context.Context, f domain.Feature) int {
+	if !DiffCommentsHold(f.Stage) {
+		return 0
+	}
+	anns, err := e.cfg.Store.ListDiffAnnotations(ctx, f.ID)
 	if err != nil {
 		return 0
 	}

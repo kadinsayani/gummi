@@ -300,6 +300,46 @@ func TestAdvanceBlockedByQuestions(t *testing.T) {
 	}
 }
 
+// A comment holds the gates of the stage that owns it and every one after,
+// and none before: a note on Progress and a diff comment are implement's,
+// so a card sent back to plan is not held at the design gate by either —
+// the architect could answer neither — while implement's gate is.
+func TestGateHeldOnlyFromTheOwningStage(t *testing.T) {
+	e, ws, store, _ := advanceEngine(t)
+	ctx := context.Background()
+	f := feature(1, "owned", domain.StagePlan)
+	putFeature(t, store, f)
+	if err := os.MkdirAll(ws.DraftsDir(), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	body := "# Spec\n\n## Chosen approach\n\nA toggle.\n\n## Progress\n\nNothing yet.\n%% @user(2026-09-29): log the migration here\n"
+	if err := os.WriteFile(filepath.Join(ws.DraftsDir(), spec.DraftFilename(&f)), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.AddDiffAnnotation(ctx, domain.DiffAnnotation{
+		Feature: f.ID, File: "a.go", Anchor: "h", Excerpt: "x", Comment: "fix this",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	specOpen, diffOpen, _, err := e.GateBlockers(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if specOpen != 0 || diffOpen != 0 {
+		t.Errorf("plan gate held by %d spec / %d diff comments implement owns", specOpen, diffOpen)
+	}
+
+	if _, err := store.Transition(ctx, f.ID, domain.StageImplement, "user"); err != nil {
+		t.Fatal(err)
+	}
+	if specOpen, diffOpen, _, err = e.GateBlockers(ctx, f.ID); err != nil {
+		t.Fatal(err)
+	}
+	if specOpen != 1 || diffOpen != 1 {
+		t.Errorf("implement gate held by %d spec / %d diff comments, want 1 / 1", specOpen, diffOpen)
+	}
+}
+
 // Unresolved diff annotations block the gate on the diff backend.
 func TestAdvanceBlockedByDiff(t *testing.T) {
 	e, _, store, _ := advanceEngine(t)

@@ -744,8 +744,10 @@ func TestDocsRequestChanges(t *testing.T) {
 
 	t.Run("spec", func(t *testing.T) {
 		b := newDocsBoard(t, agent.NewFake("ok"))
+		// a note on the Verification section is nobody's in particular,
+		// so the implement stage the card is in takes it
 		var sp webapi.Spec
-		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/notes", `{"line":5,"text":"only after dark?"}`, &sp); st != http.StatusOK {
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/notes", `{"line":7,"text":"check it at night too"}`, &sp); st != http.StatusOK {
 			t.Fatalf("add note = %d", st)
 		}
 		if sp.OpenComments != 1 {
@@ -757,6 +759,38 @@ func TestDocsRequestChanges(t *testing.T) {
 		}
 		if !out.OK || !strings.Contains(out.Text, "1 review comment") {
 			t.Errorf("outcome = %+v", out)
+		}
+	})
+
+	// A note on the Problem is the design stage's to answer: the card goes
+	// back to plan for it, and only once the person has said yes to the
+	// question that says so.
+	t.Run("spec back to plan", func(t *testing.T) {
+		b := newDocsBoard(t, agent.NewFake("ok"))
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/notes", `{"line":5,"text":"only after dark?"}`, nil); st != http.StatusOK {
+			t.Fatalf("add note = %d", st)
+		}
+		var ask webapi.Error
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/changes", "", &ask); st != http.StatusAccepted {
+			t.Fatalf("spec changes = %d, want the 202 question", st)
+		}
+		if ask.Error != webapi.ConflictConfirm || ask.Confirm == "" ||
+			!strings.Contains(ask.Text, "back to plan") || !strings.Contains(ask.Text, "Problem") {
+			t.Fatalf("question = %+v", ask)
+		}
+		if f, _ := b.store.GetFeature(context.Background(), "FD-001"); f.Stage != domain.StageImplement {
+			t.Fatalf("asking moved the card to %s", f.Stage)
+		}
+		var out webapi.Outcome
+		body := fmt.Sprintf(`{"confirm":%q}`, ask.Confirm)
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/changes", body, &out); st != http.StatusOK {
+			t.Fatalf("confirmed spec changes = %d", st)
+		}
+		if !out.OK || !strings.Contains(out.Text, "sent back to plan") {
+			t.Errorf("outcome = %+v", out)
+		}
+		if f, _ := b.store.GetFeature(context.Background(), "FD-001"); f.Stage != domain.StagePlan {
+			t.Errorf("stage = %s, want plan", f.Stage)
 		}
 	})
 

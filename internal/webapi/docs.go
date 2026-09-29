@@ -175,6 +175,14 @@ type AnnotationRequest struct {
 	Text    string `json:"text,omitempty"`
 }
 
+// ChangesRequest is the optional body of POST /api/cards/{id}/spec/changes
+// and /diff/changes. A request that would send the card back to an earlier
+// stage is answered with a "confirm" question first; Confirm is the token
+// that question came with, sent back once the person has said yes.
+type ChangesRequest struct {
+	Confirm string `json:"confirm,omitempty"`
+}
+
 // AnnotationResolveRequest is the optional body of POST
 // /api/cards/{id}/diff/annotations/{aid}/resolve: Resolved false opens
 // the comment again. With no body the comment is resolved. Answers Diff,

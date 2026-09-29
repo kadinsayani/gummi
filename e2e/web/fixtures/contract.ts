@@ -145,8 +145,17 @@ export async function mockCard(page: Page, id: string, opts: { kind?: string; de
   });
   for (const what of ['spec', 'diff']) {
     await page.route(`${base}/${what}/changes`, async (r) => {
-      m.changes.push(what);
-      await json(r, { ok: true, text: what === 'spec' ? `${id}: re-running verify with 1 review comment(s)` : `${id}: sent 1 diff comment to the implementer` });
+      const confirm = r.request().postDataJSON()?.confirm;
+      m.changes.push(confirm ? `${what}:${confirm}` : what);
+      if (what === 'spec') {
+        await json(r, { ok: true, text: `${id}: re-running verify with 1 review comment(s)` });
+      } else if (!confirm) {
+        // the card is at verify: the diff's comments are implement's, so
+        // the board asks before it sends the card back (a 202 question)
+        await json(r, { error: 'confirm', needs: 'confirm', text: `send ${id} back to implement? the diff comments are implement's to answer — verify runs again after it`, confirm: 'c0ffee' }, 202);
+      } else {
+        await json(r, { ok: true, text: `${id}: sent back to implement with the diff comments` });
+      }
     });
   }
   await page.route(`${base}/pr`, (r) => json(r, pr));

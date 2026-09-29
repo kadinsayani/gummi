@@ -224,7 +224,9 @@ func TestTheReentryChipIsAConfirmDecision(t *testing.T) {
 // loop does would recount the card's gate blockers; RefreshBlockers does,
 // and tells the pages the card changed.
 func TestRefreshBlockersRecountsAWebWrite(t *testing.T) {
-	b, log, _, f, _ := headlessBoard(t, agent.NewFake("ok"))
+	// at implement, which owns diff comments: before it they hold no gate
+	// and the row does not count them (engine.DiffCommentsHold)
+	b, log, _, f, _ := headlessBoardFor(t, agent.NewFake("ok"), domain.Feature{ID: "FD-001", Num: 1, Title: "Dark mode", Slug: "dark-mode", Stage: domain.StageImplement})
 	ctx := context.Background()
 	waitBoard(t, b, func(bd webapi.Board) bool { return len(bd.Rows) == 1 })
 	var store *state.Store

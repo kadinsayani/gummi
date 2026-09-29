@@ -189,10 +189,15 @@ func (s *Server) handleSpecResolve(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleSpecChanges is POST /api/cards/{id}/spec/changes: the spec
-// surface's "request changes", answered with what the board said.
+// surface's "request changes", answered with what the board said — or,
+// when it would send the card back, with the question to confirm first.
 func (s *Server) handleSpecChanges(w http.ResponseWriter, r *http.Request) {
+	var req webapi.ChangesRequest
+	if !readBody(w, r, &req) {
+		return
+	}
 	id, by := r.PathValue("id"), person(r)
-	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestSpecChanges(id, by) })
+	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestSpecChanges(id, by, req.Confirm) })
 }
 
 // handleDiff is GET /api/cards/{id}/diff[?since=<commit>].
@@ -229,10 +234,14 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDiffChanges is POST /api/cards/{id}/diff/changes: the diff
-// surface's "request changes", answered with what the board said.
+// surface's "request changes", answered as handleSpecChanges is.
 func (s *Server) handleDiffChanges(w http.ResponseWriter, r *http.Request) {
+	var req webapi.ChangesRequest
+	if !readBody(w, r, &req) {
+		return
+	}
 	id, by := r.PathValue("id"), person(r)
-	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestDiffChanges(id, by) })
+	s.intent(w, r, func(m *ui.Shell) (tea.Cmd, error) { return m.WebRequestDiffChanges(id, by, req.Confirm) })
 }
 
 func annotationID(w http.ResponseWriter, r *http.Request) (int64, bool) {

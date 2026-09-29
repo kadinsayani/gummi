@@ -395,6 +395,22 @@ func sectionBounds(content, name string) (bodyStart, bodyEnd int, matchedTitle s
 // isHeading reports whether line is a top-level section heading (`## `
 // at column 0). A line that merely starts with `##` without the space is
 // not a heading.
+// SectionAt names the top-level section a 1-based line sits in: the title
+// of the nearest `## ` heading at or above it, by the same rule Headings
+// reads. "" for a line above the first heading, or out of range — the
+// document's preamble belongs to no section.
+func (d Doc) SectionAt(line int) string {
+	if line < 1 || line > len(d.Lines) {
+		return ""
+	}
+	for i := line - 1; i >= 0; i-- {
+		if isHeading(d.Lines[i]) {
+			return strings.TrimSpace(d.Lines[i][len("## "):])
+		}
+	}
+	return ""
+}
+
 func isHeading(line string) bool {
 	return strings.HasPrefix(line, "## ")
 }

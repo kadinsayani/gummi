@@ -306,7 +306,7 @@ func (m *Shell) refreshBlockers(id domain.FeatureID) tea.Cmd {
 		return blockersMsg{
 			id:               id,
 			openSpecQs:       m.openQuestionsBlockingGate(f),
-			openDiffComments: m.openDiffCommentsBlockingGate(ctx, id),
+			openDiffComments: m.openDiffCommentsBlockingGate(f),
 			undrafted:        m.undraftedGate(f),
 		}
 	}
@@ -355,7 +355,7 @@ func (m *Shell) loadRows() tea.Msg {
 			}
 		}
 		row.OpenSpecQs = m.openQuestionsBlockingGate(f)
-		row.OpenDiffComments = m.openDiffCommentsBlockingGate(ctx, f.ID)
+		row.OpenDiffComments = m.openDiffCommentsBlockingGate(f)
 		row.Undrafted = m.undraftedGate(f)
 		if bl, err := m.store.CheckBaseline(ctx, f.ID); err == nil {
 			for _, r := range bl {

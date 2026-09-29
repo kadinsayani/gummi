@@ -62,11 +62,12 @@ function render (pane, entry, ctx) {
   })
   if (!checksDrawn && s.checks?.length) doc.append(h('h2', { class: 'sec' }, 'Checks'), checksBlock())
   if (s.openComments) {
-    // the TUI's R: the open notes go to the architect now, not on its
-    // next pass
+    // the TUI's R: the open notes go now, not on the next pass — to the
+    // stage writing what they are about, which may mean sending the card
+    // back (asked first)
     pane.append(h('div', { class: 'pending' },
       h('span', { testid: 'spec-pending' }, `${plural(s.openComments, 'comment')} ${s.openComments === 1 ? 'is' : 'are'} still open here.`),
-      h('button', { class: 'btn', type: 'button', testid: 'spec-request-changes', title: 'Send the open comments to the agent writing it now', onclick: (e) => requestChanges(ctx.id, 'spec', e.currentTarget) }, 'Request changes')))
+      h('button', { class: 'btn', type: 'button', testid: 'spec-request-changes', title: 'Send the open comments to the stage that writes what they are about', onclick: (e) => requestChanges(ctx.id, 'spec', e.currentTarget) }, 'Request changes')))
   }
   pane.append(h('div', { class: 'spec', testid: 'spec' },
     h('nav', { class: 'toc', 'aria-label': 'Sections', testid: 'spec-toc' }, h('h2', null, 'Sections'),

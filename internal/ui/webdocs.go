@@ -15,6 +15,7 @@ import (
 	"github.com/morphis/gummi/internal/cardrun"
 	"github.com/morphis/gummi/internal/diffannot"
 	"github.com/morphis/gummi/internal/domain"
+	"github.com/morphis/gummi/internal/engine"
 	"github.com/morphis/gummi/internal/fleetrun"
 	"github.com/morphis/gummi/internal/pr"
 	"github.com/morphis/gummi/internal/spec"
@@ -275,7 +276,10 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 		out.Sections = append(out.Sections, webapi.SpecSection{Name: h.Title, Line: h.Line})
 	}
 	doc := spec.Parse(content)
-	out.OpenComments = len(userOpenThreads(doc))
+	// counted as the gate counts them, so the button's number is the one
+	// holding it
+	f := d.fresh(ctx)
+	out.OpenComments = len(engine.SpecCommentsHolding(domain.CardTypeOf(&f), f.Stage, doc))
 	var notes []spec.Marker
 	for _, t := range doc.Threads() {
 		notes = append(notes, t.Markers...)
@@ -725,7 +729,7 @@ func (m *Shell) WebPullPR(id string) (tea.Cmd, error) {
 // WebRequestSpecChanges is the spec surface's R: the card's open spec
 // comments go to its writer, the way the terminal sends them
 // (specChanges). POST /api/cards/{id}/spec/changes.
-func (m *Shell) WebRequestSpecChanges(id, person string) (tea.Cmd, error) {
+func (m *Shell) WebRequestSpecChanges(id, person, confirm string) (tea.Cmd, error) {
 	r, err := m.webRowFor(id)
 	if err != nil {
 		return nil, err
@@ -744,14 +748,15 @@ func (m *Shell) WebRequestSpecChanges(id, person string) (tea.Cmd, error) {
 	}
 	m.webActor = state.PersonActor(person)
 	defer func() { m.webActor = "" }()
-	return m.webChanges(m.specChanges(f, spec.Parse(string(raw))))
+	cmd, refused, ask := m.specChanges(f, spec.Parse(string(raw)))
+	return m.webChanges(cmd, refused, ask, confirm)
 }
 
 // WebRequestDiffChanges is the diff surface's R: the card's open diff
 // comments go to the implementer, or to a freeform card's session, the
 // way the terminal sends them (diffChanges).
 // POST /api/cards/{id}/diff/changes.
-func (m *Shell) WebRequestDiffChanges(id, person string) (tea.Cmd, error) {
+func (m *Shell) WebRequestDiffChanges(id, person, confirm string) (tea.Cmd, error) {
 	r, err := m.webRowFor(id)
 	if err != nil {
 		return nil, err
@@ -764,12 +769,24 @@ func (m *Shell) WebRequestDiffChanges(id, person string) (tea.Cmd, error) {
 	// it through humanActor before it returns
 	m.webActor = state.PersonActor(person)
 	defer func() { m.webActor = "" }()
-	return m.webChanges(m.diffChanges(r.F, anns))
+	cmd, refused, ask := m.diffChanges(r.F, anns)
+	return m.webChanges(cmd, refused, ask, confirm)
 }
 
-// webChanges turns a surface's refusal into the web's: the terminal's
-// status-band sentence, classed as the HTTP answer will be.
-func (m *Shell) webChanges(cmd tea.Cmd, refused noticeMsg) (tea.Cmd, error) {
+// webChanges turns a surface's answer into the web's: a send-back that
+// moves the card is asked first, as the terminal's confirm asks it, and
+// goes only with the yes to that question's token (webConfirmToken); a
+// refusal is the terminal's status-band sentence, classed as the HTTP
+// answer will be.
+func (m *Shell) webChanges(cmd tea.Cmd, refused noticeMsg, ask *changesAsk, confirm string) (tea.Cmd, error) {
+	if ask != nil {
+		tok := webConfirmToken("confirm-request-changes", ask.card, ask.question)
+		in := webInput{confirm: confirm}
+		if !in.takeConfirm(tok) {
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictConfirm, Text: ask.question, Confirm: tok}
+		}
+		return ask.do(), nil
+	}
 	if cmd != nil {
 		return cmd, nil
 	}

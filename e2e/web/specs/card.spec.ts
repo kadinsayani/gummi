@@ -81,9 +81,13 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
   await expect(page.getByTestId('diff-viewed-1')).toBeChecked();
   expect(m.annotations).toHaveLength(2);
+  // at verify the diff's comments send the card back to implement, and
+  // the page asks the board's own question before it does
   await page.getByTestId('diff-request-changes').click();
-  await expect(page.getByTestId('toast').filter({ hasText: 'sent 1 diff comment to the implementer' })).toBeVisible();
-  expect(m.changes).toEqual(['diff']);
+  await expect(page.getByTestId('changes-question')).toContainText('back to implement');
+  await page.getByTestId('changes-go').click();
+  await expect(page.getByTestId('toast').filter({ hasText: 'sent back to implement' })).toBeVisible();
+  expect(m.changes).toEqual(['diff', 'diff:c0ffee']);
   await shot(page, info, 'diff');
 });
 

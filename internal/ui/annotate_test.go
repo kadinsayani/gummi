@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -29,8 +30,9 @@ import (
 // again — is handled on screen rather than here: the artifact surface
 // says the agent has answered and names x before R (specview.go).
 func TestCompileOpenQuestions(t *testing.T) {
+	planCard := domain.Feature{Kind: domain.KindFeature, Stage: domain.StagePlan}
 	doc := spec.Parse("Title\n%% @user(2026-07-04): per-device or synced?\n\nBody\n%% @user: what about webviews?\n%% @architect: resolved — covered\n")
-	turn := compileOpenQuestions(doc)
+	turn := compileOpenQuestions(planCard, doc)
 	if !strings.Contains(turn, "per-device or synced?") {
 		t.Errorf("compiled turn missing the open question:\n%s", turn)
 	}
@@ -42,12 +44,12 @@ func TestCompileOpenQuestions(t *testing.T) {
 	}
 	// a user's OWN resolution does close it — and with nothing else open
 	// the turn is empty, so R has nothing to send.
-	if got := compileOpenQuestions(spec.Parse("Body\n%% @user: q\n%% @user: resolved — y\n")); got != "" {
+	if got := compileOpenQuestions(planCard, spec.Parse("Body\n%% @user: q\n%% @user: resolved — y\n")); got != "" {
 		t.Errorf("user-resolved doc should compile to empty, got:\n%s", got)
 	}
 	// an agent thread with no human in it keeps the old behaviour: the
 	// agents' own resolutions close each other's findings.
-	if got := compileOpenQuestions(spec.Parse("Body\n%% @reviewer: q\n%% @architect: resolved — y\n")); got != "" {
+	if got := compileOpenQuestions(planCard, spec.Parse("Body\n%% @reviewer: q\n%% @architect: resolved — y\n")); got != "" {
 		t.Errorf("agent-only resolved thread should compile to empty, got:\n%s", got)
 	}
 }
@@ -280,5 +282,70 @@ func TestRequestChangesHoldsCommentsFromCritique(t *testing.T) {
 	}
 	if n := len(userOpenThreads(spec.Parse(string(raw)))); n != 1 {
 		t.Errorf("open comments = %d, want the held one still open", n)
+	}
+}
+
+// R on a note the design stage owns, left while the card is in verify,
+// does not hand it to the verify agent: it asks to send the card back to
+// plan — walking verify → implement → plan — and on the yes the
+// architect runs with the note in its kickoff.
+func TestRequestChangesSendsADesignNoteBackToPlan(t *testing.T) {
+	m, eng := chatWorkspace(t, agent.NewFake("Reworked the approach."))
+	ctx := context.Background()
+	m = openSpecFor(t, m) // writes the draft from its template
+	m = press(t, m, tea.KeyPressMsg{Code: tea.KeyEscape})
+	f := m.rows[0].F
+	path := m.artifactFile(&f)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, ok := spec.HeadingLine(string(raw), "Chosen approach")
+	if !ok {
+		t.Fatal("setup: the template has no Chosen approach")
+	}
+	body, err := spec.AddComment(string(raw), line, "user", "2026-09-29", "a toggle is the wrong shape — follow the OS setting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, to := range []domain.Stage{domain.StageImplement, domain.StageVerify} {
+		if _, err := m.store.Transition(ctx, f.ID, to, "user"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m = pump(t, m, m.Init()) // reload rows at verify
+
+	m = openSpecFor(t, m)
+	m = press(t, m, tea.KeyPressMsg{Code: 'R', Text: "R"})
+	d, ok := m.Overlay.Top().(*confirmDialog)
+	if !ok {
+		t.Fatalf("R did not ask first; top overlay is %T, notice %q", m.Overlay.Top(), m.notice.text)
+	}
+	if !strings.Contains(d.question, "back to plan") || !strings.Contains(d.question, "Chosen approach") {
+		t.Errorf("question = %q", d.question)
+	}
+	if got, _ := m.store.GetFeature(ctx, f.ID); got.Stage != domain.StageVerify {
+		t.Fatalf("asking moved the card to %s", got.Stage)
+	}
+
+	m = press(t, m, tea.KeyPressMsg{Code: 'y', Text: "y"})
+	settleChat(t, eng)
+	if got, _ := m.store.GetFeature(ctx, f.ID); got.Stage != domain.StagePlan {
+		t.Fatalf("stage = %s, want plan", got.Stage)
+	}
+	s := eng.Get(f.ID)
+	if s == nil {
+		t.Fatal("the plan stage did not run")
+	}
+	snap := s.Snapshot()
+	if snap.Feature.Stage != domain.StagePlan || snap.Role != agent.RoleArchitect {
+		t.Fatalf("wrong session: stage=%s role=%s", snap.Feature.Stage, snap.Role)
+	}
+	if len(snap.Transcript) == 0 || !strings.Contains(snap.Transcript[0].Content, "follow the OS setting") ||
+		!strings.Contains(snap.Transcript[0].Content, "@architect: resolved") {
+		t.Fatalf("the architect's kickoff does not carry the note: %+v", snap.Transcript)
 	}
 }

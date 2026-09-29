@@ -238,16 +238,57 @@ function sentence (s) {
 
 // requestChanges is the spec and diff tabs' "Request changes" — the TUI's
 // R on those surfaces: the card's open comments on what (spec or diff) go
-// to the agent that writes it, POST …/{what}/changes. The board's answer
-// is its own sentence; the broadcast of the same one shows once.
+// to the agent that writes them, POST …/{what}/changes. When one of them
+// belongs to an earlier stage the board answers with a "confirm" question
+// instead — send the card back to that stage? — asked here in its own
+// words; the yes is the token it came with, and sends it again. The
+// board's answer is its own sentence; the broadcast of the same one shows
+// once.
 export async function requestChanges (id, what, btn) {
   btn.disabled = true
   try {
     const res = await post(cardPath(id, `${what}/changes`), {})
     toast(res?.text || 'Comments sent')
   } catch (err) {
-    toast(err.notBuilt ? 'Requesting changes from the web is not available yet' : err.message, { err: !err.notBuilt })
+    if (err.status === 409 && err.data?.error === 'confirm') {
+      confirmChanges(id, what, err.data)
+    } else {
+      toast(err.notBuilt ? 'Requesting changes from the web is not available yet' : err.message, { err: !err.notBuilt })
+    }
   } finally {
     btn.disabled = false
   }
+}
+
+// confirmChanges asks the send-back the board stopped on, and sends the
+// request again with the yes to it.
+function confirmChanges (id, what, ask) {
+  const error = h('p', { class: 'aerr', testid: 'changes-error', role: 'alert', hidden: true })
+  openModal({
+    title: `Request changes · ${id}`,
+    testid: 'changes-confirm',
+    card: id,
+    returnTo: `[data-testid="${what}-request-changes"]`,
+    body: [h('p', { class: 'aq asked', testid: 'changes-question' }, sentence(ask.text)), error],
+    actions: [
+      { label: 'Cancel', testid: 'changes-cancel' },
+      {
+        label: 'Send back',
+        primary: true,
+        danger: true,
+        testid: 'changes-go',
+        onClick: async () => {
+          try {
+            const res = await post(cardPath(id, `${what}/changes`), { confirm: ask.confirm })
+            toast(res?.text || 'Sent back')
+            return true
+          } catch (err) {
+            clear(error).append(sentence(err.message))
+            error.hidden = false
+            return false
+          }
+        }
+      }
+    ]
+  })
 }

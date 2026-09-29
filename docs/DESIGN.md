@@ -1047,6 +1047,32 @@ and mark it resolved (`%% @role: resolved — …` for specs, a resolve event
 for diffs); gummi shows the open-count burn down and re-gates when it hits
 zero. Unresolved annotations block the gate — that's the quality mechanism,
 not a convention.
+
+**Who a comment belongs to.** "The responsible role" is decided per
+comment, not by where the card happens to be. A spec comment belongs to the
+stage whose writer writes the section it sits in — Problem, the approaches
+and Implementation notes are plan's; Progress (a bug's Fix, a survey's
+Findings) is implement's — and a diff comment to implement. A comment in a
+section no stage owns (the preamble, Review, the Verification plan verify
+re-authors) is the current stage's. `engine.SectionOwner` holds the table.
+Ownership decides three things, and all three read the same rule
+(`internal/engine/commentroute.go`):
+
+- **Where request changes goes.** To the earliest stage that owns an open
+  comment. A design note left at verify sends the card back to plan over
+  the graph's own rerun edges (verify → implement → plan, both recorded);
+  it is never handed to the verify agent. A send-back always asks first,
+  naming the stage, the sections that pulled it back and what runs again
+  after it — the terminal's confirm and the web's `confirm` question say
+  the same words.
+- **What a writer is given.** Its own comments and nobody's. A comment an
+  earlier stage owns waits for the send-back rather than being answered
+  in the wrong stage.
+- **What holds a gate.** Every open comment except a later stage's. A card
+  sent back to plan is not held at the design gate by a Progress note or a
+  diff comment the architect cannot answer; they hold implement's gate
+  instead, and nothing reaches done with a comment open.
+
 ### 6.2 Visual design system (Crush-grade)
 
 Beauty is a feature requirement, not polish. These are the concrete

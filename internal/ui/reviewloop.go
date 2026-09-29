@@ -326,7 +326,7 @@ func (m *Shell) onCritiqueStageDone(id domain.FeatureID, stage domain.Stage) tea
 		// shut, and a reason inviting an approval the gate then refuses
 		// sent the reader round in a circle.
 		if held := heldByCommentsText(noun, snap.Feature.Kind, m.openQuestionsBlockingGate(snap.Feature),
-			m.openDiffCommentsBlockingGate(context.Background(), id)); held != "" {
+			m.openDiffCommentsBlockingGate(snap.Feature)); held != "" {
 			text = held
 		}
 		if cmd, attempted := m.autopilotCrossGate(snap.Feature, text); attempted {

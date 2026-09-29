@@ -12,7 +12,6 @@ import (
 
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/engine"
-	"github.com/morphis/gummi/internal/workflow"
 )
 
 // diffCell sanitizes an untrusted diff line (it is agent/repo-authored
@@ -191,14 +190,19 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) stri
 }
 
 // requestDiffChanges sends the open diff annotations to the implementer
-// (DESIGN §6.1). From review/verify it bounces the feature to the work
-// stage and re-runs it; already at the work stage (the implement/fix
-// gate) there is no edge to take, so the stage is re-run in place — the
-// engine folds the open annotations into every implement/fix run's
-// hints (see newAgentSession), so either way the implementer addresses
-// each comment. Blocks with a notice when there is nothing open to send.
+// (DESIGN §6.1). Already at the work stage (the implement gate) there is
+// no edge to take, so the stage takes them in place — the engine folds
+// the open annotations into every implement run's hints (see
+// newAgentSession). From verify, or with a spec comment open that an
+// earlier stage owns, the card goes back to the stage that owns them
+// (engine.RouteComments), asked first. Blocks with a notice when there is
+// nothing open to send.
 func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
-	cmd, refused := m.diffChanges(dv.f, dv.anns)
+	cmd, refused, ask := m.diffChanges(dv.f, dv.anns)
+	if ask != nil {
+		// the surface closes on the yes; the fix runs on the board
+		return m.confirmChanges(ask, func() { m.diff = nil })
+	}
 	if cmd == nil {
 		m.notice = refused
 		return nil
@@ -208,12 +212,12 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 }
 
 // diffChanges is requestDiffChanges for any face: the command that sends
-// anns' open comments on, or — nil — the notice saying why nothing can
-// be sent.
-func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea.Cmd, noticeMsg) {
-	actor := m.humanActor()
+// anns' open comments on; or the question to ask before a send-back that
+// moves the card; or — both nil — the notice saying why nothing can be
+// sent.
+func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea.Cmd, noticeMsg, *changesAsk) {
 	if m.engine == nil {
-		return nil, noticeMsg{text: m.noAgent(""), isErr: true}
+		return nil, noticeMsg{text: m.noAgent(""), isErr: true}, nil
 	}
 	n := 0
 	for _, a := range anns {
@@ -222,7 +226,7 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 		}
 	}
 	if n == 0 {
-		return nil, noticeMsg{text: "no open diff comments to send"}
+		return nil, noticeMsg{text: "no open diff comments to send"}, nil
 	}
 	// A freeform card has exactly one session and it is always the writer,
 	// so all of the routing below collapses: there is no stage to
@@ -244,62 +248,50 @@ func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 			return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.ID, n, plural(n)), reload: true}
-		}, noticeMsg{}
+		}, noticeMsg{}, nil
 	}
-	// "request changes" targets the work stage (implement/fix); only
-	// offer it there or from a stage with a legal edge to it
-	// (review/verify), so it never tears down a running session for a
-	// transition that will just be rejected.
-	workStage := domain.StageImplement
-	atWork := f.Stage == workStage
-	if !atWork {
-		if err := workflow.CanTransition(f.Stage, workStage); err != nil {
-			return nil, noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}
-		}
+	// the diff's comments route with the artifact's: a design note left
+	// beside them sends the card to plan, not to the implementer, who
+	// would otherwise be handed a comment it has no business answering
+	route := engine.RouteComments(domain.CardTypeOf(&f), f.Stage, m.artifactDoc(f), n)
+	if route.Rewinds() {
+		return nil, noticeMsg{}, m.commentRewind(f, route)
 	}
-	// The three notices below used to hard-code "comment(s)" and let a
-	// single open comment read "sent 1 diff comment(s) to the
-	// implementer" verbatim. plural(n) (reviewloop.go) picks the right
-	// suffix instead of punting the choice onto the reader.
+	// in place is only the work stage's: before it there is no code to
+	// have commented on as the implementer's work, and past verify there
+	// is no edge back
+	if f.Stage != domain.StageImplement {
+		return nil, noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}, nil
+	}
+	// The notices below used to hard-code "comment(s)" and let a single
+	// open comment read "sent 1 diff comment(s) to the implementer"
+	// verbatim. plural(n) (reviewloop.go) picks the right suffix instead
+	// of punting the choice onto the reader.
 	turn := engine.CompileDiffComments(anns, m.engine.ClientTools())
 	return func() tea.Msg {
 		ctx := context.Background()
-		if atWork {
-			// no transition: deliver to a running session as a live turn,
-			// or re-run the stage (a fresh run reads the open annotations
-			// from the store).
-			if s := m.engine.Get(f.ID); s != nil {
-				switch s.State() {
-				case engine.StateRunning:
-					// implement runs carry the open diff comments in their
-					// hints, so a held one reaches the next writer run
-					if held := heldForWriter(s.Snapshot(), f, n, "diff comment"); held != "" {
-						return noticeMsg{text: held}
-					}
-					if err := m.engine.Send(ctx, f.ID, turn); err != nil {
-						return noticeMsg{text: sanitize(err.Error()), isErr: true}
-					}
-					return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the running %s agent", f.ID, n, plural(n), f.Stage), reload: true}
-				case engine.StateQueued:
-					return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open diff comments when it starts", f.ID, f.Stage)}
+		// deliver to a running session as a live turn, or re-run the
+		// stage (a fresh run reads the open annotations from the store).
+		if s := m.engine.Get(f.ID); s != nil {
+			switch s.State() {
+			case engine.StateRunning:
+				// implement runs carry the open diff comments in their
+				// hints, so a held one reaches the next writer run
+				if held := heldForWriter(s.Snapshot(), f, n, "diff comment"); held != "" {
+					return noticeMsg{text: held}
 				}
+				if err := m.engine.Send(ctx, f.ID, turn); err != nil {
+					return noticeMsg{text: sanitize(err.Error()), isErr: true}
+				}
+				return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the running %s agent", f.ID, n, plural(n), f.Stage), reload: true}
+			case engine.StateQueued:
+				return noticeMsg{text: fmt.Sprintf("%s: %s is queued — it will read the open diff comments when it starts", f.ID, f.Stage)}
 			}
-			m.dropSession(f.ID)
-			if err := m.engine.Run(f); err != nil {
-				return noticeMsg{text: err.Error(), isErr: true}
-			}
-			return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment%s", f.ID, f.Stage, n, plural(n)), reload: true}
-		}
-		// transition first (it validates the edge); only then drop the
-		// stale session, so a rejected bounce is never destructive.
-		nf, err := m.store.Transition(ctx, f.ID, workStage, actor)
-		if err != nil {
-			return noticeMsg{text: sanitize(err.Error()), isErr: true}
 		}
 		m.dropSession(f.ID)
-		if err := m.engine.Run(nf); err != nil {
+		if err := m.engine.Run(f); err != nil {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
-		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the implementer", f.ID, n, plural(n)), reload: true}
-	}, noticeMsg{}
+		return noticeMsg{text: fmt.Sprintf("%s: re-running %s with %d diff comment%s", f.ID, f.Stage, n, plural(n)), reload: true}
+	}, noticeMsg{}, nil
 }
