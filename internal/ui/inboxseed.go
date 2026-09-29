@@ -109,7 +109,7 @@ func (m *Shell) seedInboxFromDecisions(open map[domain.FeatureID][]state.OpenDec
 		kind := attnKind(lane)
 		m.inbox.seed(attnItem{
 			Feature: id, Kind: kind, Text: dec.Question,
-			Escalated: escalated, At: dec.At,
+			Escalated: escalated || dec.Escalated, At: dec.At,
 		})
 	}
 }

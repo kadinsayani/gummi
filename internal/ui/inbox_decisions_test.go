@@ -247,3 +247,36 @@ func TestSeedInboxSkipsGoalCards(t *testing.T) {
 		t.Fatalf("a goal card's stop is not yours: %+v", m.inbox.list())
 	}
 }
+
+// TestSeedInboxKeepsAnEscalatedGateEscalated: a gate the critique loop
+// gave up on (no clear verdict) is recorded as a gate, like a clean one.
+// Read back after a restart it must still be the loop's give-up, or the
+// card asks "plan is ready for your decision" over a critique that said
+// nothing.
+func TestSeedInboxKeepsAnEscalatedGateEscalated(t *testing.T) {
+	ws, store, wt := uiRepo(t)
+	ctx := context.Background()
+	f := mkFeature(t, store, 1, "why is it slow", domain.StagePlan)
+	if err := store.OpenDecision(ctx, f.ID, f.Stage, state.DecisionPayload{
+		ID: "gate:1", Kind: state.DecisionKindGate, Escalated: true,
+		Question: "plan critique gave no clear verdict — review before advancing",
+	}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	decisions, err := store.OpenDecisions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewShell(theme.GummiDark(), "v0-test")
+	m.Attach(store, wt, ws)
+	m.seedInboxFromDecisions(decisions)
+
+	it, ok := m.inbox.get(f.ID)
+	if !ok || it.Kind != attnGate {
+		t.Fatalf("escalated gate seeded %+v, want a gate item", it)
+	}
+	if !it.Escalated {
+		t.Error("an escalated gate read back as a clean one")
+	}
+}

@@ -47,6 +47,12 @@ type DecisionPayload struct {
 	// Anchor is an ask's spec anchor, so a re-armed answer lands where the
 	// agent asked for it to land.
 	Anchor string `json:"anchor,omitempty"`
+	// Escalated marks a gate an automatic loop gave up on (a round cap, a
+	// critique with no clear verdict) rather than one it cleared. The kind
+	// cannot say it — the loop raises both as gates — and a restart that
+	// lost it re-read a critique that said nothing as a plan "ready for
+	// your decision".
+	Escalated bool `json:"escalated,omitempty"`
 }
 
 // OpenDecision is one still-open decision as OpenDecisions reports it.
@@ -59,8 +65,10 @@ type OpenDecision struct {
 	// options are gone by design; the anchor is not — it is recorded on
 	// the decision row precisely to survive the process.
 	Anchor string
-	Stage  domain.Stage // the stage the card was waiting in
-	At     time.Time
+	// Escalated is DecisionPayload.Escalated, read back.
+	Escalated bool
+	Stage     domain.Stage // the stage the card was waiting in
+	At        time.Time
 }
 
 // The decision kinds, as the record's own closed vocabulary. These are
@@ -298,7 +306,7 @@ func (s *Store) OpenDecisions(ctx context.Context) (map[domain.FeatureID][]OpenD
 		}
 		pendingByFeature[domain.FeatureID(fid)] = append(
 			pendingByFeature[domain.FeatureID(fid)], pending{
-				dec:   OpenDecision{ID: p.ID, Kind: p.Kind, Question: p.Question, Anchor: p.Anchor, Stage: domain.Stage(stage), At: atT},
+				dec:   OpenDecision{ID: p.ID, Kind: p.Kind, Question: p.Question, Anchor: p.Anchor, Escalated: p.Escalated, Stage: domain.Stage(stage), At: atT},
 				seq:   seq,
 				stage: domain.Stage(stage),
 			})

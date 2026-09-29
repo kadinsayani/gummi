@@ -1064,14 +1064,14 @@ func (m *Shell) raiseEscalationAs(id domain.FeatureID, reason, text string) {
 	// reads it and wake the goal, but never queue it for you
 	if g := m.goalOf(id); g != "" {
 		m.logPark(id, reason, text)
-		m.logDecision(id, decisionKindForStage(m.recordStage(id)), text)
+		m.logDecisionAs(id, decisionKindForStage(m.recordStage(id)), text, true)
 		m.queueGoalTick(g)
 		return
 	}
 	if m.inbox.addEscalated(id, attnGate, text) {
 		m.alert(id, text)
 		m.logPark(id, reason, text)
-		m.logDecision(id, decisionKindForStage(m.recordStage(id)), text)
+		m.logDecisionAs(id, decisionKindForStage(m.recordStage(id)), text, true)
 	}
 }
 
@@ -1152,14 +1152,21 @@ func (m *Shell) rewordGateDecision(id domain.FeatureID, text string) {
 // raise, generation-scoped so a re-raised stop after a bounce never
 // collides with its predecessor's row.
 func (m *Shell) logDecision(id domain.FeatureID, kind, question string) {
+	m.logDecisionAs(id, kind, question, false)
+}
+
+// logDecisionAs is logDecision for a stop that may be an escalation: the
+// record keeps the flag, so the stop reads the same after a restart.
+func (m *Shell) logDecisionAs(id domain.FeatureID, kind, question string, escalated bool) {
 	if m.store == nil {
 		return
 	}
 	stage := m.recordStage(id)
 	_ = m.store.OpenDecision(context.Background(), id, stage, state.DecisionPayload{
-		ID:       kind + ":" + string(id) + ":" + string(stage) + ":" + strconv.FormatInt(time.Now().UnixNano(), 10),
-		Kind:     kind,
-		Question: question,
+		ID:        kind + ":" + string(id) + ":" + string(stage) + ":" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Kind:      kind,
+		Question:  question,
+		Escalated: escalated,
 	}, time.Now())
 }
 

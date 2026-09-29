@@ -2276,7 +2276,7 @@ func escalationDecisionKind(f domain.Feature) string {
 
 func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 	d.logPark(f, state.ParkReasonGaveUp, reason)
-	d.openDecision(f, escalationDecisionKind(f), reason)
+	d.openEscalation(f, reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: d.resumeCmd(string(f.ID)),
@@ -2289,7 +2289,7 @@ func (d *Driver) escalation(f domain.Feature, reason string) Outcome {
 // a card to wait for from a card to give up on.
 func (d *Driver) blockedEscalation(f domain.Feature, reason string) Outcome {
 	d.logPark(f, state.ParkReasonBlocked, reason)
-	d.openDecision(f, escalationDecisionKind(f), reason)
+	d.openEscalation(f, reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: d.resumeCmd(string(f.ID)),
@@ -2304,7 +2304,7 @@ func (d *Driver) blockedEscalation(f domain.Feature, reason string) Outcome {
 // carried as a placeholder for the caller's own change note.
 func (d *Driver) bounceEscalation(f domain.Feature, reason string) Outcome {
 	d.logPark(f, state.ParkReasonGaveUp, reason)
-	d.openDecision(f, escalationDecisionKind(f), reason)
+	d.openEscalation(f, reason)
 	d.out.emit(escalationEvent{
 		Event: "escalation", ID: string(f.ID), Stage: string(f.Stage), Reason: reason, Resume: string(f.ID),
 		Next: d.resumeCmd(string(f.ID), "--bounce", "--note", `"<why>"`),
@@ -2452,6 +2452,20 @@ func (d *Driver) openDecision(f domain.Feature, kind, question string) string {
 		ID: id, Kind: kind, Question: question,
 	}, time.Now())
 	return id
+}
+
+// openEscalation is openDecision for a stop an automatic loop gave up
+// on: the record says so, and a board reading it back after a restart
+// does not present it as a gate the loop cleared.
+func (d *Driver) openEscalation(f domain.Feature, reason string) {
+	if d.store == nil {
+		return
+	}
+	kind := escalationDecisionKind(f)
+	_ = d.store.OpenDecision(context.Background(), f.ID, f.Stage, state.DecisionPayload{
+		ID:   kind + ":" + string(f.ID) + ":" + string(f.Stage) + ":" + strconv.FormatInt(time.Now().UnixNano(), 10),
+		Kind: kind, Question: reason, Escalated: true,
+	}, time.Now())
 }
 
 // openDecisionOnce is openDecision for a stop a bare resume reaches again
