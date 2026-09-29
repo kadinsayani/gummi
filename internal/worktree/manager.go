@@ -571,6 +571,10 @@ func (m *Manager) Attach(ctx context.Context, f *domain.Feature) (string, error)
 			return "", rerr
 		}
 	}
+	if err := relinkGitFile(p); err != nil {
+		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+		return "", fmt.Errorf("linking adopted worktree: %w", err)
+	}
 	// Only bites when the adopted branch actually tracks .gummi, which a
 	// branch cut in a gummi-initialized repo does not. Where it does bite
 	// it adds one commit to the adopted branch — a write, not a rewrite,
@@ -685,6 +689,10 @@ func (m *Manager) Recreate(ctx context.Context, f *domain.Feature) (string, erro
 	}
 	if _, err := runGit(ctx, m.repo, "worktree", "add", "--", p, branch); err != nil {
 		return "", err
+	}
+	if err := relinkGitFile(p); err != nil {
+		_, _ = runGit(ctx, m.repo, "worktree", "remove", "--force", "--", p)
+		return "", fmt.Errorf("linking recreated worktree: %w", err)
 	}
 	return p, nil
 }
