@@ -1,13 +1,15 @@
 // spec.js — the Spec tab: the card's document as it stands on its branch,
 // with a sections outline, its review notes shown inline where they are
 // anchored, a "Comment" on every section that writes a note into the spec
-// (POST …/spec/notes), and the gummi-checks block drawn as a table with each
+// (POST …/spec/notes), "Request changes" sending the open notes to their
+// writer (POST …/spec/changes), and the gummi-checks block drawn as a table with each
 // check's last outcome on this branch.
 
-import { h, append, clock } from './dom.js?v=__ASSET_V__'
+import { h, append, clock, plural } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
+import { requestChanges } from './actions.js?v=__ASSET_V__'
 
 export const specTab = {
   name: 'spec',
@@ -59,6 +61,13 @@ function render (pane, entry, ctx) {
     append(doc, [heading, markdown(body, { ...opts, headingBase: 3 }), notesIn(notes, sec.line, end, ctx)])
   })
   if (!checksDrawn && s.checks?.length) doc.append(h('h2', { class: 'sec' }, 'Checks'), checksBlock())
+  if (s.openComments) {
+    // the TUI's R: the open notes go to the architect now, not on its
+    // next pass
+    pane.append(h('div', { class: 'pending' },
+      h('span', { testid: 'spec-pending' }, `${plural(s.openComments, 'comment')} ${s.openComments === 1 ? 'is' : 'are'} still open here.`),
+      h('button', { class: 'btn', type: 'button', testid: 'spec-request-changes', title: 'Send the open comments to the agent writing it now', onclick: (e) => requestChanges(ctx.id, 'spec', e.currentTarget) }, 'Request changes')))
+  }
   pane.append(h('div', { class: 'spec', testid: 'spec' },
     h('nav', { class: 'toc', 'aria-label': 'Sections', testid: 'spec-toc' }, h('h2', null, 'Sections'),
       sections.map((sec, i) => h('a', {

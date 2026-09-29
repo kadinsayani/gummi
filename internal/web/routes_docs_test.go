@@ -722,3 +722,68 @@ func TestDocsStatsAndFleet(t *testing.T) {
 		t.Errorf("a bad from = %d", code)
 	}
 }
+
+// "Request changes" is the terminal's R on the spec and diff surfaces:
+// with nothing open it refuses in the board's words, and with comments
+// open it sends them on and answers with what the board said.
+func TestDocsRequestChanges(t *testing.T) {
+	t.Run("nothing open", func(t *testing.T) {
+		b := newDocsBoard(t, agent.NewFake("ok"))
+		for _, what := range []string{"spec", "diff"} {
+			if st := b.send(http.MethodPost, "/api/cards/FD-001/"+what+"/changes", "", nil); st != http.StatusConflict {
+				t.Errorf("%s changes with nothing open = %d, want 409", what, st)
+			}
+			if st := b.send(http.MethodPost, "/api/cards/FD-404/"+what+"/changes", "", nil); st != http.StatusNotFound {
+				t.Errorf("%s changes on no card = %d, want 404", what, st)
+			}
+		}
+		if st := b.send(http.MethodPost, "/api/cards/FD-002/spec/changes", "", nil); st != http.StatusConflict {
+			t.Errorf("spec changes on a card with no document = %d, want 409", st)
+		}
+	})
+
+	t.Run("spec", func(t *testing.T) {
+		b := newDocsBoard(t, agent.NewFake("ok"))
+		var sp webapi.Spec
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/notes", `{"line":5,"text":"only after dark?"}`, &sp); st != http.StatusOK {
+			t.Fatalf("add note = %d", st)
+		}
+		if sp.OpenComments != 1 {
+			t.Errorf("open comments = %d, want 1", sp.OpenComments)
+		}
+		var out webapi.Outcome
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/spec/changes", "", &out); st != http.StatusOK {
+			t.Fatalf("spec changes = %d", st)
+		}
+		if !out.OK || !strings.Contains(out.Text, "1 review comment") {
+			t.Errorf("outcome = %+v", out)
+		}
+	})
+
+	t.Run("diff", func(t *testing.T) {
+		b := newDocsBoard(t, agent.NewFake("ok"))
+		var d webapi.Diff
+		b.get("/api/cards/FD-001/diff", &d)
+		var target webapi.DiffLine
+		for _, f := range d.Files {
+			for _, h := range f.Hunks {
+				for _, l := range h.Lines {
+					if l.Text == "func b() {}" {
+						target = l
+					}
+				}
+			}
+		}
+		body := fmt.Sprintf(`{"idx":%d,"comment":"why a second func?","text":"func b() {}"}`, target.Idx)
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/diff/annotations", body, nil); st != http.StatusOK {
+			t.Fatalf("annotate = %d", st)
+		}
+		var out webapi.Outcome
+		if st := b.send(http.MethodPost, "/api/cards/FD-001/diff/changes", "", &out); st != http.StatusOK {
+			t.Fatalf("diff changes = %d", st)
+		}
+		if !out.OK || !strings.Contains(out.Text, "1 diff comment") {
+			t.Errorf("outcome = %+v", out)
+		}
+	})
+}

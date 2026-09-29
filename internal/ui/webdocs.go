@@ -274,8 +274,10 @@ func (d *WebDocs) Spec(ctx context.Context) (webapi.Spec, error) {
 	for _, h := range spec.HeadingLines(content) {
 		out.Sections = append(out.Sections, webapi.SpecSection{Name: h.Title, Line: h.Line})
 	}
+	doc := spec.Parse(content)
+	out.OpenComments = len(userOpenThreads(doc))
 	var notes []spec.Marker
-	for _, t := range spec.Parse(content).Threads() {
+	for _, t := range doc.Threads() {
 		notes = append(notes, t.Markers...)
 	}
 	sortMarkers(notes)
@@ -718,6 +720,64 @@ func (m *Shell) WebPullPR(id string) (tea.Cmd, error) {
 	// whether a pull request is linked is the command's to check: it
 	// re-reads the card, where the row here may predate the link
 	return m.pullPRReview(r.F), nil
+}
+
+// WebRequestSpecChanges is the spec surface's R: the card's open spec
+// comments go to its writer, the way the terminal sends them
+// (specChanges). POST /api/cards/{id}/spec/changes.
+func (m *Shell) WebRequestSpecChanges(id, person string) (tea.Cmd, error) {
+	r, err := m.webRowFor(id)
+	if err != nil {
+		return nil, err
+	}
+	f := r.F
+	path := ""
+	if !f.IsFreeform() {
+		path = m.artifactFile(&f)
+	}
+	if path == "" {
+		return nil, webErr(WebConflict, "%s has no %s to send comments from", f.ID, artifactNoun(f.Kind))
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, webErr(WebUnavailable, "reading the %s: %v", artifactNoun(f.Kind), err)
+	}
+	m.webActor = state.PersonActor(person)
+	defer func() { m.webActor = "" }()
+	return m.webChanges(m.specChanges(f, spec.Parse(string(raw))))
+}
+
+// WebRequestDiffChanges is the diff surface's R: the card's open diff
+// comments go to the implementer, or to a freeform card's session, the
+// way the terminal sends them (diffChanges).
+// POST /api/cards/{id}/diff/changes.
+func (m *Shell) WebRequestDiffChanges(id, person string) (tea.Cmd, error) {
+	r, err := m.webRowFor(id)
+	if err != nil {
+		return nil, err
+	}
+	anns, err := m.store.ListDiffAnnotations(context.Background(), r.F.ID)
+	if err != nil {
+		return nil, webErr(WebUnavailable, "reading the diff comments: %v", err)
+	}
+	// who asked, as a bounce to implement records it: diffChanges reads
+	// it through humanActor before it returns
+	m.webActor = state.PersonActor(person)
+	defer func() { m.webActor = "" }()
+	return m.webChanges(m.diffChanges(r.F, anns))
+}
+
+// webChanges turns a surface's refusal into the web's: the terminal's
+// status-band sentence, classed as the HTTP answer will be.
+func (m *Shell) webChanges(cmd tea.Cmd, refused noticeMsg) (tea.Cmd, error) {
+	if cmd != nil {
+		return cmd, nil
+	}
+	code := WebConflict
+	if m.engine == nil {
+		code = WebUnavailable
+	}
+	return nil, webErr(code, "%s", refused.text)
 }
 
 // ----------------------------------------------------------------- stats

@@ -22,6 +22,9 @@ type Spec struct {
 	Sections []SpecSection `json:"sections,omitempty"`
 	Notes    []SpecNote    `json:"notes,omitempty"`
 	Checks   []SpecCheck   `json:"checks,omitempty"`
+	// OpenComments counts the notes that hold the gate — the unresolved
+	// threads a person started: what "request changes" sends.
+	OpenComments int `json:"openComments,omitempty"`
 }
 
 // SpecSection is one heading and the line it starts on (1-based).

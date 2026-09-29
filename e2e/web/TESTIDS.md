@@ -124,10 +124,12 @@ Spec: `spec`, `spec-toc`, `spec-toc-<i>`, `spec-doc`, `spec-src`, `spec-title`,
 `spec-note-save`, `spec-note`, `spec-prompt` (gummi's own `%%` prompts),
 `spec-note-resolve`, `spec-note-resolution` (a resolution marker, folded onto
 the note above it: "resolved by" when it closes it, "answered by" when an
-agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-none`.
+agent answered a person's note that only a person can close), `spec-checks`, `spec-check-<name>`, `spec-pending` (how many notes hold the
+gate), `spec-request-changes` (sends them to the writer: the TUI's R), `spec-none`.
 
 Diff: `diff-head`, `diff-rev`, `diff-since`, `diff-since-all`, `diff-since-new`,
 `diff-fresh` (branch moved banner), `diff-fresh-show`, `diff-pending`,
+`diff-request-changes` (sends the open comments to the implementer: the TUI's R),
 `diff-files`, `diff-file-<i>`, `diff-filebox-<i>`, `diff-viewed-<i>`,
 `diff-line-<idx>` (idx = raw diff line index, the annotation coordinate; click
 `.o`/`.n` to comment), `diff-unfold-<i>` ("Show N lines" on a file folded

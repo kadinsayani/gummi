@@ -42,7 +42,7 @@ test('the thread folds past stages and draws every item kind', async ({ pairedPa
 });
 
 test('the spec shows sections, notes, checks and a comment box', async ({ pairedPage: page }, info) => {
-  await mockCard(page, id);
+  const m = await mockCard(page, id);
   await page.goto(page.url().replace(/#.*$/, '') + `#${id}/spec`);
   await page.reload();
   if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
@@ -53,6 +53,10 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
   await expect(doc.getByTestId('spec-check-test')).toContainText('✕');
   await doc.getByTestId('spec-comment-0').click();
   await expect(doc.getByTestId('spec-note-input')).toBeFocused();
+  await expect(page.getByTestId('spec-pending')).toHaveText('1 comment is still open here.');
+  await page.getByTestId('spec-request-changes').click();
+  await expect(page.getByTestId('toast').filter({ hasText: 'with 1 review comment' })).toBeVisible();
+  expect(m.changes).toEqual(['spec']);
   await shot(page, info, 'spec');
 });
 
@@ -77,6 +81,9 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   if (info.project.name === 'phone') await page.getByTestId('mnav-panel').click();
   await expect(page.getByTestId('diff-viewed-1')).toBeChecked();
   expect(m.annotations).toHaveLength(2);
+  await page.getByTestId('diff-request-changes').click();
+  await expect(page.getByTestId('toast').filter({ hasText: 'sent 1 diff comment to the implementer' })).toBeVisible();
+  expect(m.changes).toEqual(['diff']);
   await shot(page, info, 'diff');
 });
 

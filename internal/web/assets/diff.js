@@ -1,7 +1,8 @@
 // diff.js — the Diff tab: the card's branch against its base, file by file,
 // with the review comments anchored in it. Clicking a line number opens a
 // comment box (POST …/diff/annotations with the line's raw-diff index);
-// comments can be resolved or deleted. "Viewed" ticks are kept per card in
+// comments can be resolved or deleted, and "Request changes" sends the open
+// ones to the implementer (POST …/diff/changes). "Viewed" ticks are kept per card in
 // this browser. When the branch moves while someone reads, the new diff is
 // announced with a banner, never swapped in under the reader.
 
@@ -9,6 +10,7 @@ import { h, plural, storage } from './dom.js?v=__ASSET_V__'
 import { get, post, del, cardPath } from './api.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { state } from './store.js?v=__ASSET_V__'
+import { requestChanges } from './actions.js?v=__ASSET_V__'
 
 // "Since you last read it": the branch head this browser showed on the
 // previous visit to a card's diff is the baseline, and the toggle asks the
@@ -98,9 +100,10 @@ function render (pane, entry, ctx) {
     // they go with an answer only when the open decision has one that
     // carries them (a send-back); otherwise they just wait on the diff
     const carried = state.sel === ctx.id && state.card?.decision?.options?.some(o => o.carriesComments)
-    pane.append(h('div', { class: 'pending', testid: 'diff-pending' }, carried
+    pane.append(h('div', { class: 'pending' }, h('span', { testid: 'diff-pending' }, carried
       ? `${plural(d.pendingComments, 'comment')} will go with your next answer.`
-      : `${plural(d.pendingComments, 'comment')} on this diff ${d.pendingComments === 1 ? 'is' : 'are'} still open.`))
+      : `${plural(d.pendingComments, 'comment')} on this diff ${d.pendingComments === 1 ? 'is' : 'are'} still open.`),
+    h('button', { class: 'btn', type: 'button', testid: 'diff-request-changes', title: 'Send the open comments to the implementer now', onclick: (e) => requestChanges(ctx.id, 'diff', e.currentTarget) }, 'Request changes')))
   }
 
   if (onlySince && !files.length) pane.append(h('div', { class: 'empty' }, h('b', null, 'Nothing new'), `No file changed after ${since.slice(0, 7)}.`))

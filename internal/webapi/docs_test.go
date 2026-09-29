@@ -26,9 +26,10 @@ func TestLiveShape(t *testing.T) {
 func TestSpecShape(t *testing.T) {
 	golden.RequireEqual(t, marshal(t, Spec{
 		Path: ".gummi/specs/FD-012-dark-mode.md", Rev: "3f2a1bc0000000000000000000000000000000000", Title: "Dark mode",
-		Markdown: "# Dark mode\n\n## Problem\n\nToo bright.\n%% @user(2026-09-27, Simon): only at night?\n",
-		Sections: []SpecSection{{Name: "Problem", Line: 3}},
-		Notes:    []SpecNote{{Line: 6, Anchor: 5, Author: "user", By: "Simon", Date: "2026-09-27", Text: "only at night?"}},
+		Markdown:     "# Dark mode\n\n## Problem\n\nToo bright.\n%% @user(2026-09-27, Simon): only at night?\n",
+		Sections:     []SpecSection{{Name: "Problem", Line: 3}},
+		Notes:        []SpecNote{{Line: 6, Anchor: 5, Author: "user", By: "Simon", Date: "2026-09-27", Text: "only at night?"}},
+		OpenComments: 1,
 		Checks: []SpecCheck{
 			{Name: "build", Cmd: "go build ./...", Last: &CheckOutcome{OK: true, At: at}},
 			{Name: "lint", Cmd: "golangci-lint run", Excused: true, ExcusedOn: "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c"},

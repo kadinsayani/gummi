@@ -13,6 +13,7 @@ export interface MockHandle {
   annotations: any[];
   nextAnswer: { status: number; body: any } | null;
   diffRev: string;
+  changes: string[];
 }
 
 const t0 = '2026-09-27T09:12:00Z';
@@ -59,8 +60,9 @@ export const spec = {
   path: 'docs/features/FD-001.md', rev: 'a41c9e2b', title: 'Add a wave helper',
   markdown: '# Add a wave helper\n\n## Problem\n\nGreet only says hello. We want a `Wave` too.\n\n%% @gummi: a prompt the page must not show\n\n## Chosen approach\n\nAdd `Wave(name)` beside `Greet`.\n\n1. write it\n2. test it\n\n## Verification plan\n\n```gummi-checks\nbuild: go build ./...\ntest: go test ./...\n```\n',
   sections: [{ name: 'Problem', line: 3 }, { name: 'Chosen approach', line: 9 }, { name: 'Verification plan', line: 16 }],
-  notes: [{ line: 5, author: 'yuki', date: '09:29', text: 'Does clean share the same path?', resolved: false }],
+  notes: [{ line: 5, author: 'user', by: 'Yuki', date: '09:29', text: 'Does clean share the same path?', resolved: false }],
   checks: [{ name: 'build', cmd: 'go build ./...', last: { ok: true, at: at(41) } }, { name: 'test', cmd: 'go test ./...', last: { ok: false, at: at(41) } }],
+  openComments: 1,
 };
 
 export function diff(rev: string, annotations: any[]) {
@@ -104,7 +106,7 @@ export const stats = {
 };
 
 export async function mockCard(page: Page, id: string, opts: { kind?: string; decision?: any } = {}): Promise<MockHandle> {
-  const m: MockHandle = { answers: [], annotations: [{ id: 1, file: 'wave.go', idx: 8, excerpt: 'func Wave', comment: 'Name it WaveAt?', by: 'Yuki', source: 'gummi', resolved: false }], nextAnswer: null, diffRev: 'a41c9e2' };
+  const m: MockHandle = { answers: [], annotations: [{ id: 1, file: 'wave.go', idx: 8, excerpt: 'func Wave', comment: 'Name it WaveAt?', by: 'Yuki', source: 'gummi', resolved: false }], nextAnswer: null, diffRev: 'a41c9e2', changes: [] };
   // A request the page gave up on (a reload, or a card change the board
   // pushed while the card's own fetch was in flight) is already settled by
   // the time its handler answers; answering it again is not the test's
@@ -141,6 +143,12 @@ export async function mockCard(page: Page, id: string, opts: { kind?: string; de
     m.annotations.push({ id: m.annotations.length + 1, file: 'wave.go', idx: body.idx, excerpt: '', comment: body.comment, by: 'Tester', source: 'gummi', resolved: false });
     await json(r, diff(m.diffRev, m.annotations));
   });
+  for (const what of ['spec', 'diff']) {
+    await page.route(`${base}/${what}/changes`, async (r) => {
+      m.changes.push(what);
+      await json(r, { ok: true, text: what === 'spec' ? `${id}: re-running verify with 1 review comment(s)` : `${id}: sent 1 diff comment to the implementer` });
+    });
+  }
   await page.route(`${base}/pr`, (r) => json(r, pr));
   await page.route(`${base}/stats`, (r) => json(r, stats));
   await page.route(`${base}/answer`, async (r) => {

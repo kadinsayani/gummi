@@ -36,20 +36,28 @@ func compileOpenQuestions(doc spec.Doc) string { return engine.CompileSpecCommen
 // edits the artifact and resolves each; the user reloads to see the
 // open-count burn down.
 func (m *Shell) requestSpecChanges(sv *specView) tea.Cmd {
+	cmd, refused := m.specChanges(sv.f, sv.doc)
+	if cmd == nil {
+		m.notice = refused
+	}
+	return cmd
+}
+
+// specChanges is requestSpecChanges for any face: the command that sends
+// doc's open comments on, or — nil — the notice saying why nothing can
+// be sent.
+func (m *Shell) specChanges(f domain.Feature, doc spec.Doc) (tea.Cmd, noticeMsg) {
 	if m.engine == nil {
-		m.notice = noticeMsg{text: m.noAgent(""), isErr: true}
-		return nil
+		return nil, noticeMsg{text: m.noAgent(""), isErr: true}
 	}
-	turn := compileOpenQuestions(sv.doc)
+	turn := compileOpenQuestions(doc)
 	if turn == "" {
-		m.notice = noticeMsg{text: "no open review comments to send"}
-		return nil
+		return nil, noticeMsg{text: "no open review comments to send"}
 	}
-	f := sv.f
-	n := len(userOpenThreads(sv.doc))
+	n := len(userOpenThreads(doc))
 	// Every stage is autonomous now; a chat is a session the user opened
 	// against one, not a stage state. Changes go to the running session.
-	return m.sendChangesToAutonomous(f, turn, n)
+	return m.sendChangesToAutonomous(f, turn, n), noticeMsg{}
 }
 
 // sendChangesToAutonomous delivers review comments to an autonomous

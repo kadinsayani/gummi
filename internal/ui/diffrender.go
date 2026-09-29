@@ -198,14 +198,31 @@ func (dv *diffView) annBlock(m *Shell, a domain.DiffAnnotation, pad, w int) stri
 // hints (see newAgentSession), so either way the implementer addresses
 // each comment. Blocks with a notice when there is nothing open to send.
 func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
-	actor := m.humanActor()
-	if m.engine == nil {
-		m.notice = noticeMsg{text: m.noAgent(""), isErr: true}
+	cmd, refused := m.diffChanges(dv.f, dv.anns)
+	if cmd == nil {
+		m.notice = refused
 		return nil
 	}
-	if dv.openCount() == 0 {
-		m.notice = noticeMsg{text: "no open diff comments to send"}
-		return nil
+	m.diff = nil // close the surface; the fix runs on the board
+	return cmd
+}
+
+// diffChanges is requestDiffChanges for any face: the command that sends
+// anns' open comments on, or — nil — the notice saying why nothing can
+// be sent.
+func (m *Shell) diffChanges(f domain.Feature, anns []domain.DiffAnnotation) (tea.Cmd, noticeMsg) {
+	actor := m.humanActor()
+	if m.engine == nil {
+		return nil, noticeMsg{text: m.noAgent(""), isErr: true}
+	}
+	n := 0
+	for _, a := range anns {
+		if !a.Resolved {
+			n++
+		}
+	}
+	if n == 0 {
+		return nil, noticeMsg{text: "no open diff comments to send"}
 	}
 	// A freeform card has exactly one session and it is always the writer,
 	// so all of the routing below collapses: there is no stage to
@@ -215,10 +232,8 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 	// transcript; if the card page was never opened this session,
 	// OpenFreeform is what opens it — idempotent per card, so asking twice
 	// costs nothing.
-	if dv.f.IsFreeform() {
-		f, n := dv.f, dv.openCount()
-		turn := engine.CompileDiffComments(dv.anns, m.engine.ClientTools())
-		m.diff = nil // close the surface; the fix runs on the board
+	if f.IsFreeform() {
+		turn := engine.CompileDiffComments(anns, m.engine.ClientTools())
 		return func() tea.Msg {
 			ctx := context.Background()
 			ff, err := m.engine.OpenFreeform(ctx, f)
@@ -229,28 +244,24 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 				return noticeMsg{text: sanitize(err.Error()), isErr: true}
 			}
 			return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to its session", f.ID, n, plural(n)), reload: true}
-		}
+		}, noticeMsg{}
 	}
 	// "request changes" targets the work stage (implement/fix); only
 	// offer it there or from a stage with a legal edge to it
 	// (review/verify), so it never tears down a running session for a
 	// transition that will just be rejected.
 	workStage := domain.StageImplement
-	atWork := dv.f.Stage == workStage
+	atWork := f.Stage == workStage
 	if !atWork {
-		if err := workflow.CanTransition(dv.f.Stage, workStage); err != nil {
-			m.notice = noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}
-			return nil
+		if err := workflow.CanTransition(f.Stage, workStage); err != nil {
+			return nil, noticeMsg{text: "request changes works from the implement or verify gate", isErr: true}
 		}
 	}
-	f := dv.f
-	n := dv.openCount()
 	// The three notices below used to hard-code "comment(s)" and let a
 	// single open comment read "sent 1 diff comment(s) to the
 	// implementer" verbatim. plural(n) (reviewloop.go) picks the right
 	// suffix instead of punting the choice onto the reader.
-	turn := engine.CompileDiffComments(dv.anns, m.engine.ClientTools())
-	m.diff = nil // close the surface; the fix runs on the board
+	turn := engine.CompileDiffComments(anns, m.engine.ClientTools())
 	return func() tea.Msg {
 		ctx := context.Background()
 		if atWork {
@@ -290,5 +301,5 @@ func (m *Shell) requestDiffChanges(dv *diffView) tea.Cmd {
 			return noticeMsg{text: err.Error(), isErr: true}
 		}
 		return noticeMsg{text: fmt.Sprintf("%s: sent %d diff comment%s to the implementer", f.ID, n, plural(n)), reload: true}
-	}
+	}, noticeMsg{}
 }

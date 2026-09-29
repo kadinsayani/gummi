@@ -235,3 +235,19 @@ function sentence (s) {
   s = String(s || '').trim()
   return s ? s[0].toUpperCase() + s.slice(1) : ''
 }
+
+// requestChanges is the spec and diff tabs' "Request changes" — the TUI's
+// R on those surfaces: the card's open comments on what (spec or diff) go
+// to the agent that writes it, POST …/{what}/changes. The board's answer
+// is its own sentence; the broadcast of the same one shows once.
+export async function requestChanges (id, what, btn) {
+  btn.disabled = true
+  try {
+    const res = await post(cardPath(id, `${what}/changes`), {})
+    toast(res?.text || 'Comments sent')
+  } catch (err) {
+    toast(err.notBuilt ? 'Requesting changes from the web is not available yet' : err.message, { err: !err.notBuilt })
+  } finally {
+    btn.disabled = false
+  }
+}
