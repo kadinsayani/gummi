@@ -111,6 +111,58 @@ test.describe('a running goal', () => {
     await expect(page.getByTestId('view-goal').getByTestId('goal-id')).toHaveText(goal);
   });
 
+  // A verb the lead refuses is said on the panel, in its words, and the
+  // panel stays open for another try; ctrl+enter confirms and escape
+  // closes, as in the composer.
+  test('a refused goal verb is said on its panel, and the keyboard drives it', async ({ pairedPage: page }, info) => {
+    test.skip(info.project.name !== 'desktop', 'the keyboard paths are the same on every viewport');
+    await openGoals(page, false);
+    await page.getByTestId(`goal-row-${goal}`).click();
+    const view = page.getByTestId('view-goal');
+    await expect(view.getByTestId('goal-title')).toBeVisible();
+
+    let posts = 0;
+    await page.route(`**/api/goals/${goal}/actions/note`, (route) => {
+      posts++;
+      return route.fulfill({ status: 409, contentType: 'application/json', body: JSON.stringify({ error: 'the lead is between turns' }) });
+    });
+    await view.getByTestId('goal-action-note').click();
+    const panel = view.getByTestId('goal-panel-note');
+    const confirm = panel.getByTestId('goal-action-confirm');
+    // nothing said: the page asks before it sends anything
+    await confirm.click();
+    await expect(panel.getByTestId('goal-action-error')).toContainText('Say something first');
+    expect(posts).toBe(0);
+
+    await panel.getByTestId('goal-action-input').fill('hold the second card');
+    await confirm.click();
+    await expect(panel.getByTestId('goal-action-error')).toContainText('the lead is between turns');
+    await expect(confirm).toBeEnabled();
+    // typing takes the message away; ctrl+enter sends again
+    await panel.getByTestId('goal-action-input').press('End');
+    await panel.getByTestId('goal-action-input').type('!');
+    await expect(panel.getByTestId('goal-action-error')).toBeHidden();
+    await panel.getByTestId('goal-action-input').press('Control+Enter');
+    await expect.poll(() => posts).toBe(2);
+    await expect(panel.getByTestId('goal-action-error')).toContainText('the lead is between turns');
+
+    await panel.getByTestId('goal-action-input').press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(view.getByTestId('goal-title')).toBeVisible();
+  });
+
+  // A goal's page that cannot be read says which goal, and why.
+  test('a goal page that fails to load names the goal and the reason', async ({ pairedPage: page }, info) => {
+    test.skip(info.project.name !== 'desktop', 'one viewport is enough for an error state');
+    await openGoals(page, false);
+    await page.route((u) => u.pathname === `/api/goals/${goal}`, (route) =>
+      route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ error: 'the store is locked' }) }));
+    await page.getByTestId(`goal-row-${goal}`).click();
+    const err = page.getByTestId('goal-error');
+    await expect(err).toContainText(`${goal} did not load`);
+    await expect(err).toContainText('the store is locked');
+  });
+
   // Deleting the goal from its card's menu asks the board's own question —
   // which says its two cards go with it — before anything is sent with a
   // yes; the page never confirms ahead of the server's question.
@@ -178,3 +230,20 @@ test('a goal is created from the form', async ({ pairedPage: page }, info) => {
   await view.getByTestId('goal-back').click();
   await expect(page.getByTestId('view-goals').locator('[data-testid^="goal-row-GL-"]')).toHaveCount(1);
 });
+
+// The list says why it could not be read, and a board that does not serve
+// goals at all says that instead of showing a raw status.
+for (const c of [
+  { status: 500, body: { error: 'the store is locked' }, says: 'the store is locked' },
+  { status: 501, body: { error: 'not built' }, says: 'this board does not serve goals yet' },
+]) {
+  test(`the goals list on a ${c.status} says why it did not load`, async ({ pairedPage: page }, info) => {
+    test.skip(info.project.name !== 'desktop', 'one viewport is enough for an error state');
+    await page.route((u) => u.pathname === '/api/goals', (route) =>
+      route.fulfill({ status: c.status, contentType: 'application/json', body: JSON.stringify(c.body) }));
+    await openGoals(page, false);
+    const err = page.getByTestId('goals-error');
+    await expect(err).toContainText('Goals did not load');
+    await expect(err).toContainText(c.says);
+  });
+}

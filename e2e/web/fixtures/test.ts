@@ -1,5 +1,7 @@
-import { test as base, expect, type Page } from '@playwright/test';
+import { test as base, expect, type BrowserContext, type Page } from '@playwright/test';
 import fs from 'node:fs';
+import path from 'node:path';
+import { collectCoverage, type ScriptCoverage } from './coverage';
 import { api, pair, type ApiResponse, GummiServer } from './server';
 import { Workspace } from './workspace';
 
@@ -25,6 +27,7 @@ export type BoundApi = <T = any>(
 ) => Promise<ApiResponse<T>>;
 
 interface Fixtures {
+  _coverage: void;
   /**
    * Option: runs against the fresh workspace BEFORE the server starts, so a
    * test's cards exist when the board first loads:
@@ -54,6 +57,60 @@ export const test = base.extend<Fixtures>({
   workspaceEnv: [{}, { option: true }],
   serverArgs: [[], { option: true }],
   person: ['Tester', { option: true }],
+
+  // GUMMI_E2E_COVERAGE=<dir> records which bytes of the page's own
+  // scripts ran, for scripts/web-cover.mjs to read back. It follows every
+  // page the test opens — the built-in one and those of contexts the test
+  // makes itself — and starts before anything on the page loads.
+  _coverage: [
+    async ({ context, browser }, use, testInfo) => {
+      const dir = process.env.GUMMI_E2E_COVERAGE;
+      if (!dir) return use();
+      // A page's coverage cannot be read once it is closed, and specs do
+      // close pages and contexts, so each one is read out just before.
+      const results: Array<Promise<ScriptCoverage[]>> = [];
+      const pageReads: Array<() => void> = [];
+      const follow = (c: BrowserContext) => {
+        c.on('page', (p) => {
+          const ready = collectCoverage(p);
+          let read: Promise<ScriptCoverage[]> | null = null;
+          const take = () => {
+            if (!read) {
+              read = ready.then((stop) => stop()).catch(() => []);
+              results.push(read);
+            }
+            return read;
+          };
+          pageReads.push(() => void take());
+          const close = p.close.bind(p);
+          p.close = async (o) => {
+            await take();
+            return close(o);
+          };
+        });
+        const close = c.close.bind(c);
+        c.close = async (o) => {
+          for (const take of pageReads) take();
+          await Promise.all(results);
+          return close(o);
+        };
+      };
+      follow(context);
+      const made = browser.newContext.bind(browser);
+      browser.newContext = async (o) => {
+        const c = await made(o);
+        follow(c);
+        return c;
+      };
+      await use();
+      browser.newContext = made;
+      for (const take of pageReads) take();
+      const all = (await Promise.all(results)).flat();
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, `${testInfo.project.name}-${testInfo.testId}.json`), JSON.stringify(all));
+    },
+    { auto: true },
+  ],
 
   workspace: async ({ seed, workspaceEnv }, use, testInfo) => {
     const ws = await Workspace.create({ env: workspaceEnv, name: testInfo.project.name });
