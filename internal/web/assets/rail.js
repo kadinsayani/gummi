@@ -129,7 +129,7 @@ function rowEl (r) {
   h('span', { class: 't' }, r.title),
   h('span', { class: 'id' }, r.id),
   h('span', { class: 'meta' },
-    r.stage === 'open' ? h('span', { class: 'ff' }, 'freeform') : strip(r.stage),
+    r.stage === 'open' || r.kind === 'freeform' ? h('span', { class: 'ff' }, 'freeform') : strip(r.stage),
     badge,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.join(', ')}`) : null,
     r.stack ? h('span', { class: ['badge stack', r.stack.stale && 'stale'], title: r.stack.name }, `stack ${r.stack.pos + 1} of ${r.stack.of}`) : null,

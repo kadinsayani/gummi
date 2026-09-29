@@ -72,8 +72,10 @@ export function openActions (line = '') {
 }
 
 function stages (c) {
-  if (c.stage === 'open') {
-    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, '◆ freeform · no stages, no gates'))
+  // a freeform card has no stages at all, closed or not: ticking the
+  // workflow's would claim a plan, an implement and a verify it never had
+  if (c.stage === 'open' || c.kind === 'freeform') {
+    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, c.stage === 'open' ? '◆ freeform · no stages, no gates' : '◆ freeform · closed'))
   }
   const idx = STAGES.indexOf(c.stage)
   return h('span', { class: 'stages', testid: 'card-stages' }, STAGES.map((s, i) => [

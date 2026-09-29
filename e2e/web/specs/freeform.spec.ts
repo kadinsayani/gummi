@@ -30,3 +30,25 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
   const card = (await api('GET', `/api/cards/${id}`)).json;
   expect(JSON.stringify(card.decision ?? {})).not.toContain('working on a turn');
 });
+
+// A freeform card walks no stages, so once it lands it has none to have
+// passed: the head and the rail must not tick a plan, an implement and a
+// verify it never had.
+test('a landed freeform card claims no stages', async ({ pairedPage: page, server, api }, info) => {
+  test.setTimeout(90_000);
+  const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the padding' })).json?.id);
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.options?.some((o: any) => o.id === 'merge'), { timeout: 30_000 }).toBe(true);
+  let d = (await api('GET', `/api/cards/${id}`)).json.decision;
+  let r = await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: 'merge', against: d.against.token, words: 'chore: pad the padding' });
+  for (let i = 0; i < 3 && r.json?.confirm; i++) {
+    r = await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: 'merge', against: d.against.token, words: 'chore: pad the padding', confirm: r.json.confirm });
+  }
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage, { timeout: 30_000 }).toBe('done');
+  await page.goto(`${server.url}/#${id}`);
+  await expect(page.getByTestId('card-id')).toHaveText(id);
+  await expect(page.getByTestId('card-stages')).toContainText('freeform');
+  await expect(page.getByTestId('card-stages')).not.toContainText('verify');
+  await expect(page.getByTestId('stage-verify')).toHaveCount(0);
+  if (info.project.name === 'phone') await page.getByTestId('mnav-cards').click();
+  await expect(page.getByTestId(`rail-row-${id}`)).toContainText('freeform');
+});
