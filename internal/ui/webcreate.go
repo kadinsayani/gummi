@@ -11,6 +11,7 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 	"github.com/morphis/gummi/internal/state"
 	"github.com/morphis/gummi/internal/webapi"
+	"github.com/morphis/gummi/internal/worktree"
 )
 
 // New cards from the web face. Both halves are the TUI's own card form
@@ -185,6 +186,18 @@ func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	return ""
 }
 
+// RefreshBranches reads the repositories' branches again — off the
+// board's loop, since it runs git — and hands them to the board, so the
+// new-card form offers what the repository has now.
+func (b *Bridge) RefreshBranches(ctx context.Context) {
+	var wt *worktree.Pool
+	if b.Do(ctx, func(m *Shell) tea.Cmd { wt = m.wt; return nil }) != nil || wt == nil {
+		return
+	}
+	base, repo := readBranches(ctx, wt)
+	_ = b.Do(ctx, func(m *Shell) tea.Cmd { m.baseBranches, m.repoBranches = base, repo; return nil })
+}
+
 // CreateCard is POST /api/cards: the new-card form, filled in and
 // submitted as its Create (or, with Autopilot, its "Create & autopilot")
 // button submits it. It answers the new card.
@@ -195,6 +208,9 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 	}
 	if strings.TrimSpace(req.Title) == "" {
 		return webapi.Card{}, refuse(WebBadRequest, "a card needs a title")
+	}
+	if req.Adopt != "" || req.Base != "" {
+		b.RefreshBranches(ctx)
 	}
 	// only "create & autopilot" answers the autopilot switch its flow
 	// opens; a plain create leaves any such dialog for a person

@@ -241,6 +241,13 @@ func (m *Shell) updateTracked(tm webTrackedMsg) (tea.Model, tea.Cmd) {
 	defer leave()
 	before, notice := m.Overlay.Len(), m.notice
 	model, cmd := m.Update(tm.inner)
+	if n, ok := tm.inner.(noticeMsg); ok && m.notice == n {
+		// a notice this intent's own work sent is its news even when it
+		// reads the same as the one already up: the same refusal twice
+		// running was not recorded, and the second create that hit it
+		// said only that no card was made
+		notice = noticeMsg{}
+	}
 	t.noticed(m, notice)
 	if created, ok := tm.inner.(cardCreatedMsg); ok {
 		t.out.created = created.f.ID

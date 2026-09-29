@@ -632,34 +632,38 @@ func (m *Shell) Attach(store *state.Store, wt *worktree.Pool, ws state.Workspace
 }
 
 // resolveBaseBranches reads each configured repository's current branch
-// name once, at attach. Every name a card can carry is resolved here so
-// baseBranch below is a map lookup: it is called from render paths, and
-// a render path may not run git.
+// name and its branches, at attach. Every name a card can carry is
+// resolved here so baseBranch below is a map lookup: it is called from
+// render paths, and a render path may not run git. The web face reads
+// them again, off the loop, whenever a new-card form is opened or sent
+// (Bridge.RefreshBranches): a board served for days would otherwise never
+// offer a branch cut after launch to adopt or fork from.
 func (m *Shell) resolveBaseBranches() {
 	if m.wt == nil {
 		return
 	}
-	ctx := context.Background()
-	m.baseBranches = map[string]string{"": m.wt.BaseBranch(ctx, "")}
-	m.repoBranches = map[string][]string{}
-	if mgr, err := m.wt.ManagerForName(ctx, ""); err == nil {
+	m.baseBranches, m.repoBranches = readBranches(context.Background(), m.wt)
+}
+
+// readBranches is what resolveBaseBranches installs: each repository's
+// checked-out branch, and the branches it has. It runs git.
+func readBranches(ctx context.Context, wt *worktree.Pool) (map[string]string, map[string][]string) {
+	base := map[string]string{"": wt.BaseBranch(ctx, "")}
+	repo := map[string][]string{}
+	if mgr, err := wt.ManagerForName(ctx, ""); err == nil {
 		if branches, berr := mgr.ListBranches(ctx); berr == nil {
-			m.repoBranches[""] = branches
+			repo[""] = branches
 		}
 	}
-	for _, name := range m.wt.Names() {
-		m.baseBranches[name] = m.wt.BaseBranch(ctx, name)
-		// Read once here, for the same reason the branch a repo has out
-		// is read once: the creation dialog's base row is a render path,
-		// and a render path may not run git. A branch cut after launch
-		// is therefore not offered until the next one — acceptable for a
-		// row whose default is "whatever is checked out".
-		if mgr, err := m.wt.ManagerForName(ctx, name); err == nil {
+	for _, name := range wt.Names() {
+		base[name] = wt.BaseBranch(ctx, name)
+		if mgr, err := wt.ManagerForName(ctx, name); err == nil {
 			if branches, berr := mgr.ListBranches(ctx); berr == nil {
-				m.repoBranches[name] = branches
+				repo[name] = branches
 			}
 		}
 	}
+	return base, repo
 }
 
 // baseBranch names the branch f lands on, for prose. Every caller that

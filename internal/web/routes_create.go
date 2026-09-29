@@ -21,6 +21,7 @@ func (s *Server) handleForm(w http.ResponseWriter, r *http.Request) {
 		err error
 	)
 	repo := r.URL.Query().Get("repo")
+	s.opt.Board.RefreshBranches(r.Context())
 	if !s.do(w, r, func(m *ui.Shell) tea.Cmd { f, err = m.WebForm(repo); return nil }) {
 		return
 	}
