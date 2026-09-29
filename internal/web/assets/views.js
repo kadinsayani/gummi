@@ -12,6 +12,7 @@
 
 import { h, icon } from './dom.js?v=__ASSET_V__'
 import { pushLayer } from './back.js?v=__ASSET_V__'
+import { on, state } from './store.js?v=__ASSET_V__'
 
 const views = new Map()
 let ctxFactory = () => ({})
@@ -104,8 +105,11 @@ function focusBack (opener, returnTo) {
 
 // openModal shows one dialog over the page. body is a Node (or bodyEl a
 // ready container); actions are [{label, primary, danger, testid, onClick}].
-// An action whose onClick returns false keeps the dialog open.
-export function openModal ({ title, body, bodyEl, actions = [], wide = false, testid = 'modal', onClose, role = 'dialog', returnTo }) {
+// An action whose onClick returns false keeps the dialog open. card, when
+// given, is the card the dialog acts on: opening another card (a link, a
+// hash typed in) closes it, so its keys never land on a card nobody is
+// looking at.
+export function openModal ({ title, body, bodyEl, actions = [], wide = false, testid = 'modal', onClose, role = 'dialog', returnTo, card }) {
   const mbody = bodyEl || h('div', { class: 'mbody' }, body)
   let close = null
   const foot = actions.length
@@ -126,7 +130,9 @@ export function openModal ({ title, body, bodyEl, actions = [], wide = false, te
       h('h2', null, title),
       h('button', { class: 'iconbtn', type: 'button', 'aria-label': 'Close', title: 'Close (esc)', testid: 'modal-close', onclick: () => close() }, icon('close'))),
     mbody, foot)
-  close = layer(box, { onClose, returnTo })
+  let off = null
+  close = layer(box, { onClose: () => { off?.(); onClose?.() }, returnTo })
+  if (card) off = on(['sel'], () => { if (state.sel !== card) close() })
   const first = box.querySelector('input,textarea,select,[autofocus]') || box
   first.focus()
   return { el: box, body: mbody, close }

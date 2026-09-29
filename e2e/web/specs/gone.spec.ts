@@ -36,3 +36,18 @@ test('a card deleted elsewhere stays gone where it was open', async ({ pairedPag
   await page.waitForTimeout(500);
   expect((await api('GET', `/api/cards/${verified}`)).json.stage).toBe('verify');
 });
+
+// A card's dialog is about that card: opening another one by a link or a
+// hash closes it, rather than leaving it up over a card it does not act
+// on with the keys still going into it.
+test('a card dialog closes when another card is opened', async ({ pairedPage: page, server }, info) => {
+  test.skip(info.project.name === 'phone', 'the phone reaches the menu through its own panel');
+  await page.goto(`${server.url}/#${verified}`);
+  await expect(page.getByTestId('card-id')).toHaveText(verified);
+  await page.getByTestId('card-actions').click();
+  await page.getByTestId('action-merge').click();
+  await expect(page.getByTestId('action-dialog')).toBeVisible();
+  await page.evaluate((id) => { location.hash = '#' + id; }, doomed);
+  await expect(page.getByTestId('card-id')).toHaveText(doomed);
+  await expect(page.getByTestId('action-dialog')).toHaveCount(0);
+});
