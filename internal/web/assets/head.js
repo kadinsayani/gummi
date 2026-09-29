@@ -19,7 +19,7 @@ function render () {
   clear(el)
   const c = state.card || row(state.sel)
   if (!c) {
-    el.append(h('div', { class: 'head-row' }, h('h1', { testid: 'card-title' }, state.sel ? state.sel : 'No card open')))
+    el.append(h('div', { class: 'head-row' }, h('h1', { testid: 'card-title' }, !state.sel ? 'No card open' : state.gone === state.sel ? `${state.sel} · deleted` : state.sel)))
     return
   }
   const actions = state.card?.actions || []

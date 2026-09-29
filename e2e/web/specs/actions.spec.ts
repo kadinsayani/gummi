@@ -90,7 +90,11 @@ test.describe('a backlog', () => {
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).status).toBe(404);
     if (phone(info)) await page.getByTestId('mnav-cards').click();
     await expect(page.getByTestId(`rail-row-${id}`)).toHaveCount(0);
-    await expect(page.getByTestId('card-id')).not.toHaveText(id);
+    // where it was open, it is said to be gone; the page does not move
+    // itself onto another card
+    if (phone(info)) await page.getByTestId('mnav-thread').click();
+    await expect(page.getByTestId('card-title')).toHaveText(`${id} · deleted`);
+    await expect(page.getByTestId('card-id')).toHaveCount(0);
   });
 });
 

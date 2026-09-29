@@ -42,7 +42,7 @@ export async function select (id, { tab = null, view = true } = {}) {
   const mine = ++picks
   const changed = id !== state.sel
   if (changed) {
-    set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false })
+    set({ sel: id, card: null, cardErr: null, thread: null, live: null, hi: 0, showNext: null, mdecOpen: false, gone: null })
   }
   if (tab && tab !== state.tab) set({ tab })
   writeHash(id, tab)
@@ -62,7 +62,7 @@ export async function select (id, { tab = null, view = true } = {}) {
 }
 
 export async function loadCard (id = state.sel) {
-  if (!id) return null
+  if (!id || state.gone === id) return null
   try {
     const c = await get(cardPath(id))
     if (state.sel !== id) return c
@@ -78,7 +78,7 @@ export async function loadCard (id = state.sel) {
 }
 
 export async function loadThread (id = state.sel, full = false) {
-  if (!id) return
+  if (!id || state.gone === id) return
   const after = !full && state.thread?.items ? state.thread.lastSeq || 0 : 0
   try {
     const t = await get(cardPath(id, 'thread') + (after ? `?after=${after}` : ''))
@@ -176,11 +176,14 @@ export function step (dir, ids) {
 }
 
 export function initSelection () {
-  // a card that left the board (deleted) takes the selection with it
+  // a card that left the board (deleted, here or on another device) is
+  // said to be gone where it was open. The page used to move itself onto
+  // another card: a line half-typed for this one was dropped, and enter
+  // then answered that other card's decision — a landing, say — which
+  // its reader had never looked at.
   on('board', () => {
     if (state.sel && state.board && !rows().some(r => r.id === state.sel) && state.card) {
-      const first = rows().find(r => r.status === 'needs') || rows()[0]
-      if (first) select(first.id, { view: false })
+      set({ card: null, live: null, gone: state.sel, thread: { items: [], lastSeq: 0, gone: true } })
     }
   })
 }

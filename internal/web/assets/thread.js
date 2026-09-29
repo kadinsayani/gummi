@@ -40,7 +40,10 @@ function render () {
   const t = state.thread
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
   if (!t.items.length) {
-    if (t.unavailable) {
+    if (t.gone) {
+      placeholder(box, h('div', { class: 'empty', testid: 'thread-gone' }, h('b', null, `${state.sel} was deleted`),
+        state.draft.trim() ? 'What you were writing is still in the composer. Pick another card from the list.' : 'Pick another card from the list.'))
+    } else if (t.unavailable) {
       placeholder(box, h('div', { class: 'empty', testid: 'thread-unavailable' }, h('b', null, 'The thread is not available yet'), 'This board’s server does not serve a card’s conversation yet. The head, the decision and the panel still work.'))
     } else if (t.err) {
       placeholder(box, h('div', { class: 'empty err', testid: 'thread-error' }, h('b', null, 'The thread did not load'), t.err.message))
