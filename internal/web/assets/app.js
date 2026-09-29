@@ -4,7 +4,7 @@
 // opens the event stream that keeps them current.
 
 import { $, isMobile } from './dom.js?v=__ASSET_V__'
-import { get, post, setUnauthorizedHandler } from './api.js?v=__ASSET_V__'
+import { get, post, setUnauthorizedHandler, setReadHandlers } from './api.js?v=__ASSET_V__'
 import { set, state, rows, on } from './store.js?v=__ASSET_V__'
 import { connect, close as closeEvents } from './events.js?v=__ASSET_V__'
 import { parse, onRoute } from './router.js?v=__ASSET_V__'
@@ -138,6 +138,21 @@ async function startBoard () {
     focusComposer
   })
   setUnauthorizedHandler(() => { closeEvents(); closeOverlay(); location.reload() })
+  // a read that failed is asked again, everything the page shows, until
+  // one goes through: the event that asked for it will not come twice
+  let again = 0
+  let wait = 1000
+  let missedAt = 0
+  setReadHandlers({
+    missed: () => {
+      missedAt = Date.now()
+      if (again) return
+      again = setTimeout(() => { again = 0; refreshAll() }, wait)
+      wait = Math.min(wait * 2, 15000)
+    },
+    // the backoff starts over once reads have gone through for a while
+    ok: () => { if (!again && Date.now() - missedAt > 20000) wait = 1000 }
+  })
 
   let routed = false
   onRoute(({ id, tab }) => {

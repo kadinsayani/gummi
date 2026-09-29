@@ -28,17 +28,31 @@ export class ApiError extends Error {
 let onUnauthorized = null
 export function setUnauthorizedHandler (fn) { onUnauthorized = fn }
 
+// A read that failed on the way (the board unreachable, a 5xx) was
+// usually asked for by an event saying something changed; nothing will
+// say so again, so the page would keep drawing what it had. onMissed is
+// told of each such failure and onRead of each read that went through,
+// so the page can fetch again until one does.
+let reads = { missed: null, ok: null }
+export function setReadHandlers ({ missed, ok }) { reads = { missed, ok } }
+
 export async function api (method, path, body) {
   const init = { method, credentials: 'same-origin', headers: { Accept: 'application/json' } }
   if (body !== undefined) {
     init.headers['Content-Type'] = 'application/json'
     init.body = JSON.stringify(body)
   }
+  const read = method === 'GET'
   let res
   try {
     res = await fetch(path, init)
   } catch (err) {
+    if (read) reads.missed?.()
     throw new ApiError(0, null, 'the board cannot be reached')
+  }
+  if (read) {
+    if (res.status >= 500 && res.status !== 501) reads.missed?.()
+    else reads.ok?.()
   }
   const text = await res.text()
   let data = null
