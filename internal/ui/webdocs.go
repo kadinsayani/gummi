@@ -666,6 +666,11 @@ func (d *WebDocs) pushCommand(ctx context.Context, f domain.Feature) string {
 	if f.IsFreeform() && f.Stage == domain.StageTodo {
 		return ""
 	}
+	// a research card has a branch name and never a branch: there is
+	// nothing to push
+	if f.Kind == domain.KindResearch {
+		return ""
+	}
 	branch := f.BranchName()
 	if branch == "" {
 		return ""

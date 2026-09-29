@@ -103,6 +103,13 @@ func artifactNoun(k domain.Kind) string { return k.ArtifactNoun() }
 // flags: a bug with diagnose skipped approves its report at triage, and
 // the sentence stays true.
 func noWorktreeYet(f domain.Feature) string {
+	// A research card never gets a worktree of its own: its approved
+	// document leads to an investigation in a scratch tree, not a branch.
+	// Promising one "when you approve" sent its reader back to a card
+	// whose document was approved long ago.
+	if f.Kind == domain.KindResearch {
+		return string(f.ID) + " is research and carries no branch — its work is the document"
+	}
 	return string(f.ID) + " has no worktree yet (created when you approve the " + artifactNoun(f.Kind) + ")"
 }
 
