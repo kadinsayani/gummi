@@ -28,11 +28,8 @@ test.describe('a goal at its plan gate', () => {
     // the head leads to the goal's own page
     await expect(page.getByTestId('card-goal')).toHaveText('goal page');
     await shot(page, info, 'goal-card-gate');
-    // approve is the highlighted answer, but nobody chose it yet: the
-    // first press chooses it and the second gives it
+    // approve is the highlighted answer, and one press gives it
     await expect(page.getByTestId('decision-option-advance')).toHaveClass(/\bhi\b/);
-    await page.getByTestId('decision-option-advance').click();
-    await expect(page.getByTestId('decision-arm')).toBeVisible();
     await page.getByTestId('decision-option-advance').click();
     // past its plan gate the lead takes it from here (the scripted one is
     // quick), as far as it may go without a person: verify, ready for
@@ -47,7 +44,6 @@ test.describe('a goal at its plan gate', () => {
     // landing it is a second, deliberate answer, and it is recorded as the
     // person who gave it
     await expect(page.getByTestId('decision-option-advance')).toContainText(/land/i);
-    await page.getByTestId('decision-option-advance').click();
     await page.getByTestId('decision-option-advance').click();
     // the landing shows its drafted message, and lands on its own button
     await expect(page.getByTestId('landing-dialog')).toBeVisible({ timeout: 60_000 });

@@ -28,7 +28,6 @@ test('the landing dialog makes the page behind it inert and keeps Tab inside', a
   await open(page, server);
   const land = page.getByTestId('decision-option-advance');
   await land.click();
-  await land.click();
   const dialog = page.getByTestId('landing-dialog');
   await expect(dialog).toBeVisible();
   await expect(page.getByTestId('app')).toHaveJSProperty('inert', true);

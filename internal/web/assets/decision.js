@@ -38,6 +38,13 @@ let answering = false
 // or words typed for it are read, and answer at once.
 const SETTLE_MS = 800
 let shownAt = 0
+// replacedAt: when a press's own answer last replaced the decision on the
+// open card (its reply, or the stop that came a moment after it). A press
+// arriving that soon is the second click of a double click, aimed at the
+// answer before it. A decision that arrived any other way — the card just
+// opened, a chip raised by a line sent — answers at once.
+let replacedAt = 0
+let pressed = { busy: false, done: 0 }
 // held: the decision changed under words typed for the one before it.
 // The next enter only says so; the one after sends them to the new one.
 let held = false
@@ -66,6 +73,7 @@ export function initDecision (c) {
       // takes words in the new one: a reply to a question someone else
       // answered would go as a rework of the plan, say, unannounced
       const wrote = same && !chose && !!state.draft.trim()
+      replacedAt = ref !== null && sameCard && (pressed.busy || Date.now() - pressed.done < SETTLE_MS) ? Date.now() : 0
       ref = r
       refCard = state.sel
       shownAt = Date.now()
@@ -85,8 +93,8 @@ export function openDecision () { return state.card?.decision || null }
 
 // highlight moves the highlight. by is 'user' for a person's own choice
 // (a click, an arrow, a digit) and anything else for the page's aim (the
-// row that takes the words being typed); only a person's own choice arms
-// a click to answer.
+// row that takes the words being typed); only a person's own choice lets
+// enter or a press answer a decision that has just appeared.
 export function highlight (i, by = 'user') {
   const d = openDecision()
   if (!d || i < 0 || i >= d.options.length) return
@@ -159,19 +167,23 @@ function onOption (i, compact) {
     set({ hi: i, hiUser: true })
     return
   }
-  // a press on an answer the person has already chosen gives it; the
-  // first press only chooses it — including the answer highlighted by
-  // default, which nobody chose. One that takes words is given bare (the
-  // server asks for the words if it needs them), except the chat row,
-  // which is nothing without them.
-  if (state.hi === i && state.hiUser) { answer({ picked: true }); return }
+  // a press on an answer gives it, as its key does in the terminal. What
+  // asks first is the server's to ask — a landing's message, a yes for
+  // what spends or cannot be undone, the words a row is nothing without —
+  // so the page adds no press of its own. A note written first goes with
+  // the answer that takes one; the chat row with none asks for it.
+  //
+  // The one exception: a decision that has just replaced another under
+  // the pointer (the second click of a double click, meant for the answer
+  // before it) is chosen, not answered unread.
+  const chose = state.hi === i && state.hiUser
   set({ hi: i, hiUser: true })
-  if (o.words) {
-    if (isMobile()) set({ view: 'thread' })
-    $('#composer-input').focus()
-  } else {
-    note(`${compact ? 'Tap' : 'Press'} “${o.label}” again${compact ? '' : ', or enter,'} to answer.`, { testid: 'decision-arm' })
+  if (!chose && Date.now() - replacedAt < SETTLE_MS) {
+    note(`${state.sel} has a new decision — read it, then ${compact ? 'tap' : 'press'} “${o.label}” again.`, { tone: 'warn', testid: 'decision-fresh' })
+    return
   }
+  pressed = { busy: true, done: 0 }
+  Promise.resolve(answer({ picked: true })).finally(() => { pressed = { busy: false, done: Date.now() } })
 }
 
 export function togglePick (id) {

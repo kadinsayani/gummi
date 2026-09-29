@@ -29,15 +29,9 @@ async function open(page: Page, server: GummiServer, id: string) {
   await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
 }
 
-// give picks an answer from the pinned block: the first press only chooses
-// it (or puts the reader in the composer), the second gives it.
+// give answers from the pinned block: one press gives it.
 async function give(page: Page, option: string) {
-  const opt = page.getByTestId(`decision-option-${option}`);
-  await opt.click();
-  await page.waitForTimeout(150);
-  const chose = (await page.getByTestId('decision-arm').count()) > 0 ||
-    (await page.getByTestId('composer-input').evaluate((e) => e === document.activeElement));
-  if (chose) await opt.click();
+  await page.getByTestId(`decision-option-${option}`).click();
 }
 
 // The console is the same on every viewport; one project is enough.

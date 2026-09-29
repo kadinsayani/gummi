@@ -21,26 +21,16 @@ async function open(page: Page, server: GummiServer, id: string) {
 
 // answerOption answers the pinned decision with one option: on a phone
 // from the docked bar (the documents view shows it), elsewhere from the
-// pinned block. The first press only chooses an answer — even the one
-// highlighted by default, which nobody chose — and the second gives it.
+// pinned block. One press gives it: what asks first (a landing's message,
+// a yes) is the server's to ask.
 async function answerOption(page: Page, phone: boolean, option: string) {
   if (phone) {
     await page.getByTestId('mnav-panel').click();
     await page.getByTestId('mdec-toggle').click();
-    const opt = page.getByTestId(`mdec-option-${option}`);
-    await opt.click();
-    await page.waitForTimeout(150);
-    if (await page.getByTestId('mdec-note').filter({ hasText: 'again' }).count()) await opt.click();
+    await page.getByTestId(`mdec-option-${option}`).click();
     return;
   }
-  const opt = page.getByTestId(`decision-option-${option}`);
-  await opt.click();
-  await page.waitForTimeout(150);
-  // the press only chose it (or, for an answer that takes words, put the
-  // reader in the composer): the second gives it
-  const chose = (await page.getByTestId('decision-arm').count()) > 0 ||
-    (await page.getByTestId('composer-input').evaluate((e) => e === document.activeElement));
-  if (chose) await opt.click();
+  await page.getByTestId(`decision-option-${option}`).click();
 }
 
 async function thread(page: Page, phone: boolean) {
@@ -76,6 +66,22 @@ test.describe('a design gate', () => {
     const items = await thread(page, isPhone(info));
     await expect(items.getByTestId('receipt').last()).toContainText('Tester');
     await shot(page, info, 'gate-approved');
+  });
+
+  // One press answers. A second press a moment later, meant for the
+  // answer just given, meets the stop that answer led to: it is chosen,
+  // not answered unread.
+  test('one press approves, and a second press does not answer the next stop', async ({ pairedPage: page, server, api }, info) => {
+    test.skip(isPhone(info), 'the phone answers from the docked bar');
+    await open(page, server, id);
+    await page.getByTestId('decision-option-advance').click();
+    await expect(page.getByTestId('stage-implement')).toHaveAttribute('aria-current', 'step');
+    const next = (await api('GET', `/api/cards/${id}`)).json.decision;
+    await expect(page.getByTestId('decision')).toHaveAttribute('data-ref', next.ref);
+    await page.getByTestId('decision').locator('.opt').first().click();
+    await expect(page.getByTestId('decision-fresh')).toContainText('new decision');
+    await page.waitForTimeout(300);
+    expect((await api('GET', `/api/cards/${id}`)).json.decision?.ref).toBe(next.ref);
   });
 
   test('reworking the plan carries the note to the architect', async ({ pairedPage: page, server, workspace }, info) => {
@@ -167,13 +173,11 @@ test.describe('a design gate', () => {
         return p.getByTestId('decision-option-advance');
       };
       const [a, b] = [await go(page), await go(page2)];
-      // each chooses the answer, then both give it at once
-      await a.click();
-      await b.click();
+      // both give it at once
       await Promise.all([a.click(), b.click()]);
       // the loser is told: who answered, when its answer reached the board
       // second; or that the card moved, when the winner's answer reached
-      // its page before its own second press did
+      // its page before its own press did
       const told = (p: Page) => p.getByTestId(phone ? 'mdec-note' : 'decision-answered').or(p.getByTestId('decision-moved'));
       await expect.poll(async () => (await told(page).count()) + (await told(page2).count())).toBe(1);
       const [loser, winner] = (await told(page).count()) ? [page, 'Yuki'] : [page2, 'Tester'];
@@ -202,10 +206,8 @@ test.describe('a failed verify', () => {
       await page.getByTestId('mdec-toggle').click();
       await expect(page.getByTestId('mdec-option-bounce')).toContainText('+ 1 diff comment');
       await shot(page, info, 'verify-carry');
-      // a send-back takes words, so the bar sends the reader to the composer
+      // the tap sends it back, and the comment goes with it
       await page.getByTestId('mdec-option-bounce').click();
-      await expect(page.getByTestId('composer-input')).toBeFocused();
-      await page.getByTestId('composer-send').click();
     } else {
       await expect(page.getByTestId('decision-option-bounce')).toContainText('+ 1 diff comment');
       await shot(page, info, 'verify-carry');
@@ -269,7 +271,6 @@ test.describe('an agent’s question', () => {
     await open(page, server, id);
     if (isPhone(info)) await page.getByTestId('mnav-thread').click();
     // the chat row with nothing typed asks for the words
-    await page.getByTestId('decision-option-chat').click();
     await page.getByTestId('decision-option-chat').click();
     await expect(page.getByTestId('decision-needs')).toContainText('Type your answer');
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
@@ -423,7 +424,6 @@ test.describe('a question whose backend went away', () => {
     await shot(page, info, 'ask-restored');
     if (isPhone(info)) await page.getByTestId('mnav-thread').click();
     await page.getByTestId('decision-option-chat').click();
-    await page.getByTestId('decision-option-chat').click();
     await page.getByTestId('composer-input').fill('Put it beside Greet, in greet.go');
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('thread')).toContainText('Put it beside Greet, in greet.go');
@@ -509,7 +509,6 @@ test.describe('a verified card', () => {
     if (isPhone(info)) await page.getByTestId('mnav-thread').click();
     const opt = page.getByTestId('decision-option-handoff');
     await expect(opt).toBeVisible();
-    await opt.click();
     await opt.click();
     const confirm = page.getByTestId('decision-confirm');
     await expect(confirm).toBeVisible();
