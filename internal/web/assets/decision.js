@@ -271,7 +271,7 @@ function drawDecision (box) {
   h('div', { class: 'against', testid: 'decision-against' }, offline
     ? 'Reconnecting. Answers wait until the board is back.'
     : ['You are answering against ', h('span', { class: 'mono' }, d.against?.label || d.against?.token || 'the card as shown'),
-        d.multi ? ' · pick any, then enter' : '']),
+        d.multi ? (isMobile() ? ' · pick any, then Answer' : ' · pick any, then enter') : '']),
   optionButtons(d, false)),
   confirmEl(false) || '')
   const opts = box.querySelector('.decision > .opts')
@@ -315,7 +315,16 @@ function drawMdec (box) {
     h('span', { class: 'chev', 'aria-hidden': 'true' }, '▴')))
   if (state.mdecOpen || state.decNote || state.decConfirm) {
     box.append(noteEl(true) || '')
-    if (state.mdecOpen) box.append(optionButtons(d, true))
+    if (state.mdecOpen) {
+      box.append(optionButtons(d, true))
+      // a question that takes several answers is sent by a press of its
+      // own: tapping an answer only ticks it, and the bar has no enter
+      if (d.multi) {
+        const n = (state.picked || []).length
+        box.append(h('button', { class: 'btn pri msend', type: 'button', testid: 'mdec-send', disabled: !n || answering || state.conn !== 'live', onclick: () => answer() },
+          n ? `Answer with ${plural(n, 'choice')}` : 'Tick one or more, then answer'))
+      }
+    }
     box.append(confirmEl(true) || '')
   }
 }

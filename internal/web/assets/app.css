@@ -640,6 +640,7 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
   .mdec .sum .chev{color:var(--fg3);transition:transform .15s}
   .mdec.open .sum .chev{transform:rotate(180deg)}
   .mdec .opts{padding:0 10px 10px;max-height:40vh;overflow:auto}
+  .mdec .msend{display:block;width:calc(100% - 20px);margin:0 10px 10px}
   /* a phone is too narrow for an answer's detail beside its label: it goes under it */
   .opt{grid-template-columns:22px minmax(0,1fr);gap:2px 10px}
   .opt .d{grid-column:2;text-align:left}

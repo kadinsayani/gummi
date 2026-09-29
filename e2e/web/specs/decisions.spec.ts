@@ -535,3 +535,24 @@ test.describe('a verified card', () => {
     await expect(page.getByTestId('decision-confirm')).toHaveCount(0);
   });
 });
+
+// A question that takes several answers, on a phone: tapping answers in
+// the docked bar only ticks them, and a phone has no enter, so the bar
+// must carry its own way to send them.
+test('a phone sends a multi-pick answer from the docked bar', async ({ pairedPage: page, server, api }, info) => {
+  test.skip(!isPhone(info), 'the docked bar is the phone’s');
+  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask-multi] Add a plural helper' })).json;
+  let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+  card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.multi).toBe(true);
+  await open(page, server, c.id);
+  await page.getByTestId('mnav-panel').click();
+  await page.getByTestId('mdec-toggle').click();
+  await expect(page.getByTestId('mdec-send')).toBeDisabled();
+  await page.getByTestId('mdec-option-0').click();
+  await page.getByTestId('mdec-option-1').click();
+  await expect(page.getByTestId('mdec-send')).toContainText('2 choices');
+  await shot(page, info, 'mdec-multi');
+  await page.getByTestId('mdec-send').click();
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind, { timeout: 30_000 }).not.toBe('ask');
+});

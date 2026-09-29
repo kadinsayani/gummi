@@ -25,6 +25,8 @@ artifact):
                    puts the choice to the person with ask_user (two options,
                    changes_section "Chosen approach"), and finishes the spec
                    with whatever the answer was.
+    [ask-multi]    as [ask], but the question takes several answers
+                   (multi_select), so a test can pick more than one.
     [ask-gives-up] as [ask], but the agent's own tool call times out before
                    the person answers (GUMMI_E2E_ASK_TIMEOUT seconds, default
                    2): it says so and ends its turn with the question still
@@ -366,7 +368,7 @@ def plan_feature(turn, answer=None):
     gives_up = "[ask-gives-up]" in ctx["keywords"]
     dies = "[ask-dies]" in ctx["keywords"]
     spends = "[ask-spends]" in ctx["keywords"]
-    if ("[ask]" in ctx["keywords"] or gives_up or dies or spends) and answer is None:
+    if ("[ask]" in ctx["keywords"] or "[ask-multi]" in ctx["keywords"] or gives_up or dies or spends) and answer is None:
         turn.say("Two ways to do this are written up under Considered approaches. "
                  "I need you to pick one.")
         answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None,
@@ -378,6 +380,7 @@ def plan_feature(turn, answer=None):
             ],
             "changes_section": "Chosen approach",
             "spec_anchor": "Chosen approach",
+            **({"multi_select": True} if "[ask-multi]" in ctx["keywords"] else {}),
         })
     chosen = "Approach 1: a new file."
     if answer:
@@ -587,7 +590,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[slow]", "[research]")
+KEYWORDS = ("[ask-multi]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[slow]", "[research]")
 
 
 def detect(frame):
