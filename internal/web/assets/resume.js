@@ -1,5 +1,6 @@
 // resume.js — the quit-resume question. When the board's last host quit
-// with autopilot cards running, it stopped them and marked where; the
+// with cards mid-stage (on autopilot or started by hand), it stopped them
+// and marked where; the
 // next host holds the question (Board.resume) until a person answers:
 // pick them all back up, choose some, or not now — which leaves every one
 // parked where it stopped. Nothing restarts without that answer
@@ -35,7 +36,7 @@ function render () {
     h('div', { class: 'rb-row' },
       h('span', { class: 'rb-dot', 'aria-hidden': 'true' }),
       h('span', { class: 'rb-text', testid: 'resume-text' },
-        `The board was closed ${/^0s\b/.test(offer.since || '') ? 'just now' : (offer.since || 'a while ago')} with ${plural(cards.length, 'card')} on autopilot: `, names,
+        `The board was closed ${/^0s\b/.test(offer.since || '') ? 'just now' : (offer.since || 'a while ago')} with ${plural(cards.length, 'card')} mid-stage: `, names,
         '. ', cards.length === 1 ? 'It is' : 'They are', ' parked where ', cards.length === 1 ? 'it' : 'they', ' stopped.'),
       h('span', { class: 'rb-actions' },
         h('button', { class: 'btn pri', type: 'button', testid: 'resume-all', disabled: busy, onclick: () => answer({ cards: cards.map(c => c.id) }) }, cards.length === 1 ? 'Resume it' : 'Resume all'),

@@ -48,3 +48,17 @@ test('resume picks the chosen cards back up', async ({ pairedPage: page, server,
   await expect.poll(async () => (await api('GET', `/api/cards/${a}`)).json.status).toBe('running');
   expect((await api('GET', `/api/cards/${b}`)).json.status).not.toBe('running');
 });
+
+// A card started by hand is stopped by the quit just the same; the banner
+// names it for what it was doing, not as autopilot's.
+test('a card started by hand is not called autopilot’s', async ({ pairedPage: page, server, api }) => {
+  const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[slow] Add a handmade helper' })).json;
+  const card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
+  await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token });
+  await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.status).toBe('running');
+  await reopen(page, server);
+  await expect(page.getByTestId('resume-text')).toContainText(c.id);
+  await expect(page.getByTestId('resume-text')).toContainText('mid-stage');
+  await expect(page.getByTestId('resume-text')).not.toContainText('autopilot');
+  await page.getByTestId('resume-none').click();
+});
