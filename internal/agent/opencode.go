@@ -92,7 +92,7 @@ func (o *Opencode) NewSession(_ context.Context, opts SessionOpts) (Session, err
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: locating own executable: %w", err)
 	}
-	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.Workspace, opts.SkillDirs)
+	cfg, err := buildOpencodeConfig(opts.WorkDir, opts.MCPSockPath, opts.FeatureID, exe, opts.ExtraReadAllows, opts.ReadOnly, opts.Workspace, opts.SkillDirs, opts.ScratchDir)
 	if err != nil {
 		return nil, fmt.Errorf("opencode adapter: building session config: %w", err)
 	}
@@ -460,13 +460,17 @@ type ocEvent struct {
 		Type   string  `json:"type"`
 		Text   string  `json:"text"`
 		Tool   string  `json:"tool"`
+		CallID string  `json:"callID"`
 		Cost   float64 `json:"cost"`
 		Error  string  `json:"error"`
 		Reason string  `json:"reason"` // step-finish: "stop" | "tool-calls" | "length" | …
 		State  struct {
-			Title string         `json:"title"`
-			Input map[string]any `json:"input"`
-		} `json:"state"` // tool parts: arguments and a pre-rendered title
+			Title  string         `json:"title"`
+			Input  map[string]any `json:"input"`
+			Status string         `json:"status"` // "completed" | "error" on a tool_use line
+			Output string         `json:"output"`
+			Error  string         `json:"error"`
+		} `json:"state"` // tool parts: arguments, a pre-rendered title, and the outcome
 		Tokens struct {
 			Input     int64 `json:"input"`
 			Output    int64 `json:"output"`
@@ -529,7 +533,21 @@ func (s *opencodeSession) mapEvent(line []byte, msg *strings.Builder) []Event {
 		if detail == "" {
 			detail = collapseDetail(s.workdir, e.Part.State.Title)
 		}
-		return append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail})
+		out = append(out, Event{Kind: EventToolCall, Tool: e.Part.Tool, Detail: detail, CallID: e.Part.CallID})
+		// opencode writes a tool_use line only once the call has finished,
+		// completed or errored, so its outcome is already on it. It is
+		// reported because a refused call is otherwise invisible: a
+		// permission denial is an "error" part, and a model that retries
+		// one is a stage that loops until something outside it gives up.
+		switch e.Part.State.Status {
+		case "completed":
+			out = append(out, Event{Kind: EventToolResult, Tool: e.Part.Tool, CallID: e.Part.CallID,
+				Result: &ToolResult{OK: true, Output: boundTail(e.Part.State.Output, true)}})
+		case "error":
+			out = append(out, Event{Kind: EventToolResult, Tool: e.Part.Tool, CallID: e.Part.CallID,
+				Result: &ToolResult{OK: false, Output: boundTail(e.Part.State.Error, false)}})
+		}
+		return out
 	case "step_finish":
 		u := Usage{Model: s.model, InputTokens: e.Part.Tokens.Input, OutputTokens: e.Part.Tokens.Output}
 		// opencode cost is USD; gummi credits are $0.01 units.

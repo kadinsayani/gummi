@@ -65,6 +65,36 @@ func TestOpencodeMapEventToolAndUsage(t *testing.T) {
 	}
 }
 
+// opencode writes a tool_use line once the call has finished, and the
+// line carries its outcome. A permission denial is an "error" part; it
+// must reach the engine as a failed result, or a model retrying the
+// denial loops with nothing ever seeing it fail. The part shape is
+// opencode 1.18's, the error text the one its permission layer writes.
+func TestOpencodeMapEventToolOutcome(t *testing.T) {
+	s := newOCSession()
+	var msg strings.Builder
+	denied := `{"type":"tool_use","part":{"type":"tool","tool":"bash","callID":"c9","state":{"status":"error",` +
+		`"input":{"command":"HOME=/tmp/opencode/home make check"},` +
+		`"error":"The user has specified a rule which prevents you from using this specific tool call. Here are some of the relevant rules [...]"}}}`
+	evs := s.mapEvent([]byte(denied), &msg)
+	if len(evs) != 2 || evs[0].Kind != EventToolCall || evs[1].Kind != EventToolResult {
+		t.Fatalf("denied tool_use = %+v, want [tool-call, tool-result]", evs)
+	}
+	if evs[0].CallID != "c9" || evs[1].CallID != "c9" {
+		t.Errorf("call ids = %q/%q, want c9 on both so the result pairs with its call", evs[0].CallID, evs[1].CallID)
+	}
+	if r := evs[1].Result; r == nil || r.OK || !strings.HasPrefix(r.Output, "The user has specified a rule") {
+		t.Errorf("result = %+v, want a failure carrying opencode's reason", r)
+	}
+
+	done := `{"type":"tool_use","part":{"type":"tool","tool":"read","callID":"c10","state":{"status":"completed",` +
+		`"input":{"filePath":"go.mod"},"output":"module x"}}}`
+	evs = s.mapEvent([]byte(done), &msg)
+	if len(evs) != 2 || evs[1].Kind != EventToolResult || evs[1].Result == nil || !evs[1].Result.OK || evs[1].Result.Output != "module x" {
+		t.Fatalf("completed tool_use = %+v, want a successful result with its output", evs)
+	}
+}
+
 // A step_finish with reason=length and output=0 means the model exhausted
 // its max_tokens cap entirely on reasoning tokens and emitted no visible
 // text. Without a specific signal the driver just sees a clean idle with

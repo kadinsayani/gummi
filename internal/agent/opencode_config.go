@@ -38,13 +38,31 @@ import "encoding/json"
 // extraReadAllows are both []string, and separating them means a caller
 // that transposes the two fails to compile instead of silently opening a
 // read allowance where a skill path was meant.
-func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly, workspace bool, skillDirs []string) ([]byte, error) {
+//
+// scratchDir (SessionOpts.ScratchDir) is the one place outside the
+// worktree the stage hints send a session to, so it is opened to every
+// file tool here: external_directory and read for all sessions, edit and
+// write unless readOnly. A cage that denied it answered the hint's own
+// instruction with a refusal, and a model that retried the refusal never
+// stopped. Last, like skillDirs, and for the same reason: the string
+// parameters ahead of it are too many to transpose silently.
+//
+// Every pattern map relies on opencode letting the LAST matching rule
+// win and on encoding/json writing keys sorted: "*" sorts before any
+// absolute path, so the catch-all deny lands first and each allow after.
+func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraReadAllows []string, readOnly, workspace bool, skillDirs []string, scratchDir string) ([]byte, error) {
 	worktreeOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
+	var external any = "deny"
+	if scratchDir != "" {
+		scratch := scratchDir + "/**"
+		worktreeOnly[scratch] = "allow"
+		external = map[string]string{"*": "deny", scratch: "allow"}
+	}
 
 	permission := map[string]any{
 		"edit":               worktreeOnly,
 		"write":              worktreeOnly,
-		"external_directory": "deny",
+		"external_directory": external,
 	}
 	// A ReadOnly research session runs in the main checkout with no
 	// worktree: pin edit and write to "deny" outright so opencode's file
@@ -59,6 +77,9 @@ func buildOpencodeConfig(workdir, mcpSock, featureID, execPath string, extraRead
 		readOnly := map[string]string{workdir + "/**": "allow", "*": "deny"}
 		for _, p := range extraReadAllows {
 			readOnly[p] = "allow"
+		}
+		if scratchDir != "" {
+			readOnly[scratchDir+"/**"] = "allow"
 		}
 		permission["read"] = readOnly
 	}

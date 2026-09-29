@@ -357,6 +357,7 @@ type Session struct {
 	pendingNudge string // budget nudge awaiting the next sent turn
 	exhausted    bool   // hit the credit cap
 	clientTools  bool   // resolved backend's ClientTools capability (spawn-time cache)
+	failing      toolFailStreak
 
 	// cardUnlock retires this session's hold on the workspace's per-card
 	// lock (state.CardLocks), taken before the session was created so a
@@ -821,10 +822,11 @@ func (s *Session) appendTool(m Message) {
 // resolveToolResult attaches a backend-reported outcome to the pending
 // AuthorTool entry with the matching call id. Unknown ids are dropped
 // (a result for a call gummi never displayed, e.g. one from before a
-// restart).
-func (s *Session) resolveToolResult(callID string, ok bool, output string) {
+// restart). It returns the resolved call's tool and argument, both empty
+// when nothing matched.
+func (s *Session) resolveToolResult(callID string, ok bool, output string) (tool, detail string) {
 	if callID == "" {
-		return
+		return "", ""
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -840,8 +842,9 @@ func (s *Session) resolveToolResult(callID string, ok bool, output string) {
 		}
 		s.transcript[i].ToolOutput = output
 		s.live.Emit(livelog.Record{Kind: livelog.KindResult, Call: callID, OK: ok, Output: output})
-		return
+		return s.transcript[i].Tool, s.transcript[i].Detail
 	}
+	return "", ""
 }
 
 func (s *Session) addSpend(u agent.Usage) {

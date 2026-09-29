@@ -9,7 +9,7 @@ import (
 
 func buildConfig(t *testing.T, extra []string) map[string]any {
 	t.Helper()
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, false, nil)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", extra, false, false, nil, "")
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 		"no sock":    {"FD-011", ""},
 	} {
 		t.Run(name, func(t *testing.T) {
-			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, false, nil)
+			raw, err := buildOpencodeConfig("/tmp/wt", args[1], args[0], "/opt/gummi", nil, false, false, nil, "")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -94,7 +94,7 @@ func TestBuildOpencodeConfigNoMCP(t *testing.T) {
 // command shape: ["execPath","__mcp","--workspace"], no "--feature", and
 // featureID (passed as junk here) is not consulted.
 func TestBuildOpencodeConfigWorkspace(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/ws.sock", "should-be-ignored", "/opt/gummi", nil, false, true, nil)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/ws.sock", "should-be-ignored", "/opt/gummi", nil, false, true, nil, "")
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestBuildOpencodeConfigExtraReads(t *testing.T) {
 // pattern map), while read stays open — the deny is structural, so
 // enforce/warn/off sandbox modes cannot re-arm the write tools.
 func TestBuildOpencodeConfigReadOnly(t *testing.T) {
-	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, false, nil)
+	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, true, false, nil, "")
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}
@@ -219,12 +219,56 @@ func TestOpencodeConfigOmitsSkillsWhenNoneForwarded(t *testing.T) {
 	}
 }
 
+// The stage hints send a session to the card's scratch directory for
+// throwaway files, so the cage must let it in: external_directory opens
+// for that directory alone, and edit/write allow it beside the worktree.
+// A cage that denied it answered a followed instruction with a refusal.
+func TestBuildOpencodeConfigOpensTheScratchDir(t *testing.T) {
+	const scratch = "/ws/.gummi/state/scratch/FD-025"
+	perm := func(readOnly bool, extra []string) map[string]any {
+		t.Helper()
+		raw, err := buildOpencodeConfig("/tmp/wt", "", "FD-025", "/opt/gummi", extra, readOnly, false, nil, scratch)
+		if err != nil {
+			t.Fatalf("buildOpencodeConfig: %v", err)
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			t.Fatalf("output not valid JSON: %v\n%s", err, raw)
+		}
+		return m["permission"].(map[string]any)
+	}
+
+	p := perm(false, nil)
+	ext, ok := p["external_directory"].(map[string]any)
+	if !ok || ext["*"] != "deny" || ext[scratch+"/**"] != "allow" || len(ext) != 2 {
+		t.Errorf("external_directory = %v, want the scratch dir allowed and nothing else", p["external_directory"])
+	}
+	for _, key := range []string{"edit", "write"} {
+		m, _ := p[key].(map[string]any)
+		if m[scratch+"/**"] != "allow" || m["/tmp/wt/**"] != "allow" || m["*"] != "deny" {
+			t.Errorf("%s = %v, want worktree and scratch allowed, the rest denied", key, p[key])
+		}
+	}
+
+	// a read-only session still may not write, scratch or not
+	p = perm(true, nil)
+	if p["edit"] != "deny" || p["write"] != "deny" {
+		t.Errorf("read-only edit/write = %v/%v, want deny", p["edit"], p["write"])
+	}
+
+	// a caged read must not shut the scratch dir out
+	p = perm(false, []string{"/ws/.gummi/specs/FD-025.md"})
+	if r, _ := p["read"].(map[string]any); r[scratch+"/**"] != "allow" {
+		t.Errorf("read = %v, want the scratch dir readable", p["read"])
+	}
+}
+
 // Forwarded skills reach opencode as `skills.paths`. The key is additive
 // on opencode's side (the worktree's own skills still load), which is why
 // forwarding is safe to turn on for a repo that carries skills already.
 func TestOpencodeConfigForwardsSkillPaths(t *testing.T) {
 	raw, err := buildOpencodeConfig("/tmp/wt", "/tmp/mcp/FD-011.sock", "FD-011", "/opt/gummi", nil, false, false,
-		[]string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"})
+		[]string{"/ws/.agents/skills/container-env", "/ws/.claude/skills/toolchain"}, "")
 	if err != nil {
 		t.Fatalf("buildOpencodeConfig: %v", err)
 	}

@@ -152,6 +152,13 @@ type SessionOpts struct {
 	// read outside WorkDir. Adapters without a per-file allowlist (or
 	// without a cage of any kind) ignore it.
 	ExtraReadAllows []string
+	// ScratchDir is the card's own directory for throwaway files, outside
+	// WorkDir on purpose (a stage's checkpoint commits whatever the
+	// worktree holds). The stage hints send the session there, so a cage
+	// that denies it turns a followed instruction into a refused call.
+	// Adapters with a path cage let the session read and write it;
+	// adapters without one ignore it.
+	ScratchDir string
 	// SkillDirs are absolute skill-directory paths the session should load
 	// beyond whatever the backend discovers on its own. Every card runs in
 	// a worktree under <workspace>/.gummi/worktrees, a sibling of the

@@ -1982,6 +1982,9 @@ func (e *Engine) newAgentSession(ctx context.Context, f domain.Feature, role age
 		ReadOnly:       readOnly,
 		ResumePath:     resumeSessionPath(e.cfg.Workspace, f.ID, role, flavor),
 		ResumeID:       resumeID,
+		// The scratch directory the boundary hint names: a caged backend
+		// must let the session use the place it was told to use.
+		ScratchDir: scratch,
 		// Workspace skills the operator forwarded. The worktree is a
 		// sibling of the repository, so nothing the workspace root holds
 		// is in this session's project scope unless it is named here.
@@ -2690,8 +2693,23 @@ func (e *Engine) handle(s *Session, ev agent.Event) {
 	case agent.EventToolCall:
 		s.appendToolCall(ev.CallID, toolLine(ev), ev.Tool, ev.Detail)
 	case agent.EventToolResult:
-		if ev.Result != nil {
-			s.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)
+		if ev.Result == nil {
+			break
+		}
+		tool, detail := s.resolveToolResult(ev.CallID, ev.Result.OK, ev.Result.Output)
+		if tool == "" {
+			tool = ev.Tool
+		}
+		// an autonomous run that keeps failing the same way is stopped
+		// here, since nothing else would stop it (toolloop.go). A chat
+		// has a person watching it, who can interrupt it themselves.
+		if err := s.noteToolOutcome(tool, detail, ev.Result.OK, ev.Result.Output); err != nil &&
+			!s.Interactive && s.State() == StateRunning {
+			if a := s.agent(); a != nil {
+				_ = a.Interrupt(context.Background())
+			}
+			e.failRun(s, err)
+			return
 		}
 	case agent.EventClientToolCall:
 		e.handleClientTool(s, ev.ToolCall)
