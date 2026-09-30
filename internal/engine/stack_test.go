@@ -290,6 +290,34 @@ func TestStackBaseCollapsesWhenTheBottomLands(t *testing.T) {
 	}
 }
 
+// A landed card's branch is never replayed, so the snapshot must not call
+// it stale: main carries its work, and its old tip is no longer "on" the
+// base.
+func TestALandedCardIsNeverStale(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+	mgr, err := f.pool.ManagerFor(ctx, &a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, merr := mgr.SquashMerge(ctx, &a, "A: landed"); merr != nil {
+		t.Fatalf("landing A: %v", merr)
+	}
+	view, err := f.eng.StackSnapshot(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range view.Snapshot.Members {
+		if m.ID == a.ID && (!m.Landed || m.Stale) {
+			t.Errorf("landed card: Landed=%v Stale=%v, want landed and not stale", m.Landed, m.Stale)
+		}
+	}
+}
+
 // A card may not land while a card below it has not: its branch carries
 // their commits, so landing it would land their work too.
 func TestStackOrdersLandingOnly(t *testing.T) {
@@ -526,5 +554,76 @@ func TestALiveFreeformTurnHoldsAReplay(t *testing.T) {
 	}
 	if view.Snapshot.Members[1].Running {
 		t.Error("a freeform conversation with no backend still holds its card's replay")
+	}
+}
+
+// A card closed without landing (handed off) is finished too: main moving
+// on does not make it stale, and nothing will replay it.
+func TestADoneCardIsNeverStale(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	h := feature(1, "handed", domain.StageDone)
+	h.BranchScheme = domain.BranchSchemeKind
+	h.StackID, h.StackPos = "chain", 0
+	if err := f.store.CreateFeature(ctx, &h); err != nil {
+		t.Fatal(err)
+	}
+	f.cut(h, "h.txt", "h\n")
+	f.git("commit", "-q", "--allow-empty", "-m", "main moves on")
+	view, err := f.eng.StackSnapshot(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m := view.Snapshot.Members[0]; !m.Landed || m.Stale {
+		t.Errorf("done card: Landed=%v Stale=%v, want finished and not stale", m.Landed, m.Stale)
+	}
+}
+
+// Reordering a stack changes what every card above the move forks from, so
+// the cards whose branches no longer contain their new base are stale and
+// a replay walk has to pick them up.
+func TestAReorderedStackIsReplayed(t *testing.T) {
+	f := newStackFixture(t)
+	ctx := context.Background()
+	a := f.card(1, "parser", "chain", 0)
+	b := f.card(2, "eval", "chain", 1)
+	c := f.card(3, "cli", "chain", 2)
+	f.cut(a, "a.txt", "a\n")
+	f.cut(b, "b.txt", "b\n")
+	f.cut(c, "c.txt", "c\n")
+
+	// C moves below B: B now forks from C, and B's branch does not hold it.
+	if err := f.store.MoveInStack(ctx, c.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	view, err := f.eng.StackSnapshot(ctx, "chain")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := map[domain.FeatureID]bool{}
+	for _, m := range view.Snapshot.Members {
+		stale[m.ID] = m.Stale
+	}
+	if !stale[b.ID] {
+		t.Fatalf("B should be stale after C moved beneath it: %v", stale)
+	}
+	for i := 0; i < 16; i++ {
+		res, err := f.eng.StackTick(ctx, "chain")
+		if err != nil {
+			t.Fatalf("tick %d: %v", i, err)
+		}
+		if !res.Again {
+			break
+		}
+	}
+	if !f.contains(c.BranchName(), b.BranchName()) {
+		t.Error("B was not replayed onto C")
+	}
+	if n := f.countBetween(c.BranchName(), b.BranchName()); n != 1 {
+		t.Errorf("B has %d commits beyond C, want 1", n)
+	}
+	// C gave B's commit back: it carries only its own above A.
+	if n := f.countBetween(a.BranchName(), c.BranchName()); n != 1 {
+		t.Errorf("C has %d commits beyond A, want 1", n)
 	}
 }

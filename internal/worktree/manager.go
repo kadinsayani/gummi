@@ -1433,7 +1433,23 @@ func (m *Manager) RebasedOnBase(ctx context.Context, f *domain.Feature) (bool, e
 	if err != nil {
 		return false, err
 	}
-	return gitOK(ctx, p, "merge-base", "--is-ancestor", mainHead, "HEAD")
+	onBase, err := gitOK(ctx, p, "merge-base", "--is-ancestor", mainHead, "HEAD")
+	if err != nil || !onBase || f.StackID == "" {
+		return onBase, err
+	}
+	// A stacked card can contain its base's tip and still be off it: a
+	// reorder that put a card beneath the one it used to sit on leaves the
+	// moved card carrying the commits it forked over. Its recorded fork
+	// point then is not behind the base's tip, and only a replay onto the
+	// base, from that fork point, gives the card back its own commits.
+	fork, ferr := m.forkStore.ForkPoint(ctx, f.ID)
+	if ferr != nil || fork == "" {
+		return true, nil //nolint:nilerr // no fork point to judge by: the ancestry answer stands
+	}
+	if behind, berr := gitOK(ctx, m.repo, "merge-base", "--is-ancestor", fork, mainHead); berr == nil && !behind {
+		return false, nil
+	}
+	return true, nil
 }
 
 // Unmerged lists the unmerged paths in f's worktree — what a finished

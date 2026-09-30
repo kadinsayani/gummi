@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -242,5 +243,54 @@ func TestCollapseWithAdvancedOriginMain(t *testing.T) {
 	}
 	if got := mustGit(t, p, "log", "-1", "--format=%s"); got != "feat(x): collapsed" {
 		t.Errorf("subject = %q, want %q", got, "feat(x): collapsed")
+	}
+}
+
+// A card stacked on another collapses onto the card below, not onto main:
+// its one commit must not carry the work of the cards beneath it.
+func TestResolveCollapseBaseStackedCard(t *testing.T) {
+	root := newRepo(t)
+	m := newManager(t, root)
+	store := openTestStore(t)
+
+	below := feature(1, "Below card")
+	if err := store.CreateFeature(ctx, below); err != nil {
+		t.Fatal(err)
+	}
+	bPath, err := m.Create(ctx, below)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, bPath, "below.txt", "below work\n")
+	mustGit(t, bPath, "add", ".")
+	mustGit(t, bPath, "commit", "-q", "-m", "below work")
+	belowTip := mustGit(t, root, "rev-parse", below.BranchName())
+
+	above := feature(2, "Above card")
+	above.StackID = "s"
+	above.StackPos = 1
+	if err := store.CreateFeature(ctx, above); err != nil {
+		t.Fatal(err)
+	}
+	m.SetBaseLookup(func(_ context.Context, f *domain.Feature) (string, error) {
+		if f.ID == above.ID {
+			return below.BranchName(), nil
+		}
+		return "", nil
+	})
+	aPath, err := m.Create(ctx, above)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, aPath, "above.txt", "above work\n")
+	mustGit(t, aPath, "add", ".")
+	mustGit(t, aPath, "commit", "-q", "-m", "above work")
+
+	base, err := ResolveCollapseBase(ctx, store, m, above)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != belowTip {
+		t.Errorf("base = %s, want the card below's tip %s", base, belowTip)
 	}
 }

@@ -16,6 +16,29 @@ import (
 // pick; a named parent whose branch cannot be resolved is likewise a hard
 // error rather than a silent fallback to main.
 func ResolveCollapseBase(ctx context.Context, store *state.Store, mgr *Manager, f *domain.Feature) (string, error) {
+	// A card that sits in a stack, or was cut from a chosen base, forks from
+	// the tip of that base and nothing else: collapsing onto main (or onto
+	// whatever a dependency edge names) would fold the cards beneath it
+	// into this card's one commit. A dependency is scheduling, never the
+	// base (DESIGN §18.1), so it does not get a vote here.
+	if f.StackID != "" || f.Base != "" {
+		// the recorded fork point is exactly what a replay of this card
+		// keeps, so it stays right while the base has moved on
+		if fp, err := mgr.ForkPoint(ctx, f); err == nil && fp != "" {
+			if ok, err := gitOK(ctx, mgr.RepoRoot(), "merge-base", "--is-ancestor", fp, f.BranchName()); err == nil && ok {
+				return fp, nil
+			}
+		}
+		tip, err := mgr.BaseHead(ctx, f)
+		if err != nil {
+			return "", fmt.Errorf("resolving collapse base for %s: base tip: %w", f.ID, err)
+		}
+		sha, err := runGit(ctx, mgr.RepoRoot(), "merge-base", tip, f.BranchName())
+		if err != nil {
+			return "", fmt.Errorf("resolving collapse base for %s: fork point with its base: %w", f.ID, err)
+		}
+		return sha, nil
+	}
 	deps, err := store.ListDependencies(ctx, f.ID)
 	if err != nil {
 		return "", fmt.Errorf("resolving collapse base for %s: %w", f.ID, err)

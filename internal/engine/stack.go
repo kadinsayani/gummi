@@ -301,6 +301,21 @@ func (e *Engine) freeformHoldsTree(id domain.FeatureID) bool {
 	return sessionHoldsTree(sess) || (sess != nil && sess.Busy())
 }
 
+// forksFromMember reports whether f's base is the branch of another card
+// in its stack rather than the stack's own base.
+func (e *Engine) forksFromMember(ctx context.Context, f *domain.Feature, members []domain.Feature) bool {
+	base, err := e.StackBaseFor(ctx, f)
+	if err != nil || base == "" {
+		return false
+	}
+	for _, o := range members {
+		if o.ID != f.ID && o.BranchName() == base {
+			return true
+		}
+	}
+	return false
+}
+
 // StackSnapshot builds the policy's view of one stack: the members in
 // order, and for each the git facts the policy needs.
 func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackView, error) {
@@ -337,14 +352,24 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 				// merged PR both show up here) and of the record second,
 				// so a card whose PR merged upstream reads as landed as
 				// soon as main carries it.
-				if landed, lerr := mgr.Landed(ctx, &f); lerr == nil {
-					m.Landed = landed
+				//
+				// Only when the card's base is the trunk, though: asked
+				// against another card's branch, "is my branch in my
+				// base" is answered yes by a card that a reorder just put
+				// beneath the card it used to sit on, and reading that as
+				// a landing would drop it from the replay.
+				if !e.forksFromMember(ctx, &f, members) {
+					if landed, lerr := mgr.Landed(ctx, &f); lerr == nil {
+						m.Landed = landed
+					}
 				}
 				if !m.Landed && f.LandedSHA != "" {
 					m.Landed = true
 				}
 				if rebased, rerr := mgr.RebasedOnBase(ctx, &f); rerr == nil {
-					m.Stale = !rebased
+					// a landed card's branch is never replayed, so it is
+					// never "stale" — its commits are in the base already
+					m.Stale = !rebased && !m.Landed
 				}
 				if dirty, derr := mgr.TrackedDirty(ctx, &f); derr == nil {
 					m.Dirty = dirty
@@ -353,8 +378,9 @@ func (e *Engine) StackSnapshot(ctx context.Context, id domain.StackID) (StackVie
 		}
 		if f.Stage == domain.StageDone {
 			// A done card is finished either way: landed, handed off, or
-			// dropped. Nothing above it should fork from it any more.
-			m.Landed = true
+			// dropped. Nothing above it should fork from it any more, and
+			// nothing will replay it: it cannot be stale.
+			m.Landed, m.Stale = true, false
 		}
 		snap.Members = append(snap.Members, m)
 	}
