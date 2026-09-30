@@ -241,6 +241,8 @@ func coreGrammar() []grammarEntry {
 		{sigs: []string{"gummi merge <id|ref> -m <message|->"}, path: "merge"},
 		{sigs: []string{"gummi squash <id|ref> -m <message|->"}, path: "squash"},
 		{sigs: []string{"gummi commit <id|ref> -m <message|->"}, path: "commit"},
+		{sigs: []string{"gummi log <id|ref>"}, path: "log"},
+		{sigs: []string{"gummi rewrite <id|ref> --plan <file|->"}, path: "rewrite"},
 		{sigs: []string{"gummi handoff <id|ref>"}, path: "handoff"},
 		{sigs: []string{"gummi clean <id|ref>"}, path: "clean"},
 		{sigs: []string{"gummi status <id|ref>"}, path: "status"},

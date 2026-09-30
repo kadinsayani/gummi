@@ -398,7 +398,7 @@ func (m *Shell) openAnchor(r featureRow, a anchor) tea.Cmd {
 		if err != nil {
 			return nil
 		}
-		m.spec, m.diff = nil, nil
+		m.spec, m.diff, m.logv = nil, nil, nil
 		if !m.scrollThreadToEvent(r, n) {
 			// The claim named a real event — gatherEvidence already checked
 			// that — but not one any stretch opens, which is the only shape

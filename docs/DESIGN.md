@@ -1813,6 +1813,16 @@ Decided in the design interview (2026-07-03):
     same decision. One board has one interactive host at a time, held by the
     instance lock the TUI already takes; the headless verbs are not hosts
     and do not take it.
+24. **A card's history may be rewritten, but never its content**,
+    decided 2026-09-30 (§21). A card's own commits can be reworded, and
+    contiguous runs of them squashed into one, from the log tab of
+    either face or `gummi rewrite`. Reordering and dropping are not
+    offered, so the branch's tree is unchanged by construction and the
+    verify that ran on it still stands. It is a human's act, like
+    `squash`: withheld from hosted agents (§16), refused while an agent
+    holds the card, on an adopted branch (D22) and on a landed one, and
+    on pushed commits until the person acknowledges the force push gummi
+    prints and never runs.
 
 Still open:
 
@@ -3688,7 +3698,7 @@ against base is already read.
 ## 20. The web face — the board in a browser
 
 `gummi web` serves the board to a browser as a page of its own: cards on
-the left, the open card's conversation in the middle, and its spec, diff,
+the left, the open card's conversation in the middle, and its spec, diff, log,
 pull request and stats on the right. It exists for two situations the
 terminal serves badly. The board runs on a machine you are not sitting
 at, all day, and a card wants a gate crossed from a phone. And a person
@@ -3994,3 +4004,95 @@ loopback.
 A daily ceiling for the whole board, if unattended nights prove expensive.
 Holding a line typed mid-turn until the turn ends (open question 3): the
 web face does whatever the TUI does, and will change when it does.
+
+## 21. The log — a card's own commits, and rewriting them
+
+A card's branch was the one part of its record neither face could show
+as it is. The diff shows what the branch changes in total; `gummi
+squash` collapses it to one commit; nothing let a person read the
+commits themselves, or tidy them short of collapsing all of them. The
+log tab — `alt+l` in the terminal, Log beside Diff on the web page,
+`gummi log` headlessly — reads them, and rewrites them in the only ways
+that leave the card's quality floor where it was.
+
+### 21.1 Content never changes
+
+A rewrite is a plan: the branch as it should read afterwards, oldest
+first, as contiguous runs of its current commits, each becoming one
+commit with the message given (a lone commit given no message is kept).
+Every commit belongs to exactly one run and the runs keep their order,
+so a reword and a squash are expressible and a reorder and a drop are
+not. That is the whole of the rule, and it is chosen for what it
+preserves: the final tree is the tree verify ran on, the diff the
+comments anchor to is the same diff (§6.1), and nothing about the
+card's standing moves. A drop would change content and would have to
+send the card back through verify; a reorder can change every
+intermediate tree and can conflict. Neither is worth building until
+someone needs one.
+
+`Manager.Rewrite` builds each result commit with `commit-tree` from the
+tree of the last commit of its run, on top of the result commit before
+it, then moves the branch with `update-ref` against the old tip. So
+there is no rebase to stop half way, no hook to run, no checkout, and a
+commit made in between is not overwritten; commits before the first
+changed run keep their SHAs. It still asserts the tree afterwards, as
+`Collapse` does. Author and author date come from the first commit of
+each run.
+
+The plan carries the tip it was made against, and a branch that has
+moved since refuses it (`ErrPlanMismatch`) rather than being rewritten
+from a view that is no longer true. Every surface dry-runs the plan
+first (`PlanRewrite`: what the branch would read like, how many commits
+change, whether any was pushed) and applies it only on a second act.
+
+### 21.2 Who may, and when
+
+The rule is `branchlog.Refusal`, one function all three surfaces call:
+
+| the card | its log |
+|---|---|
+| research, todo, goal | no branch of its own to show |
+| adopted (D22) | read-only: gummi does not record where its own commits on somebody else's branch begin |
+| landed | read-only: the commits are already on the base |
+| an agent holds it | read-only until the session stops — a rewrite would pull commits out from under the next checkpoint |
+| otherwise | rewritable |
+
+Under that, `Rewrite` refuses a dirty worktree and a rebase in flight
+exactly as `Collapse` does, and the whole thing runs under the card's
+lock, so a headless drive of the same card excludes it. A message
+carrying agent attribution is refused (`MatchesAttribution`, the same
+match the landing message is scrubbed for), and a commit that already
+carries one is flagged in the log.
+
+Commits the branch's upstream already has are marked **pushed**. A plan
+that replaces one is refused until the person acknowledges it, and a
+rewrite that did ends with the `git push --force-with-lease` it needs
+(`engine.PushCommandFor`, the line a replayed stack card prints) —
+printed, never run (§18.5, §20.5).
+
+Rewriting is withheld from hosted agents (§16) for the reason `squash`
+is: what a card's history says is the person's to decide. An outside
+agent can call `gummi rewrite`, and the skill tells it to ask first.
+
+### 21.3 One read model
+
+`branchlog` folds `Manager.Log` into rows — subject, body, author,
+numstat, whether gummi made the commit itself as a checkpoint, whether
+it was pushed, what attribution it carries — and answers whether the
+card may be rewritten. The TUI's tab, the web page's tab (`webapi.Log`,
+`GET /api/cards/{id}/log`, `…/log/{sha}` for one commit's patch,
+`POST …/log/plan` and `…/log/rewrite`) and `gummi log --json` all read
+it, per §20.1: neither face decides who may rewrite.
+
+### 21.4 Deferred
+
+- **Reorder and drop**, for the reasons in §21.1. Drop would need to
+  re-enter verify; reorder would need the conflict hand-off
+  `internal/ui/rebase.go` already offers.
+- **Splitting a commit**, which is interactive by nature.
+- **Comments on a commit** rather than on the branch's diff. Diff
+  comments survive a rewrite because they anchor to the diff, not to a
+  commit; comments on a commit would not.
+- **Adopted branches.** Recording the tip at adoption would let the
+  commits gummi added be rewritten while the inherited ones stay
+  locked.

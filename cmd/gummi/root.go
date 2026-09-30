@@ -61,6 +61,8 @@ func init() {
 	rootCmd.AddCommand(watchCmd)
 	rootCmd.AddCommand(specCmd)
 	rootCmd.AddCommand(diffCmd)
+	rootCmd.AddCommand(logCmd)
+	rootCmd.AddCommand(rewriteCmd)
 	rootCmd.AddCommand(doctorCmd)
 	rootCmd.AddCommand(initCmd)
 	rootCmd.AddCommand(skillCmd)

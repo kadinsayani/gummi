@@ -70,6 +70,8 @@ func (m *Shell) activeSurface() (string, []binding) {
 		return "spec", m.withCardTabsIf(m.cardOpen, m.spec.bindings())
 	case live && m.diff != nil:
 		return "diff", m.withCardTabsIf(m.cardOpen, m.diff.bindings())
+	case live && m.logv != nil:
+		return "log", m.withCardTabsIf(m.cardOpen, m.logv.bindings())
 	case live && m.ingest != nil:
 		return "ingest", m.ingest.bindings()
 	case live && m.bugIngest != nil:

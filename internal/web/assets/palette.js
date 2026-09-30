@@ -71,6 +71,7 @@ export function keysHelp () {
       h('h3', null, 'Document panel'),
       k('g', 's'), h('span', null, 'Spec'),
       k('g', 'd'), h('span', null, 'Diff'),
+      k('g', 'l'), h('span', null, 'Log'),
       k('g', 'p'), h('span', null, 'PR'),
       k('g', 'r'), h('span', null, 'Stats'),
       h('h3', null, 'Open decision'),

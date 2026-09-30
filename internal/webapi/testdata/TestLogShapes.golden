@@ -1,0 +1,103 @@
+{
+  "Log": {
+    "base": "main",
+    "head": "bbbbbbb2",
+    "commits": [
+      {
+        "sha": "aaaaaaa1",
+        "short": "aaaaaaa",
+        "subject": "FD-012: implement checkpoint",
+        "author": "gummi",
+        "at": "2026-09-27T09:12:00Z",
+        "files": 2,
+        "add": 10,
+        "del": 1,
+        "checkpoint": true,
+        "pushed": true
+      },
+      {
+        "sha": "bbbbbbb2",
+        "short": "bbbbbbb",
+        "subject": "feat: x",
+        "body": "why",
+        "author": "Simon",
+        "at": "2026-09-27T09:12:00Z",
+        "files": 1,
+        "add": 3,
+        "del": 0,
+        "warning": "Co-Authored-By: Claude"
+      }
+    ],
+    "rewritable": true,
+    "pushCommand": "git push --force-with-lease origin feat/x"
+  },
+  "Request": {
+    "head": "bbbbbbb2",
+    "groups": [
+      {
+        "commits": [
+          "aaaaaaa1",
+          "bbbbbbb2"
+        ],
+        "message": "feat: x"
+      }
+    ],
+    "acknowledgePushed": true
+  },
+  "Preview": {
+    "commits": [
+      {
+        "sha": "bbbbbbb2",
+        "short": "bbbbbbb",
+        "subject": "feat: x",
+        "body": "why",
+        "author": "Simon",
+        "at": "2026-09-27T09:12:00Z",
+        "files": 1,
+        "add": 3,
+        "del": 0,
+        "warning": "Co-Authored-By: Claude"
+      }
+    ],
+    "changed": 1,
+    "pushed": true,
+    "noop": false,
+    "pushCommand": "git push --force-with-lease origin feat/x"
+  },
+  "Result": {
+    "head": "ccccccc3",
+    "pushCommand": "git push --force-with-lease origin feat/x",
+    "log": {
+      "base": "main",
+      "head": "bbbbbbb2",
+      "commits": [
+        {
+          "sha": "aaaaaaa1",
+          "short": "aaaaaaa",
+          "subject": "FD-012: implement checkpoint",
+          "author": "gummi",
+          "at": "2026-09-27T09:12:00Z",
+          "files": 2,
+          "add": 10,
+          "del": 1,
+          "checkpoint": true,
+          "pushed": true
+        },
+        {
+          "sha": "bbbbbbb2",
+          "short": "bbbbbbb",
+          "subject": "feat: x",
+          "body": "why",
+          "author": "Simon",
+          "at": "2026-09-27T09:12:00Z",
+          "files": 1,
+          "add": 3,
+          "del": 0,
+          "warning": "Co-Authored-By: Claude"
+        }
+      ],
+      "rewritable": true,
+      "pushCommand": "git push --force-with-lease origin feat/x"
+    }
+  }
+}

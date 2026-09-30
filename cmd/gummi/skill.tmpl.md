@@ -193,6 +193,16 @@ outright): use `commit` first to turn stray worktree changes into a commit, then
 run `squash` on a PR-linked card that has them, in place of raw `git commit`. A
 clean worktree is a no-op, not an error.
 
+`gummi log <id>` lists a card's own commits, oldest first (`--json` for the
+SHAs). `gummi rewrite <id> --plan <file|->` rewords or squashes them in place:
+the plan lists every commit, oldest first, in contiguous groups, each group
+becoming one commit with the message given. Reordering and dropping cannot be
+expressed, so the branch's content never changes; `--dry-run` shows the result
+first. It refuses while an agent holds the card, on an adopted branch, and on
+commits already pushed unless `--allow-pushed` — then prints the force push,
+which it never runs. Like `squash`, rewriting history is the human's call: ask
+before you run it.
+
 If a card depends on another (`gummi deps add <dependent> <depends-on>`,
 `rm`/`list` to remove or read them back), an unmet dependency blocks it from
 entering its coding stage — see the `blocked (3)` case above.

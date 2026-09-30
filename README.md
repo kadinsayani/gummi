@@ -200,6 +200,16 @@ something real: a check, a hunk, a spec section, a moment in the log.
 The mark beside it (`[alt+a]`) is the key that opens it. A claim citing
 nothing is dropped, not shown.
 
+Above the thread, the page's tabs are one chord each: `alt+s` the spec,
+`alt+d` the diff, `alt+l` the log, `alt+r` the stats, `alt+t` back to the
+thread. The **log** is the card's own commits, oldest first — `enter`
+shows what one changed, `e` rewords it, `s` squashes it into the one
+before, and `a` applies the draft after asking. A rewrite never reorders
+or drops a commit, so the branch's content, and the verify that ran on it,
+are unchanged. It is refused while an agent is working on the card, and
+on a branch gummi did not cut. Commits already pushed are marked; gummi
+prints the force push a rewrite of them needs and never runs it.
+
 **Typing at a stop is always safe.** gummi reads your line for what it
 asks. A missed requirement goes into the spec and the card walks back to
 plan. A missing check goes into the verification plan and the checks run
@@ -357,6 +367,7 @@ it. `gummi status` says by how much when it happens.
 | `merge <id> -m <msg\|->` | land the branch as one squash commit |
 | `handoff <id>` | close a verified card and keep its branch — nothing lands |
 | `squash`, `commit`, `clean` | collapse the branch, commit stray changes, remove a landed worktree |
+| `log <id>` / `rewrite <id> --plan <file\|->` | list a card's own commits / reword or squash them in place — never reorder or drop, so the content stays verified |
 | `stack new\|add\|rm\|mv\|list` | build and read a stack of cards whose branches fork from one another |
 | `stack restack <stack>` | replay every card in a stack onto its current base now (the board does this on its own) |
 | `pr link\|unlink\|status\|comments` | land through a PR you opened; gummi never writes to GitHub |
@@ -389,7 +400,7 @@ landing loop included, is in [docs/HEADLESS.md](docs/HEADLESS.md).
 ## The board in a browser
 
 `gummi web` serves the same board to a browser: the rail of cards, the
-open card's conversation, and its spec, diff, pull request and stats
+open card's conversation, and its spec, diff, log, pull request and stats
 beside it. It is a board host like the TUI — it builds the board the same
 way and runs the TUI's own model without a screen — so one board has one
 host at a time, and whichever starts second names the first and exits.

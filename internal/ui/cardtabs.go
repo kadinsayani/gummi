@@ -48,6 +48,10 @@ const (
 	// "run" next to "spec" and "diff" invited being read as an action on
 	// the card rather than a page about it.
 	cardTabStats cardTab = "stats"
+	// cardTabLog is the card's own commits (logview.go), and the one
+	// place their history can be rewritten — reworded or squashed, never
+	// changed in content.
+	cardTabLog cardTab = "log"
 )
 
 // cardTabKeys maps each tab to the chord that selects it.
@@ -56,6 +60,7 @@ var cardTabKeys = map[cardTab]string{
 	cardTabArtifact: "alt+s",
 	cardTabDiff:     "alt+d",
 	cardTabStats:    "alt+r",
+	cardTabLog:      "alt+l",
 }
 
 // activeCardTab reports which of the three is on screen, read from the
@@ -70,6 +75,8 @@ func (m *Shell) activeCardTab() cardTab {
 		return cardTabDiff
 	case m.stats != nil:
 		return cardTabStats
+	case m.logv != nil:
+		return cardTabLog
 	}
 	return cardTabThread
 }
@@ -105,6 +112,9 @@ func (m *Shell) cardTabBar(active cardTab, w int) string {
 	}
 	if cardHasDiff(r) {
 		tabs = append(tabs, cardTabDiff)
+	}
+	if logHasBranch(r) {
+		tabs = append(tabs, cardTabLog)
 	}
 	if statsHasRecord(r) {
 		tabs = append(tabs, cardTabStats)
@@ -165,7 +175,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 	}
 	switch tab {
 	case cardTabThread:
-		m.spec, m.diff, m.stats = nil, nil, nil
+		m.spec, m.diff, m.stats, m.logv = nil, nil, nil, nil
 		return nil, true
 	case cardTabArtifact:
 		if !cardHasArtifact(r) {
@@ -175,7 +185,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 			m.notice = noticeMsg{text: string(r.F.ID) + ": a freeform card has no document — its thread is the record"}
 			return nil, true
 		}
-		m.diff, m.stats = nil, nil
+		m.diff, m.stats, m.logv = nil, nil, nil
 		return m.openSpec(r.F), true
 	case cardTabDiff:
 		if !cardHasDiff(r) {
@@ -185,7 +195,7 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 			m.notice = noticeMsg{text: string(r.F.ID) + ": no diff — " + noDiffReason(r)}
 			return nil, true
 		}
-		m.spec, m.stats = nil, nil
+		m.spec, m.stats, m.logv = nil, nil, nil
 		return m.openDiff(r.F), true
 	case cardTabStats:
 		if !statsHasRecord(r) {
@@ -194,8 +204,17 @@ func (m *Shell) cardTabKey(key string) (tea.Cmd, bool) {
 			m.notice = noticeMsg{text: string(r.F.ID) + ": nothing has run on this card yet"}
 			return nil, true
 		}
-		m.spec, m.diff = nil, nil
+		m.spec, m.diff, m.logv = nil, nil, nil
 		return m.openStats(r.F), true
+	case cardTabLog:
+		if !logHasBranch(r) {
+			// the same contract as the diff chord: a key the help table
+			// lists answers, even for a card with no branch to read
+			m.notice = noticeMsg{text: string(r.F.ID) + ": no log — " + noLogReason(r)}
+			return nil, true
+		}
+		m.spec, m.diff, m.stats = nil, nil, nil
+		return m.openLog(r.F), true
 	}
 	return nil, false
 }
@@ -249,7 +268,7 @@ func (m *Shell) cardCitationKey(key string) (tea.Cmd, bool) {
 // is excluded here instead: a collision saved only by the ORDER of two
 // handlers is a bug waiting for someone to reorder them, and it would
 // present as a mark the reader can see and cannot open.
-const reservedChords = "tsdjko"
+const reservedChords = "tsdjkorl"
 
 // citationLetters are the marks, in order: the first nine letters that
 // are not reserved.
@@ -319,6 +338,15 @@ func cardTabFor(key string) (cardTab, bool) {
 	return "", false
 }
 
+// noLogReason is noDiffReason for the log, which a goal also has none of:
+// its branch is built from its cards' landings.
+func noLogReason(r featureRow) string {
+	if r.F.Kind == domain.KindGoal {
+		return "a goal's branch is its cards' landings"
+	}
+	return noDiffReason(r)
+}
+
 // noDiffReason names which of the two reasons a card has no diff, so the
 // refusal is a fact about this card rather than a generic apology.
 func noDiffReason(r featureRow) string {
@@ -365,6 +393,9 @@ func (m *Shell) cardTabBindings() []binding {
 	}
 	if !haveCard || cardHasDiff(r) {
 		bs = append(bs, binding{key: "alt+d", label: "diff", help: "the card's diff — comment, resolve and approve in place"})
+	}
+	if !haveCard || logHasBranch(r) {
+		bs = append(bs, binding{key: "alt+l", label: "log", help: "the card's own commits — read each one, reword it, or squash it into the one before"})
 	}
 	if !haveCard || statsHasRecord(r) {
 		bs = append(bs, binding{key: "alt+r", label: "stats", help: "where the card's credits and hours went — its passes, what each cost, and how much was work done twice"})

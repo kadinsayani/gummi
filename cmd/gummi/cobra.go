@@ -141,6 +141,24 @@ var diffCmd = &cobra.Command{
 	RunE:  func(_ *cobra.Command, args []string) error { return runDiff(args) },
 }
 
+// logCmd implements `gummi log <id|ref> [--json]`.
+var logCmd = &cobra.Command{
+	Use:   "log <id|ref>",
+	Short: "List a card's own commits, oldest first",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runLog(cmdFlags(cmd), args)
+	},
+}
+
+// rewriteCmd implements `gummi rewrite <id|ref> --plan <file|->`.
+var rewriteCmd = &cobra.Command{
+	Use:   "rewrite <id|ref> --plan <file|->",
+	Short: "Reword or squash a card's commits in place; its content never changes",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runRewrite(cmdFlags(cmd), args)
+	},
+}
+
 // doctorCmd implements `gummi doctor [--json] [--deep]`.
 var doctorCmd = &cobra.Command{
 	Use:   "doctor [--json] [--deep]",
@@ -368,6 +386,8 @@ func init() {
 	bindMergeFlags(mergeCmd.Flags())
 	bindSquashFlags(squashCmd.Flags())
 	bindCommitFlags(commitCmd.Flags())
+	jsonFlag(logCmd.Flags(), "emit the commits as JSON (the shape the board's web page reads)")
+	bindRewriteFlags(rewriteCmd.Flags())
 	bindStatusFlags(statusCmd.Flags())
 	bindWatchFlags(watchCmd.Flags())
 	bindDoctorFlags(doctorCmd.Flags())
@@ -483,6 +503,13 @@ func bindCommitFlags(fs *pflag.FlagSet) {
 func bindSquashFlags(fs *pflag.FlagSet) {
 	messageFlag(fs, "collapsed commit message")
 	fs.Bool("force", false, "proceed even if the linked PR has open review threads")
+}
+
+// bindRewriteFlags declares `gummi rewrite`'s flags.
+func bindRewriteFlags(fs *pflag.FlagSet) {
+	fs.String("plan", "", `the branch as it should read, oldest first (a file path, or - for stdin): {"head":"<tip>","groups":[{"commits":["<sha>",…],"message":"…"},…]} — every commit in exactly one group`)
+	fs.Bool("dry-run", false, "say what the plan would do and move nothing")
+	fs.Bool("allow-pushed", false, "rewrite commits the remote already has; the branch will then need a force push, which gummi prints and never runs")
 }
 
 // bindStatusFlags declares `gummi status`'s flags.

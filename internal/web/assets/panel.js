@@ -1,4 +1,4 @@
-// panel.js — the right panel: the Spec, Diff, PR and Stats tabs beside the
+// panel.js — the right panel: the Spec, Diff, Log, PR and Stats tabs beside the
 // conversation (never over it), the resizer between them, and hiding it
 // with `]`. It fetches the open tab for the open card, refetches it when
 // the card changes, and hands each tab module an entry { data, fresh, err }
@@ -10,10 +10,11 @@ import { on, set, state } from './store.js?v=__ASSET_V__'
 import { write as writeHash } from './router.js?v=__ASSET_V__'
 import { specTab } from './spec.js?v=__ASSET_V__'
 import { diffTab } from './diff.js?v=__ASSET_V__'
+import { logTab } from './log.js?v=__ASSET_V__'
 import { prTab } from './pr.js?v=__ASSET_V__'
 import { statsTab } from './stats.js?v=__ASSET_V__'
 
-const TABS = [specTab, diffTab, prTab, statsTab]
+const TABS = [specTab, diffTab, logTab, prTab, statsTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
 let cache = {} // tab name -> { data, fresh, err, loading, stale }

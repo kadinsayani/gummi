@@ -67,6 +67,11 @@ type WebDocs struct {
 	// segment the card's log ends in (liveSessionActive), zero when none.
 	liveStart time.Time
 	live      *webapi.Live
+	// locks is the board's per-card lock registry (nil in a scaffold), and
+	// busy whether an agent had the card mid-turn when it was captured: the
+	// two things a history rewrite asks of the model.
+	locks *state.CardLocks
+	busy  bool
 }
 
 // WebDocs captures card id's documents for reading off the loop. It
@@ -83,6 +88,7 @@ func (m *Shell) WebDocs(id string) (*WebDocs, error) {
 	return &WebDocs{
 		f: r.F, base: m.baseBranch(r.F), store: m.store, pool: m.wt, ws: m.ws,
 		now: m.now, threads: m.fetchPRReviewThreads,
+		locks: m.locks, busy: m.webCardBusy(r.F.ID) || m.cardBusy(r),
 	}, nil
 }
 
@@ -457,23 +463,8 @@ func (d *WebDocs) Diff(ctx context.Context, since string) (webapi.Diff, error) {
 		}
 	}
 	for _, f := range diffannot.Parse(lines) {
-		wf := webapi.DiffFile{
-			Path: f.Path, OldPath: f.OldPath, Status: f.Status, Binary: f.Binary,
-			Add: f.Add, Del: f.Del, Hunks: make([]webapi.Hunk, 0, len(f.Hunks)),
-		}
 		added, touched := fresh[f.Path]
-		wf.Since = touched
-		for _, h := range f.Hunks {
-			wh := webapi.Hunk{Header: h.Header, Lines: make([]webapi.DiffLine, 0, len(h.Lines))}
-			for _, l := range h.Lines {
-				wh.Lines = append(wh.Lines, webapi.DiffLine{
-					T: string(l.Op), Old: l.Old, New: l.New, Text: l.Text, Idx: l.Idx,
-					Since: l.Op == '+' && added[l.New],
-				})
-			}
-			wf.Hunks = append(wf.Hunks, wh)
-		}
-		out.Files = append(out.Files, wf)
+		out.Files = append(out.Files, webDiffFile(f, added, touched))
 	}
 	anns, err := d.store.ListDiffAnnotations(ctx, d.f.ID)
 	if err != nil {
@@ -944,4 +935,25 @@ func WebFleetReport(r fleetrun.Report) webapi.Fleet {
 		out.Lanes = append(out.Lanes, wl)
 	}
 	return out
+}
+
+// webDiffFile projects one parsed file onto the wire. added, when the
+// diff is read against a commit, is the new-side lines changed since it,
+// and touched whether the file was.
+func webDiffFile(f diffannot.File, added map[int]bool, touched bool) webapi.DiffFile {
+	wf := webapi.DiffFile{
+		Path: f.Path, OldPath: f.OldPath, Status: f.Status, Binary: f.Binary,
+		Add: f.Add, Del: f.Del, Since: touched, Hunks: make([]webapi.Hunk, 0, len(f.Hunks)),
+	}
+	for _, h := range f.Hunks {
+		wh := webapi.Hunk{Header: h.Header, Lines: make([]webapi.DiffLine, 0, len(h.Lines))}
+		for _, l := range h.Lines {
+			wh.Lines = append(wh.Lines, webapi.DiffLine{
+				T: string(l.Op), Old: l.Old, New: l.New, Text: l.Text, Idx: l.Idx,
+				Since: l.Op == '+' && added[l.New],
+			})
+		}
+		wf.Hunks = append(wf.Hunks, wh)
+	}
+	return wf
 }

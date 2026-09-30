@@ -42,6 +42,10 @@ func (s *Server) docsRoutes() {
 	s.api("GET /api/cards/{id}/pr", func(w http.ResponseWriter, r *http.Request) { s.handlePR(w, r, prs) })
 	s.api("POST /api/cards/{id}/pr/pull", func(w http.ResponseWriter, r *http.Request) { s.handlePRPull(w, r, prs) })
 	s.api("GET /api/cards/{id}/stats", s.handleStats)
+	s.api("GET /api/cards/{id}/log", s.handleLog)
+	s.api("GET /api/cards/{id}/log/{sha}", s.handleLogCommit)
+	s.api("POST /api/cards/{id}/log/plan", s.handleLogPlan)
+	s.api("POST /api/cards/{id}/log/rewrite", s.handleLogRewrite)
 	s.api("GET /api/fleet", s.handleFleet)
 }
 
@@ -73,6 +77,8 @@ func writeDocsError(w http.ResponseWriter, err error, id string) {
 	switch {
 	case errors.Is(err, ui.ErrNoCard):
 		writeError(w, http.StatusNotFound, "not found on "+id)
+	case errors.Is(err, ui.ErrConflict):
+		writeError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, ui.ErrMoved):
 		writeError(w, http.StatusConflict, "moved")
 	case errors.Is(err, ui.ErrDetached):
@@ -453,4 +459,74 @@ func (c *prCache) drop(id string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.m, id)
+}
+
+// handleLog is GET /api/cards/{id}/log: the card's own commits, and
+// whether they may be rewritten now.
+func (s *Server) handleLog(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	l, err := d.Log(r.Context())
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, l)
+}
+
+// handleLogPlan is POST /api/cards/{id}/log/plan: a dry run of a rewrite.
+func (s *Server) handleLogPlan(w http.ResponseWriter, r *http.Request) {
+	var req webapi.RewriteRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	prev, err := d.PlanRewrite(r.Context(), req)
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, prev)
+}
+
+// handleLogRewrite is POST /api/cards/{id}/log/rewrite: the rewrite
+// itself, under the card's lock. gummi never pushes what it rewrote; the
+// answer carries the command when the branch needs one.
+func (s *Server) handleLogRewrite(w http.ResponseWriter, r *http.Request) {
+	var req webapi.RewriteRequest
+	if err := readJSON(w, r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	res, err := d.Rewrite(r.Context(), req)
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	s.changed(r.PathValue("id"))
+	writeJSON(w, http.StatusOK, res)
+}
+
+// handleLogCommit is GET /api/cards/{id}/log/{sha}: one commit's patch.
+func (s *Server) handleLogCommit(w http.ResponseWriter, r *http.Request) {
+	d, ok := s.docs(w, r)
+	if !ok {
+		return
+	}
+	c, err := d.CommitDiff(r.Context(), r.PathValue("sha"))
+	if err != nil {
+		writeDocsError(w, err, r.PathValue("id"))
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
 }

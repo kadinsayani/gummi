@@ -113,7 +113,7 @@ dialog), `action-confirm`, `action-cancel`.
 | id | what |
 |---|---|
 | `panel` | the right landmark |
-| `panel-tabs`, `tab-spec`, `tab-diff`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
+| `panel-tabs`, `tab-spec`, `tab-diff`, `tab-log`, `tab-pr`, `tab-stats` | tabs (`aria-selected`) |
 | `panel-close` | hide the panel |
 | `panel-pane` | the tab body; `data-tab` = open tab |
 | `panel-loading`, `panel-unavailable`, `panel-error` | tab states (unavailable = the route answers 501) |
@@ -147,6 +147,14 @@ comment is never folded, and its lines have no `diff-line-*` until unfolded),
 PR: `pr`, `pr-state`, `pr-fetched`, `pr-refresh`, `pr-pull`, `pr-thread-<i>`,
 `pr-push`, `pr-push-cmd`, `pr-push-copy`, `pr-none`, `pr-link` (link a pull
 request, when the card's menu offers it).
+
+Log: `log`, `log-head`, `log-why` (why the history is read-only),
+`log-none`, `log-commit-<i>` (oldest first), `log-show-<i>` (a commit's
+changes, in `log-patch`), `log-reword-<i>`, `log-editor-<i>`,
+`log-editor-save-<i>`, `log-squash-<i>` (`aria-pressed`), `log-plan` (the
+draft's bar), `log-plan-line` (what the dry run says), `log-confirm`
+(rewriting pushed commits), `log-reset`, `log-apply`, `log-push`,
+`log-push-cmd` (the force push a rewrite of pushed commits leaves).
 
 Stats: `stats`, `stats-spent`, `stats-passes`, `stats-rework`, `stats-table`,
 `stats-none`.

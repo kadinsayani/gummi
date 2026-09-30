@@ -101,3 +101,24 @@ func TestFleetShape(t *testing.T) {
 		AllTimeCredits: 40, AllTimeCards: 5,
 	}))
 }
+
+func TestLogShapes(t *testing.T) {
+	log := Log{
+		Base: "main", Head: "bbbbbbb2", Rewritable: true, PushCommand: "git push --force-with-lease origin feat/x",
+		Commits: []LogCommit{
+			{SHA: "aaaaaaa1", Short: "aaaaaaa", Subject: "FD-012: implement checkpoint", Author: "gummi", At: at, Files: 2, Add: 10, Del: 1, Checkpoint: true, Pushed: true},
+			{SHA: "bbbbbbb2", Short: "bbbbbbb", Subject: "feat: x", Body: "why", Author: "Simon", At: at, Files: 1, Add: 3, Warning: "Co-Authored-By: Claude"},
+		},
+	}
+	golden.RequireEqual(t, marshal(t, struct {
+		Log     Log
+		Request RewriteRequest
+		Preview RewritePreview
+		Result  RewriteResult
+	}{
+		Log:     log,
+		Request: RewriteRequest{Head: "bbbbbbb2", AcknowledgePushed: true, Groups: []RewriteGroup{{Commits: []string{"aaaaaaa1", "bbbbbbb2"}, Message: "feat: x"}}},
+		Preview: RewritePreview{Commits: log.Commits[1:], Changed: 1, Pushed: true, PushCommand: log.PushCommand},
+		Result:  RewriteResult{Head: "ccccccc3", PushCommand: log.PushCommand, Log: log},
+	}))
+}

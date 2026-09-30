@@ -314,6 +314,9 @@ type Shell struct {
 	// stats is the mounted stats tab (statsview.go), nil when closed:
 	// where the selected card's credits and hours went.
 	stats *statsView
+	// logv is the mounted log tab (logview.go), nil when closed: the
+	// selected card's own commits, and the draft of a rewrite of them.
+	logv *logView
 	// wsstats is the workspace stats tab (wsstats.go), nil until its
 	// first visit mounts it: where the whole board's credits and hours
 	// went, and when — the timeline. The card's own tab is stats; this
@@ -2115,6 +2118,18 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case squashOpenDialogMsg:
 		return m, m.openSquashDialog(msg.f)
 
+	case logLoadedMsg:
+		return m, m.logLoaded(msg)
+
+	case logPatchMsg:
+		return m, m.logPatchLoaded(msg)
+
+	case logPreparedMsg:
+		return m, m.logPrepared(msg)
+
+	case logRewrittenMsg:
+		return m, m.logRewritten(msg)
+
 	case prLinkProbeMsg:
 		m.handlePRLinkProbe(msg)
 		return m, nil
@@ -3025,6 +3040,10 @@ func (m *Shell) handleKey(msg tea.KeyPressMsg) tea.Cmd {
 		if m.stats != nil {
 			m.clearTransientNotice()
 			return m.handleStatsKey(key)
+		}
+		if m.logv != nil {
+			m.clearTransientNotice()
+			return m.handleLogKey(key)
 		}
 		if m.cardOpen && m.threadInput.Focused() {
 			return m.handleThreadInputKey(msg)
@@ -4545,6 +4564,12 @@ func (m *Shell) mainView(w, h int) string {
 				return m.cardSurface(cardTabStats, w, h, m.statsViewRender)
 			}
 			return m.statsViewRender(w, h)
+		}
+		if m.logv != nil {
+			if m.cardOpen {
+				return m.cardSurface(cardTabLog, w, h, m.logViewRender)
+			}
+			return m.logViewRender(w, h)
 		}
 		if m.ingest != nil {
 			return m.ingestViewRender(w, h)

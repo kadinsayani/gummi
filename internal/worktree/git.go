@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -70,4 +71,20 @@ func gitOK(ctx context.Context, dir string, args ...string) (bool, error) {
 		return false, nil
 	}
 	return false, &gitError{args: full, stderr: stderr.String(), err: err}
+}
+
+// runGitEnv is runGit with extra environment entries, for the few
+// commands that take an identity from the environment (commit-tree's
+// author). The child inherits everything else.
+func runGitEnv(ctx context.Context, dir string, env []string, args ...string) (string, error) {
+	full := append([]string{"-C", dir}, args...)
+	cmd := exec.CommandContext(ctx, "git", full...)
+	cmd.Env = append(os.Environ(), env...)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", &gitError{args: full, stderr: stderr.String(), err: err}
+	}
+	return strings.TrimSpace(stdout.String()), nil
 }

@@ -86,6 +86,14 @@ gummi squash <id|ref> -m <message|->
 gummi commit <id|ref> -m <message|->
     -m, --message string  commit message for the card's uncommitted worktree changes (required; - reads from stdin)
 
+gummi log <id|ref>
+    --json  emit the commits as JSON (the shape the board's web page reads)
+
+gummi rewrite <id|ref> --plan <file|->
+    --allow-pushed  rewrite commits the remote already has; the branch will then need a force push, which gummi prints and never runs
+    --dry-run       say what the plan would do and move nothing
+    --plan string   the branch as it should read, oldest first (a file path, or - for stdin): {"head":"<tip>","groups":[{"commits":["<sha>",…],"message":"…"},…]} — every commit in exactly one group
+
 gummi handoff <id|ref>
 
 gummi clean <id|ref>
@@ -280,6 +288,16 @@ refuses a PR-linked card outright) and `squash` (which refuses a dirty worktree
 outright): use `commit` first to turn stray worktree changes into a commit, then
 run `squash` on a PR-linked card that has them, in place of raw `git commit`. A
 clean worktree is a no-op, not an error.
+
+`gummi log <id>` lists a card's own commits, oldest first (`--json` for the
+SHAs). `gummi rewrite <id> --plan <file|->` rewords or squashes them in place:
+the plan lists every commit, oldest first, in contiguous groups, each group
+becoming one commit with the message given. Reordering and dropping cannot be
+expressed, so the branch's content never changes; `--dry-run` shows the result
+first. It refuses while an agent holds the card, on an adopted branch, and on
+commits already pushed unless `--allow-pushed` — then prints the force push,
+which it never runs. Like `squash`, rewriting history is the human's call: ask
+before you run it.
 
 If a card depends on another (`gummi deps add <dependent> <depends-on>`,
 `rm`/`list` to remove or read them back), an unmet dependency blocks it from
