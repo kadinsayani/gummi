@@ -695,3 +695,19 @@ func TestAGoalKeepsItsLandedCardUntilTheGoalIsOver(t *testing.T) {
 		t.Fatal("a card the goal dropped keeps its full inventory, so adopt stays reachable")
 	}
 }
+
+// A card cut from a chosen base names that branch in the words on its
+// verbs, and a stacked card above the bottom — which ignores its own
+// choice — keeps naming the trunk.
+func TestACardNamesTheChosenBaseItLandsOn(t *testing.T) {
+	m := goalBoard()
+	f := m.rows[0].F
+	f.Base = "develop"
+	if got := m.baseBranch(f); got != "develop" {
+		t.Fatalf("a card cut from develop: got %q", got)
+	}
+	f.StackID, f.StackPos = "chain", 1
+	if got := m.baseBranch(f); got != worktree.DefaultBaseBranchName {
+		t.Fatalf("a stacked card above the bottom ignores its own base: got %q", got)
+	}
+}

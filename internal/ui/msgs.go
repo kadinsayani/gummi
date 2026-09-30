@@ -341,6 +341,12 @@ func (m *Shell) loadRows() tea.Msg {
 	rows := make([]featureRow, 0, len(feats))
 	for _, f := range feats {
 		row := featureRow{F: f, BaseBranch: m.repoBaseBranch(f)}
+		if f.Base != "" && (f.StackID == "" || f.StackPos == 0) {
+			// a card cut from a chosen base forks from it and lands on
+			// it (§18.2), so the words on its verbs name that branch. A
+			// stacked card above the bottom ignores its own choice.
+			row.BaseBranch = f.Base
+		}
 		if name := goalBranches[f.GoalID]; name != "" {
 			// The same lookup answers both questions, because it is the
 			// same fact: a goal still conducting, and the branch its cards

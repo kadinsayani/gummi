@@ -680,6 +680,9 @@ func (m *Shell) baseBranch(f domain.Feature) string {
 	if name := m.goalBranchOf(f); name != "" {
 		return name
 	}
+	if f.Base != "" && (f.StackID == "" || f.StackPos == 0) {
+		return f.Base
+	}
 	return m.repoBaseBranch(f)
 }
 
