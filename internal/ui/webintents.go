@@ -532,6 +532,17 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			want = append(want, domain.FeatureID(strings.TrimSpace(c)))
 		}
 		return m.setDependencies(r.F, want), nil
+	case "model":
+		if problem := m.checkSessionPick(req.Backend, req.Model); problem != "" || req.Backend == "" {
+			if problem == "" {
+				problem = "say which agent the session should run on"
+			}
+			return nil, refuse(WebBadRequest, problem)
+		}
+		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: engine.ErrSessionBusy.Error()}
+		}
+		return m.switchSessionModel(r.F.ID, req.Backend, strings.TrimSpace(req.Model)), nil
 	case "profile":
 		if !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == req.Profile }) {
 			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+string(r.F.ID)+" can switch to")

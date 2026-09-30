@@ -1,0 +1,63 @@
+{
+  "sessions": {
+    "default": {
+      "backend": "claude",
+      "model": "claude-sonnet-5-5"
+    },
+    "agents": [
+      {
+        "name": "claude",
+        "installed": true,
+        "models": [
+          "claude-opus-5-5",
+          "claude-sonnet-5-5"
+        ],
+        "hint": "versions with dashes"
+      },
+      {
+        "name": "opencode",
+        "installed": false,
+        "models": [],
+        "needsModel": true,
+        "hint": "provider/model"
+      }
+    ],
+    "recent": [
+      {
+        "backend": "codex",
+        "model": "gpt-5"
+      }
+    ]
+  },
+  "card": {
+    "id": "FF-003",
+    "kind": "freeform",
+    "title": "Tidy the help text",
+    "stage": "open",
+    "status": "running",
+    "spend": 12,
+    "envelope": 150,
+    "branch": "ff/003-tidy-the-help-text",
+    "decisionsMore": 0,
+    "actions": [
+      {
+        "id": "model",
+        "label": "model",
+        "needs": "model",
+        "default": "codex gpt-5"
+      }
+    ],
+    "composer": {
+      "says": "",
+      "route": ""
+    },
+    "session": {
+      "backend": "codex",
+      "model": "gpt-5"
+    }
+  },
+  "switch": {
+    "backend": "claude",
+    "model": "claude-sonnet-5-5"
+  }
+}

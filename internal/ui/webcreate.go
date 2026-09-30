@@ -60,6 +60,7 @@ func (m *Shell) WebForm(repo string) (webapi.Form, error) {
 		Stackable:  []webapi.CardRef{},
 		Dependable: []webapi.CardRef{},
 		Envelope:   m.envelopePrefill(),
+		Sessions:   m.webSessionModels(),
 	}
 	for _, ct := range domain.CardTypes {
 		f.Kinds = append(f.Kinds, webapi.Choice{Value: webKindValue(ct), Label: ct.Name(), Detail: firstLineOf(cardPlaceholderFor(ct))})
@@ -105,6 +106,17 @@ func (m *Shell) webFormRepo(d *cardForm, repo string) string {
 func (m *Shell) webFill(d *cardForm, req webapi.CreateCardRequest) string {
 	if problem := m.webFormRepo(d, req.Repo); problem != "" {
 		return problem
+	}
+	if req.Backend != "" || strings.TrimSpace(req.Model) != "" {
+		// only a session picks its own model: a stage takes its agent from
+		// the card's profile (DESIGN §19.8)
+		if d.ct.Kind != domain.KindFreeform {
+			return "only a session picks its own model — a " + d.ct.Name() + "'s stages take theirs from its profile"
+		}
+		if problem := m.checkSessionPick(req.Backend, req.Model); problem != "" {
+			return problem
+		}
+		d.sessionBackend, d.sessionModel = req.Backend, strings.TrimSpace(req.Model)
 	}
 	text := strings.TrimSpace(req.Title)
 	var body []string
@@ -206,7 +218,11 @@ func (b *Bridge) CreateCard(ctx context.Context, req webapi.CreateCardRequest, p
 	if !ok {
 		return webapi.Card{}, refuse(WebBadRequest, "no card kind "+strconv.Quote(req.Kind))
 	}
-	if strings.TrimSpace(req.Title) == "" {
+	// A session is started from its first message, the way a person
+	// starts a conversation, and takes its title from that message's first
+	// line (domain.SplitFreeform) — the draft has no title field to fill.
+	session := ct.Kind == domain.KindFreeform && strings.TrimSpace(req.Description) != ""
+	if strings.TrimSpace(req.Title) == "" && !session {
 		return webapi.Card{}, refuse(WebBadRequest, "a card needs a title")
 	}
 	if req.Adopt != "" || req.Base != "" {

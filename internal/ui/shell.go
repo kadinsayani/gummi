@@ -1993,6 +1993,10 @@ func (m *Shell) update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case sessionSwitchedMsg:
+		m.notice = noticeMsg{text: msg.text, id: msg.id}
+		return m, m.loadRows
+
 	case noticeMsg:
 		// an outcome-driven clear: the action that produced this notice
 		// succeeded, so drop the attention item it resolved (see

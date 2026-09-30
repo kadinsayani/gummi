@@ -184,7 +184,7 @@ func (m *Shell) cardCreated(msg cardCreatedMsg) tea.Cmd {
 	// visible.
 	if msg.f.IsFreeform() {
 		m.openOnLoad = msg.f.ID
-		return tea.Batch(append(cmds, m.startFreeform(msg.f))...)
+		return tea.Batch(append(cmds, m.startFreeform(msg.f, msg.opening))...)
 	}
 	if msg.start {
 		cmds = append(cmds, m.openAutopilot(msg.f))

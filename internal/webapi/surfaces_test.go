@@ -119,3 +119,29 @@ func TestAgentShape(t *testing.T) {
 		Context: &AgentContext{Tokens: 12000, Limit: 200000},
 	}))
 }
+
+// TestSessionModelsShape: what a session's model picker is offered, and
+// the pair a session card reports it runs on (DESIGN §19.8).
+func TestSessionModelsShape(t *testing.T) {
+	golden.RequireEqual(t, marshal(t, struct {
+		Sessions SessionModels `json:"sessions"`
+		Card     Card          `json:"card"`
+		Switch   ActionRequest `json:"switch"`
+	}{
+		Sessions: SessionModels{
+			Default: SessionModel{Backend: "claude", Model: "claude-sonnet-5-5"},
+			Agents: []SessionAgent{
+				{Name: "claude", Installed: true, Models: []string{"claude-opus-5-5", "claude-sonnet-5-5"}, Hint: "versions with dashes"},
+				{Name: "opencode", Installed: false, Models: []string{}, NeedsModel: true, Hint: "provider/model"},
+			},
+			Recent: []SessionModel{{Backend: "codex", Model: "gpt-5"}},
+		},
+		Card: Card{
+			Row:     Row{ID: "FF-003", Kind: "freeform", Title: "Tidy the help text", Stage: "open", Status: StatusRunning, Spend: 12, Envelope: 150},
+			Branch:  "ff/003-tidy-the-help-text",
+			Actions: []Action{{ID: "model", Label: "model", Needs: ActionNeedsModel, Default: "codex gpt-5"}},
+			Session: &SessionModel{Backend: "codex", Model: "gpt-5"},
+		},
+		Switch: ActionRequest{Backend: "claude", Model: "claude-sonnet-5-5"},
+	}))
+}

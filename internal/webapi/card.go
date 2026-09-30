@@ -25,6 +25,10 @@ type Card struct {
 	Actions []Action `json:"actions"`
 	// Composer says what a line typed into the card's composer would do.
 	Composer Composer `json:"composer"`
+	// Session is the agent and model a session (a freeform card) runs on,
+	// resolved the way its next turn will resolve them; nil on a card in
+	// the workflow, whose stages take theirs from its profile.
+	Session *SessionModel `json:"session,omitempty"`
 }
 
 // DecisionKind classifies an open decision.
@@ -139,6 +143,9 @@ const (
 	// pull request's URL or number; empty is an answer too when Detail
 	// says so.
 	ActionNeedsText ActionNeeds = "text"
+	// ActionNeedsModel: a session's agent and model (ActionRequest.Backend
+	// and ActionRequest.Model), picked from Form.Sessions or typed.
+	ActionNeedsModel ActionNeeds = "model"
 )
 
 // Action is one entry in a card's menu.
@@ -292,6 +299,10 @@ type ActionRequest struct {
 	// Mode is the autopilot switch's answer: "autopilot" or "attended".
 	// Empty takes the one the card's menu entry names.
 	Mode string `json:"mode,omitempty"`
+	// Backend and Model are the model switch's answer: the agent and model
+	// a session runs on from its next turn.
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
 	// Against is the pinned decision's Against.Token as the page showed
 	// it: an action is refused with 409 "moved" if the card moved since.
 	// On a card that pins a decision it is required, except for the
@@ -303,7 +314,8 @@ type ActionRequest struct {
 // move past a pinned decision, so they run without an Against: the menu
 // entries that change what the card waits for, what it may spend, which
 // profile or repository it runs under and which pull request it is linked
-// to, and the ones that copy or remove it (each of those asks its own
+// to (and, for a session, which model it runs on), and the ones that copy
+// or remove it (each of those asks its own
 // question first). Every other action — a crossing, a landing, a
 // send-back, a run, a pause, a rebase, a hand-off, the autopilot switch —
 // and every composer line (SendRequest) sent while a decision is pinned
@@ -312,5 +324,5 @@ type ActionRequest struct {
 // options is never independent.
 var DecisionIndependentActions = []string{
 	"deps", "profile", "envelope", "repo", "prlink", "prunlink", "prpull",
-	"duplicate", "delete", "clean",
+	"duplicate", "delete", "clean", "model",
 }

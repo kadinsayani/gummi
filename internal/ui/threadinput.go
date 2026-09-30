@@ -1162,12 +1162,13 @@ func (m *Shell) interruptFreeform(f domain.Feature) (tea.Cmd, bool) {
 	}, true
 }
 
-// startFreeform opens a freeform card's session and hands it the card's
-// own description as its first turn (FreeformSession.Kickoff). It is what
+// startFreeform opens a freeform card's session and hands it the text the
+// card was created with as its first turn (FreeformSession.KickoffWith),
+// every line of it — the card itself keeps only a title. It is what
 // creating such a card does: the description IS the task, and a card that
 // sat waiting for the reader to retype it would be waiting for nothing —
 // there is no gate to start it at and no backlog for it to wait in.
-func (m *Shell) startFreeform(f domain.Feature) tea.Cmd {
+func (m *Shell) startFreeform(f domain.Feature, opening string) tea.Cmd {
 	if m.engine == nil {
 		return nil
 	}
@@ -1181,7 +1182,7 @@ func (m *Shell) startFreeform(f domain.Feature) tea.Cmd {
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
-		if err := ff.Kickoff(who); err != nil {
+		if err := ff.KickoffWith(who, opening); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
 		}
 		return nil

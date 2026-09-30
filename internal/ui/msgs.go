@@ -492,6 +492,12 @@ type formResult struct {
 	StackInto  domain.StackID
 	Start      bool
 	FromPicker bool
+	// SessionBackend and SessionModel are the agent and model a freeform
+	// card's session runs on when the person picked them (DESIGN §19.8);
+	// both empty is the profile's implementer. Only the web face's session
+	// draft sets them today.
+	SessionBackend string
+	SessionModel   string
 }
 
 // cardCreatedMsg is createCard's success: the shell reloads rows, keeps
@@ -505,6 +511,10 @@ type cardCreatedMsg struct {
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
 	warn  string // a dependency edge that could not be written
+	// opening is the text a freeform card was created with, verbatim: its
+	// session's first turn (FreeformSession.KickoffWith), which the card
+	// itself only keeps as a line-sized title and one-liner.
+	opening string
 	// open asks the shell to land on the new card once the reload that
 	// puts it on the board arrives (shell.go's openOnLoad). Set by the
 	// follow-up, which is minted from the page of the card it came out
@@ -544,7 +554,8 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 			Repo: repo, RequireRepo: m.requireRepo, Base: res.Base,
 			Adopt: res.Adopt, InspectAdopted: m.adoptInspector(ctx, repo, res.Base),
 			ExternalRef: res.ExternalRef, Severity: res.Severity, Source: res.Source,
-			Discussion: res.Discussion,
+			Discussion:     res.Discussion,
+			SessionBackend: res.SessionBackend, SessionModel: res.SessionModel,
 		})
 		if err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true}
@@ -568,8 +579,12 @@ func (m *Shell) createCard(res formResult) tea.Cmd {
 				stacked = id
 			}
 		}
-		return cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker,
+		created := cardCreatedMsg{f: f, start: res.Start, fromPicker: res.FromPicker,
 			stack: stacked, warn: strings.Join(warn, "; ")}
+		if f.IsFreeform() {
+			created.opening = res.Desc
+		}
+		return created
 	}
 }
 

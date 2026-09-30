@@ -315,6 +315,7 @@ func (m *Shell) webCard(id domain.FeatureID) (webCardState, bool) {
 	}
 	st.card.Actions = m.webActions(r)
 	st.card.Composer = m.webComposer(r, "")
+	st.card.Session = m.webSessionOf(r.F)
 	return st, true
 }
 
@@ -475,7 +476,16 @@ var webActionHidden = map[string]bool{
 // its o key opens, less what webActionHidden leaves out.
 func (m *Shell) webActions(r featureRow) []webapi.Action {
 	in := m.nextInputFor(r)
-	list := append(cardActionsFor(in, r), m.cardProfileActions()...)
+	list := cardActionsFor(in, r)
+	if r.F.IsFreeform() {
+		// a session runs on the model its person picked, not on a profile
+		// role, so its menu switches the model instead (DESIGN §19.8)
+		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
+			list = append(list, cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"})
+		}
+	} else {
+		list = append(list, m.cardProfileActions()...)
+	}
 	if m.repoPickable(r) {
 		list = append(list, cardAction{id: "repo", key: "o", label: "repository", why: "choose the repository this card works in"})
 	}
@@ -536,6 +546,11 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		a.Default = r.F.Repo
 		for _, n := range m.repoNames {
 			a.Choices = append(a.Choices, webapi.Choice{Value: n, Label: n})
+		}
+	case "model":
+		a.Needs = webapi.ActionNeedsModel
+		if s := m.webSessionOf(r.F); s != nil {
+			a.Default = s.Backend + " " + s.Model
 		}
 	case "gate":
 		a.Default = autopilotSwitchTo(r.F.GateApproval)

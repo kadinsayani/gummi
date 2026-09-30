@@ -31,6 +31,13 @@ import (
 type cardForm struct {
 	ct domain.CardType
 
+	// sessionBackend and sessionModel are the agent and model a freeform
+	// card's session will run on. The form has no row for them — the web
+	// face's session draft picks them in its composer and webFill sets
+	// them — so a card made in the terminal leaves both empty and runs on
+	// its profile's implementer, as it always did.
+	sessionBackend, sessionModel string
+
 	repo repoPicker
 	// origins caches each repository's parsed origin, resolved through
 	// originFor the first time its row is chosen. nil originFor (a test
@@ -848,6 +855,7 @@ func (d *cardForm) submit(start bool) (bool, tea.Cmd) {
 		Repo: d.formRepo(), Source: "manual", After: append([]domain.FeatureID(nil), d.after...),
 		Base: d.base, Adopt: d.adopt, StackOnto: d.stackOnto, StackInto: d.stackInto,
 		Start: start, FromPicker: d.fromPicker,
+		SessionBackend: d.sessionBackend, SessionModel: d.sessionModel,
 	}
 	if d.ct.Kind == domain.KindBug {
 		res.Severity = bugSeverityChoices[d.sev]

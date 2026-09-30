@@ -38,6 +38,12 @@ type CreateCardRequest struct {
 	Diagnosis bool `json:"diagnosis,omitempty"`
 	// Start runs the card's first stage once it is created.
 	Start bool `json:"start,omitempty"`
+	// Backend and Model are the agent and model a session (a freeform
+	// card) runs on, picked in its draft's composer (DESIGN §19.8). Both
+	// empty runs it on its profile's implementer. Refused on every other
+	// kind: a stage takes its agent from the card's profile.
+	Backend string `json:"backend,omitempty"`
+	Model   string `json:"model,omitempty"`
 }
 
 // Form is GET /api/form: the choices the new-card form offers.
@@ -55,6 +61,45 @@ type Form struct {
 	Dependable []CardRef `json:"dependable"`
 	// Envelope is the board's default envelope.
 	Envelope int `json:"envelope"`
+	// Sessions is what a session's model picker offers.
+	Sessions SessionModels `json:"sessions"`
+}
+
+// SessionModels is what a session's model picker offers (DESIGN §19.8).
+// There is deliberately no list of every model an agent can run: model ids
+// are opaque strings the adapters forward verbatim, so the picker suggests
+// the ones this workspace already uses and takes any other typed in.
+type SessionModels struct {
+	// Default is what a new session runs on when nothing is picked: the
+	// default profile's implementer.
+	Default SessionModel `json:"default"`
+	// Agents is every agent a session can be pointed at, in the order the
+	// picker lists them, with whether this host can run it.
+	Agents []SessionAgent `json:"agents"`
+	// Recent are the pairs sessions on this board run on, most recently
+	// changed first.
+	Recent []SessionModel `json:"recent"`
+}
+
+// SessionModel is one agent-and-model pair a session runs on.
+type SessionModel struct {
+	Backend string `json:"backend"`
+	Model   string `json:"model"`
+}
+
+// SessionAgent is one agent in the picker.
+type SessionAgent struct {
+	Name string `json:"name"`
+	// Installed is false for an agent this host cannot start: its CLI is
+	// not on PATH (or, for headless, no command line is configured).
+	Installed bool `json:"installed"`
+	// Models are the ids the workspace's profiles run on this agent, as
+	// suggestions; any other id may be typed.
+	Models []string `json:"models"`
+	// NeedsModel marks an agent that refuses to start without a model id.
+	NeedsModel bool `json:"needsModel,omitempty"`
+	// Hint says how this agent spells a model id, when it has a rule.
+	Hint string `json:"hint,omitempty"`
 }
 
 // Choice is one option in a select: a value and the words for it.
