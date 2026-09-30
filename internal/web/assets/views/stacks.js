@@ -67,7 +67,10 @@ registerView('stacks', {
     const hooks = {
       hold () { holds++ },
       release () { holds = Math.max(0, holds - 1); if (!holds && stale) { stale = false; load() } },
-      reload: () => load(),
+      // force redraws even when the server's answer is unchanged: a restack
+      // that found nothing to move (a conflict, a wait) leaves the data as
+      // it was, yet its button and result panel still have to be redrawn
+      reload: (force) => { if (force) drawn = ''; return load() },
       focus (id) { focus = id }
     }
 
@@ -206,7 +209,7 @@ function stackBox (st, ctx, hooks, focused) {
       ctx.toast(res.conflict ? `${res.conflict.card} hit conflicts` : res.replayed?.length ? `replayed ${res.replayed.join(', ')}` : res.waiting ? `waiting: ${res.waiting}` : 'nothing to replay')
       ctx.refreshBoard?.()
       hooks.focus(st.id)
-      hooks.reload()
+      hooks.reload(true)
     } catch (ex) {
       ctx.toast(errText(ex), { err: true })
       btn.disabled = false
@@ -292,8 +295,9 @@ function stackBox (st, ctx, hooks, focused) {
       h('span', null, 'forks from ', base ? h('span', { class: 'mono' }, base) : 'the branch the repository has checked out')),
     members.map((m, i) => memberRow(m, i, members, rowOf(m.id), {
       open: () => { ctx.select(m.id); ctx.close() },
-      up: i > 0 ? () => move(m, members[i - 1].pos) : null,
-      down: i < members.length - 1 ? () => move(m, members[i + 1].pos) : null,
+      // a closed card (landed, handed off) keeps its place
+      up: i > 0 && !isClosed(m) ? () => move(m, members[i - 1].pos) : null,
+      down: i < members.length - 1 && !isClosed(m) ? () => move(m, members[i + 1].pos) : null,
       remove: () => remove(m)
     })))
 
@@ -307,13 +311,14 @@ function stackBox (st, ctx, hooks, focused) {
 
 function memberRow (m, i, members, row, act) {
   const marks = []
+  if (m.handedOff) marks.push(h('span', { class: 'sk-mark t-mute', testid: 'marker-handedoff', title: 'Closed without landing; its branch is kept for you to push' }, 'handed off'))
   if (m.landed) marks.push(h('span', { class: 'sk-mark t-ok', testid: 'marker-landed' }, 'landed'))
   if (m.stale) marks.push(h('span', { class: 'sk-mark t-warn', testid: 'marker-stale', title: 'It sits on commits that have since moved; the next tick replays it' }, 'stale'))
   if (m.running) marks.push(h('span', { class: 'sk-mark t-run', testid: 'marker-running', title: 'A session is working on it; a replay waits' }, 'running'))
   if (m.dirty) marks.push(h('span', { class: 'sk-mark t-warn', testid: 'marker-dirty', title: 'Its worktree has uncommitted changes; a replay waits' }, 'uncommitted changes'))
-  if (!m.tree && !m.landed) marks.push(h('span', { class: 'sk-mark t-mute', testid: 'marker-notree', title: 'Its branch is cut when it starts' }, 'no branch yet'))
+  if (!m.tree && !m.landed && !m.handedOff) marks.push(h('span', { class: 'sk-mark t-mute', testid: 'marker-notree', title: 'Its branch is cut when it starts' }, 'no branch yet'))
   if (row?.status === 'needs') marks.push(h('span', { class: 'sk-mark t-run', testid: 'marker-needs' }, 'needs you'))
-  const below = m.below || (i > 0 ? members[i - 1].id : '')
+  const below = m.below || ''
   return h('li', {
     class: ['sk-member', `st-${m.stage}`, m.landed && 'landed'],
     testid: `stack-member-${m.id}`,
@@ -336,6 +341,9 @@ function memberRow (m, i, members, row, act) {
     h('button', { class: 'iconbtn', type: 'button', testid: `stack-down-${m.id}`, disabled: !act.down, title: 'Move away from the base', 'aria-label': `Move ${m.id} away from the base`, onclick: act.down }, '↓'),
     h('button', { class: 'iconbtn sk-rm', type: 'button', testid: `stack-remove-${m.id}`, title: 'Take out of the stack', 'aria-label': `Take ${m.id} out of the stack`, onclick: act.remove }, '×')))
 }
+
+// isClosed is a card whose work has left gummi: it holds its place in the chain.
+const isClosed = (m) => !!m.landed || !!m.handedOff || m.stage === 'done'
 
 // ---- what a restack did ----
 

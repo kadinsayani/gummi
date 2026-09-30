@@ -212,7 +212,7 @@ only); `stack-add-form`, `stack-add-card`, `stack-add-pos`, `stack-add-submit`;
 `stack-remove-dialog`/`-cancel`/`-confirm`, `stack-delete-dialog`/`-cancel`/`-confirm`.
 Chain: `stack-chain`, `stack-base`, `stack-member-<ID>` (`data-pos`, and
 `data-stale`, `data-landed`, `data-running`, `data-dirty` when set),
-`stack-open-<ID>`, `member-branch`, `member-blocker`, `marker-landed`,
+`stack-open-<ID>`, `member-branch`, `member-blocker`, `marker-landed`, `marker-handedoff`,
 `marker-stale`, `marker-running`, `marker-dirty`, `marker-notree`,
 `marker-needs`, `stack-up-<ID>` (toward the base), `stack-down-<ID>`,
 `stack-remove-<ID>`.

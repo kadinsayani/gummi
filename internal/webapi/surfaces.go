@@ -179,6 +179,10 @@ type StackMember struct {
 	// Tree marks a card that has cut its branch.
 	Tree   bool `json:"tree,omitempty"`
 	Landed bool `json:"landed,omitempty"`
+	// HandedOff marks a card that closed without landing: its branch was
+	// kept for someone else to push. It is not Landed, though the cards
+	// above it stop forking from it all the same.
+	HandedOff bool `json:"handedOff,omitempty"`
 	// Stale marks a card sitting on commits that have since moved.
 	Stale   bool `json:"stale,omitempty"`
 	Running bool `json:"running,omitempty"`

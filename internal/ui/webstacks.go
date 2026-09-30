@@ -92,6 +92,12 @@ func webStack(view engine.StackView) webapi.Stack {
 		}
 		if f, ok := view.Card(mem.ID); ok {
 			sm.Title, sm.Stage = f.Title, string(f.Stage)
+			// the policy counts a finished card as landed so nothing forks
+			// from it again; the page must not tell a handed-off card's
+			// reader that its branch reached the base
+			if f.HandedOff() && f.LandedSHA == "" {
+				sm.Landed, sm.HandedOff = false, true
+			}
 		}
 		if below, ok := stack.BelowDeclared(snap, mem.ID); ok {
 			sm.Below = string(below)
