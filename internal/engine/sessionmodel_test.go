@@ -1,0 +1,209 @@
+package engine
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"sync/atomic"
+	"testing"
+
+	"github.com/morphis/gummi/internal/agent"
+	"github.com/morphis/gummi/internal/config"
+	"github.com/morphis/gummi/internal/domain"
+)
+
+// sessionModelEngine is a board whose profiles only ever name backend
+// "claude", plus a StartAgent that can start "codex" on demand — the shape
+// that makes "a session may pick any installed agent" observable: codex is
+// reachable only through the start, never through the profiles.
+func sessionModelEngine(t *testing.T) (*Engine, *recorder, *recorder, *atomic.Int32) {
+	t.Helper()
+	ws, store, wt := newRepo(t)
+	claude := recordingAgent()
+	claude.name = "claude"
+	codex := recordingAgent()
+	codex.name = "codex"
+	var starts atomic.Int32
+	e := New(Config{
+		Agents: map[string]agent.Agent{"": claude, "claude": claude},
+		StartAgent: func(name string) (agent.Agent, error) {
+			if name != "codex" {
+				return nil, errors.New("not installed")
+			}
+			starts.Add(1)
+			return codex, nil
+		},
+		Store: store, Worktrees: wt, Workspace: ws, Model: "fallback",
+		Profiles: config.Profiles{Default: "alpha", Profiles: map[string]config.Profile{
+			"alpha": {"implementer": {Backend: "claude", Model: "claude-sonnet-5-5"}},
+		}},
+	})
+	t.Cleanup(func() { e.Close() })
+	return e, claude, codex, &starts
+}
+
+// TestASessionRunsOnTheModelItNamed: a freeform card that names its own
+// agent and model runs on them, not on its profile's implementer — and an
+// agent the board did not start is started for it, once.
+func TestASessionRunsOnTheModelItNamed(t *testing.T) {
+	e, claude, codex, starts := sessionModelEngine(t)
+	ctx := context.Background()
+
+	f := freeformCard(1, "tidy the help text")
+	f.Profile = "alpha"
+	f.SessionBackend, f.SessionModel = "codex", "gpt-5"
+	createFeature(t, e.cfg.Store, f)
+	if _, err := e.OpenFreeform(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if got := codex.opts().Model; got != "gpt-5" {
+		t.Errorf("the session ran on model %q, want the gpt-5 it named", got)
+	}
+	if claude.count() != 0 {
+		t.Error("the profile's implementer was started for a session that named its own agent")
+	}
+
+	g := freeformCard(2, "a second codex session")
+	g.SessionBackend, g.SessionModel = "codex", "gpt-5"
+	createFeature(t, e.cfg.Store, g)
+	if _, err := e.OpenFreeform(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if n := starts.Load(); n != 1 {
+		t.Errorf("codex was started %d times for two sessions, want once", n)
+	}
+	if backend, model := e.SessionModel(g); backend != "codex" || model != "gpt-5" {
+		t.Errorf("SessionModel = %s/%s, want codex/gpt-5", backend, model)
+	}
+
+	// A card that names nothing still runs on its profile's implementer.
+	h := freeformCard(3, "a profile session")
+	h.Profile = "alpha"
+	if backend, model := e.SessionModel(h); backend != "claude" || model != "claude-sonnet-5-5" {
+		t.Errorf("SessionModel for a card naming nothing = %s/%s, want the profile's claude/claude-sonnet-5-5", backend, model)
+	}
+}
+
+// TestSwitchingASessionsModelCarriesTheConversation: switching mid-session
+// stores the new pair on the card, and the next turn runs on it with the
+// conversation so far replayed rather than resumed, since the old
+// backend's conversation id is not the new one's.
+func TestSwitchingASessionsModelCarriesTheConversation(t *testing.T) {
+	e, _, codex, _ := sessionModelEngine(t)
+	ctx := context.Background()
+
+	f := freeformCard(4, "fix the flaky retry")
+	f.Profile = "alpha"
+	createFeature(t, e.cfg.Store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "find out why TestRetry flakes"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+
+	if err := e.SwitchSessionModel(ctx, f.ID, "codex", "gpt-5"); err != nil {
+		t.Fatal(err)
+	}
+	row, err := e.cfg.Store.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.SessionBackend != "codex" || row.SessionModel != "gpt-5" {
+		t.Errorf("the card holds %q/%q after the switch, want codex/gpt-5", row.SessionBackend, row.SessionModel)
+	}
+	if !strings.Contains(transcriptText(ff.Snapshot()), "Switched to gpt-5 on codex") {
+		t.Errorf("the thread does not say the model changed:\n%s", transcriptText(ff.Snapshot()))
+	}
+
+	if err := ff.Send(ctx, "now make the cap configurable"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	opts := codex.opts()
+	if opts.Model != "gpt-5" {
+		t.Errorf("the turn after the switch ran on %q, want gpt-5", opts.Model)
+	}
+	if opts.ResumeID != "" {
+		t.Errorf("the new backend was asked to resume %q, a conversation that belongs to the old one", opts.ResumeID)
+	}
+	if hints := strings.Join(opts.SystemHints, "\n"); !strings.Contains(hints, "find out why TestRetry flakes") {
+		t.Errorf("the conversation so far did not go with the switch:\n%s", hints)
+	}
+}
+
+// TestASessionSwitchIsRefusedWhereItCannotApply: a card in the workflow
+// takes its agents from its profile, a pair no session could run is
+// refused before it is stored, and a turn in flight keeps the model it
+// started on.
+func TestASessionSwitchIsRefusedWhereItCannotApply(t *testing.T) {
+	ag := &agent.Fake{Responder: func(agent.SessionOpts, string) []agent.Event {
+		// No idle: the turn is still in flight when the switch arrives.
+		return []agent.Event{{Kind: agent.EventTextDelta, Text: "working"}}
+	}}
+	ag.Caps = agent.Capabilities{UsageEvents: true, Interrupt: true}
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(ag), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	stage := feature(5, "a stage card", domain.StageImplement)
+	createFeature(t, store, stage)
+	if err := e.SwitchSessionModel(ctx, stage.ID, "codex", "gpt-5"); err == nil {
+		t.Error("a card in the workflow was given a session model")
+	}
+
+	f := freeformCard(6, "busy session")
+	createFeature(t, store, f)
+	for _, bad := range [][2]string{{"nonesuch", "m"}, {"opencode", ""}, {"claude", "gpt-5"}, {"claude", "claude-haiku-4.5"}} {
+		if err := e.SwitchSessionModel(ctx, f.ID, bad[0], bad[1]); err == nil {
+			t.Errorf("switching to %s/%q was accepted", bad[0], bad[1])
+		}
+	}
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "go slowly"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.SwitchSessionModel(ctx, f.ID, "codex", "gpt-5"); !errors.Is(err, ErrSessionBusy) {
+		t.Errorf("a switch mid-turn = %v, want ErrSessionBusy", err)
+	}
+	row, err := store.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.SessionBackend != "" || row.SessionModel != "" {
+		t.Errorf("a refused switch was stored anyway: %q/%q", row.SessionBackend, row.SessionModel)
+	}
+}
+
+// TestASessionStartsFromItsWholeOpeningMessage: the message a session was
+// started with is its first turn verbatim, every line of it — the card
+// itself keeps only a title, which is what a multi-line opening used to be
+// cut down to.
+func TestASessionStartsFromItsWholeOpeningMessage(t *testing.T) {
+	r := recordingAgent()
+	ws, store, wt := newRepo(t)
+	e := New(Config{Agents: singleAgent(r), Store: store, Worktrees: wt, Workspace: ws, Model: "m"})
+	t.Cleanup(func() { e.Close() })
+	ctx := context.Background()
+
+	opening := "The retry test flakes on CI.\n\nFind out why, and keep the fix small."
+	f := freeformCard(7, "The retry test flakes on CI")
+	createFeature(t, store, f)
+	ff, err := e.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.KickoffWith(ctx, opening); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if got := transcriptText(ff.Snapshot()); !strings.Contains(got, "keep the fix small") {
+		t.Errorf("the opening message was cut short:\n%s", got)
+	}
+}

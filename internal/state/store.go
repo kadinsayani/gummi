@@ -94,7 +94,9 @@ CREATE TABLE IF NOT EXISTS features (
 	branch_scheme   TEXT NOT NULL DEFAULT '',
 	branch          TEXT NOT NULL DEFAULT '',
 	stack_id        TEXT NOT NULL DEFAULT '',
-	stack_pos       INTEGER NOT NULL DEFAULT 0
+	stack_pos       INTEGER NOT NULL DEFAULT 0,
+	session_backend TEXT NOT NULL DEFAULT '',
+	session_model   TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS features_external_ref ON features(external_ref);
 -- features_stack is created by the column migrations, not here: this
@@ -753,6 +755,11 @@ var migrations = []string{
 	// face did (DESIGN §20.3). Empty is the terminal, an agent, or a row
 	// written before the column existed.
 	`ALTER TABLE diff_annotations ADD COLUMN author TEXT NOT NULL DEFAULT ''`,
+	// The agent and model a freeform card's session runs on when the
+	// person chose them (DESIGN §19.8). Empty is the profile's implementer,
+	// which is what every row written before the columns existed ran on.
+	`ALTER TABLE features ADD COLUMN session_backend TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE features ADD COLUMN session_model TEXT NOT NULL DEFAULT ''`,
 }
 
 // Close releases the database.
@@ -789,8 +796,9 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 			pr_repo, pr_number, pr_url, pr_head_sha,
 			goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 			research_mode,
-			base, branch_scheme, branch, stack_id, stack_pos)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			base, branch_scheme, branch, stack_id, stack_pos,
+			session_backend, session_model)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		string(f.ID), f.Num, f.Title, f.OneLiner, f.Slug, string(f.Stage),
 		// the two false values are skip_brainstorm/skip_plan: vestigial
 		false, false, f.Profile,
@@ -803,7 +811,8 @@ func (s *Store) CreateFeature(ctx context.Context, f *domain.Feature) error {
 		string(f.GoalID), f.GoalAttached, formatOptTime(f.GoalDroppedAt), string(f.FoundBy),
 		f.Goal.Lanes, f.Goal.Reserve, formatOptTime(f.Goal.WrapUpAt), f.Goal.Partial,
 		string(f.Mode),
-		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos)
+		f.Base, f.BranchScheme, f.Branch, string(f.StackID), f.StackPos,
+		f.SessionBackend, f.SessionModel)
 	if err != nil {
 		return fmt.Errorf("creating %s: %w", f.ID, err)
 	}
@@ -828,7 +837,8 @@ const featureCols = `id, num, title, one_liner, slug, stage,
 	pr_repo, pr_number, pr_url, pr_head_sha,
 	goal_id, goal_attached, goal_dropped_at, found_by, goal_lanes, goal_reserve, goal_wrapup_at, goal_partial,
 	research_mode,
-	base, branch_scheme, branch, stack_id, stack_pos`
+	base, branch_scheme, branch, stack_id, stack_pos,
+	session_backend, session_model`
 
 // writtenFeatureColumns returns the set of feature columns the store
 // reads back (the SELECT list of featureCols), keyed by name. It is the
@@ -868,7 +878,8 @@ func scanFeature(r rowScanner) (domain.Feature, error) {
 		&f.PullRequest.Repo, &f.PullRequest.Number, &f.PullRequest.URL, &f.PullRequest.HeadSHA,
 		&goalID, &f.GoalAttached, &goalDropped, &foundBy, &f.Goal.Lanes, &f.Goal.Reserve, &goalWrapUp, &f.Goal.Partial,
 		&mode,
-		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos)
+		&f.Base, &f.BranchScheme, &f.Branch, &stackID, &f.StackPos,
+		&f.SessionBackend, &f.SessionModel)
 	if err != nil {
 		return f, err
 	}
@@ -1600,10 +1611,10 @@ func (s *Store) UpdateFeature(ctx context.Context, f *domain.Feature) error {
 	now := time.Now().UTC()
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE features SET title=?, one_liner=?, slug=?, profile=?,
-			budget_envelope=?, repo=?, updated_at=?
+			budget_envelope=?, repo=?, session_backend=?, session_model=?, updated_at=?
 		WHERE id=?`,
 		f.Title, f.OneLiner, f.Slug, f.Profile,
-		f.Budget.Envelope, f.Repo,
+		f.Budget.Envelope, f.Repo, f.SessionBackend, f.SessionModel,
 		now.Format(timeFmt), string(f.ID))
 	if err != nil {
 		return fmt.Errorf("updating %s: %w", f.ID, err)

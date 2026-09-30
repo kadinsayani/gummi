@@ -188,7 +188,13 @@ type Config struct {
 	// buildAgents in cmd/gummi seeds both the default's Name() and ""
 	// with the same adapter, so lookups by either always resolve.
 	Agents map[string]agent.Agent
-	Store  *state.Store
+	// StartAgent starts a backend by name for a session that asks for one
+	// this board did not start (DESIGN §19.8): the profiles decide which
+	// backends a board launches, and a person may pick any installed agent
+	// for a session. Nil means a session may only name a backend already
+	// in Agents. Backends it starts are the engine's, closed by Close.
+	StartAgent func(name string) (agent.Agent, error)
+	Store      *state.Store
 	// Worktrees is a single repository's manager, retained for callers that
 	// bind one repository directly. New callers pass Pool instead.
 	Worktrees *worktree.Manager
@@ -370,8 +376,12 @@ type Engine struct {
 	// holds its card's worktree, its per-card lock and its envelope (see
 	// freeformsession.go).
 	freeform map[domain.FeatureID]*FreeformSession
+	// started holds the backends a session asked for that the board did
+	// not start (sessionAgent), keyed by name, closed by Close.
+	startedMu sync.Mutex
+	started   map[string]agent.Agent
 	// freeformMu serializes OpenFreeform end to end — consultMu's job, for
-	// the identical check-then-act reason. Held only by OpenFreeform, and
+	// the identical check-then-act reason. Held by OpenFreeform and SwitchSessionModel, and
 	// never while e.mu is also held.
 	freeformMu sync.Mutex
 	// freeformIdleTimeout bounds how long a freeform card's backend stays
@@ -1732,10 +1742,17 @@ func indentLines(s string) string {
 // moment the session exists, not after the first usage event.
 func (e *Engine) stampSpawnInfo(s *Session) {
 	rc, backend := e.resolveRole(s.Feature.Profile, s.Role)
-	name := ""
+	a := e.agentFor(backend)
+	if s.Feature.IsFreeform() {
+		// A session names its own agent and model (DESIGN §19.8); asked
+		// without starting one, since a restore spawns nothing.
+		rc, backend = e.sessionRole(s.Feature)
+		a = e.knownAgent(backend)
+	}
+	name := backend
 	rate := 0.0
 	clientTools := false
-	if a := e.agentFor(backend); a != nil {
+	if a != nil {
 		name = a.Name()
 		rate = a.CreditRate(rc.Model)
 		clientTools = a.Capabilities().ClientTools
@@ -2631,6 +2648,7 @@ func (e *Engine) Close() error {
 	// Join the pump and kickoff goroutines so no git subprocess or persist
 	// write is still in flight against the workspace when Close returns.
 	e.wg.Wait()
+	e.closeStartedAgents()
 	close(e.stopped)
 	return nil
 }

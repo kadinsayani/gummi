@@ -178,3 +178,27 @@ func TestArtifactFileRefusesACardWithNoArtifact(t *testing.T) {
 		}
 	}
 }
+
+// TestOnlyASessionNamesItsOwnModel: a freeform card may carry the agent
+// and model its session runs on; a card in the workflow may not, because
+// its stages take theirs from its profile and nothing else.
+func TestOnlyASessionNamesItsOwnModel(t *testing.T) {
+	f := freeformCard(t)
+	f.SessionBackend, f.SessionModel = "codex", "gpt-5"
+	if err := f.Validate(); err != nil {
+		t.Fatalf("a freeform card naming its session model was refused: %v", err)
+	}
+	id, err := NewID(KindFeature, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stage := Feature{
+		ID: id, Num: 3, Kind: KindFeature, Title: "configurable retries",
+		Slug: "configurable-retries", Stage: StageTodo,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		SessionModel: "gpt-5",
+	}
+	if err := stage.Validate(); err == nil {
+		t.Error("a feature naming a session model was accepted; its stages take their models from its profile")
+	}
+}

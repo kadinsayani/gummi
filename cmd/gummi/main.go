@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime/debug"
@@ -311,6 +312,10 @@ func engineFromEnv(store *state.Store, pool *worktree.Pool, ws state.Workspace) 
 		Profiles: profiles, StageBudget: stageBudget, TurnReserve: turnReserve,
 		Permission: perm, Sandbox: sandboxMode, Instructions: instructions,
 		Skills: forwardSkills,
+		// A session may run on any installed agent, not only the ones the
+		// profiles name (DESIGN §19.8); this is how the board starts one it
+		// did not launch.
+		StartAgent: startSessionAdapter,
 	})
 	// Teach every worktree manager how to resolve a card's base. Until
 	// this is installed a card forks from whatever the checkout has out,
@@ -416,6 +421,22 @@ func startAdapter(name string) (agent.Agent, error) {
 		return agent.NewPi(os.Getenv("GUMMI_PI_BIN"))
 	}
 	return nil, fmt.Errorf("unknown backend %q", name)
+}
+
+// startSessionAdapter starts a backend a session asked for that the board
+// did not launch. It refuses an agent CLI that is not on PATH by name,
+// before the adapter's own lookup fails with a less direct message, and
+// headless without the command line that is its whole definition.
+func startSessionAdapter(name string) (agent.Agent, error) {
+	if bin, ok := agentcli.Binary(name); ok {
+		if _, err := exec.LookPath(bin); err != nil {
+			return nil, fmt.Errorf("%s is not installed on this host (no %s on PATH)", name, bin)
+		}
+	}
+	if name == "headless" && strings.TrimSpace(os.Getenv("GUMMI_AGENT_CMD")) == "" {
+		return nil, errors.New("headless needs GUMMI_AGENT_CMD")
+	}
+	return startAdapter(name)
 }
 
 // requiredBackends returns the set of backend names the loaded profiles

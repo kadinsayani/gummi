@@ -73,6 +73,13 @@ type Input struct {
 	Profile string
 	// Envelope is the card's credit budget ceiling.
 	Envelope int
+	// SessionBackend and SessionModel are the agent and model a freeform
+	// card's session runs on (DESIGN §19.8); both empty is the profile's
+	// implementer. Any other kind naming one is refused by
+	// domain.Feature.Validate, since a stage takes its agent from the
+	// profile.
+	SessionBackend string
+	SessionModel   string
 	// Repo is the managed repository the card belongs to: a configured
 	// `repos:` name, or "" for the workspace default.
 	Repo string
@@ -356,6 +363,7 @@ func Mint(ctx context.Context, store *state.Store, ws state.Workspace, in Input)
 		// graph, at domain.StageOpen, and never enters it.
 		Slug: slug, Stage: workflow.InitialFor(in.Kind),
 		Profile: in.Profile, Budget: domain.Budget{Envelope: in.Envelope},
+		SessionBackend: in.SessionBackend, SessionModel: in.SessionModel,
 		GateApproval: gate,
 		ExternalRef:  in.ExternalRef, Repo: in.Repo, CreatedAt: now, UpdatedAt: now,
 		Base: in.Base,

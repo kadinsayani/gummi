@@ -64,8 +64,9 @@ const freeformIdleTimeout = 20 * time.Minute
 type FreeformSession struct {
 	engine *Engine
 	id     domain.FeatureID
-	// rc/backend are resolved once, at OpenFreeform, and reused by every
-	// respawn — a card's profile does not change mid-conversation.
+	// rc/backend are resolved at OpenFreeform and reused by every respawn.
+	// They change only through SwitchSessionModel, which swaps them under
+	// mu and stops the backend so the next turn respawns on the new pair.
 	rc      config.RoleConfig
 	backend string
 
@@ -127,7 +128,7 @@ func (e *Engine) OpenFreeform(ctx context.Context, f domain.Feature) (*FreeformS
 	}
 	e.mu.Unlock()
 
-	rc, backend := e.resolveRole(f.Profile, agent.RoleImplementer)
+	rc, backend := e.sessionRole(f)
 	ff := &FreeformSession{engine: e, id: f.ID, rc: rc, backend: backend}
 
 	if err := ff.spawn(ctx, nil, ""); err != nil {
@@ -163,9 +164,12 @@ func (e *Engine) Freeform(id domain.FeatureID) *FreeformSession {
 // or a respawn of an already-registered session.
 func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID string) error {
 	e := ff.engine
-	ag := e.agentFor(ff.backend)
-	if ag == nil {
-		return fmt.Errorf("no agent configured for %s's freeform session", ff.id)
+	ff.mu.Lock()
+	rc, backend := ff.rc, ff.backend
+	ff.mu.Unlock()
+	ag, err := e.sessionAgent(backend)
+	if err != nil {
+		return fmt.Errorf("%s's session: %w", ff.id, err)
 	}
 	// The card lock, for as long as this backend exists. A second gummi
 	// driving the card is excluded from here until the backend stops, and
@@ -199,7 +203,8 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 		cancel:      cancel,
 		startedAt:   time.Now(),
 	}
-	sess.setSpawnInfo(ag.Name(), ff.rc.Model, ag.Capabilities().ClientTools)
+	sess.setSpawnInfo(ag.Name(), rc.Model, ag.Capabilities().ClientTools)
+	sess.setByokRate(ag.CreditRate(rc.Model))
 	if len(seed) > 0 {
 		sess.transcript = append(sess.transcript, seed...)
 	}
@@ -251,15 +256,15 @@ func (ff *FreeformSession) spawn(ctx context.Context, seed []Message, resumeID s
 	agentSess, err := ag.NewSession(ctx, agent.SessionOpts{
 		WorkDir:        workDir,
 		Role:           agent.RoleImplementer,
-		Model:          ff.rc.Model,
+		Model:          rc.Model,
 		SystemHints:    hints,
 		Permission:     e.cfg.Permission,
 		MaxCredits:     budget * capHeadroom,
 		Tools:          tools,
-		OutputTokenMax: ff.rc.OutputTokenMax,
+		OutputTokenMax: rc.OutputTokenMax,
 		MCPSockPath:    mcpPath,
 		FeatureID:      string(ff.id),
-		SkillDirs:      e.skillDirsFor(ag, backendLabel(ff.backend)),
+		SkillDirs:      e.skillDirsFor(ag, backendLabel(backend)),
 		// No ArtifactPath: there is no document.
 		//
 		// ResumePath and ResumeID are how a freeform conversation survives
@@ -454,6 +459,17 @@ func (ff *FreeformSession) Send(ctx context.Context, msg string) error {
 // diff comments to a card nobody ever talked to) can call it without
 // checking first, and only the first one costs anything.
 func (ff *FreeformSession) Kickoff(ctx context.Context) error {
+	return ff.KickoffWith(ctx, "")
+}
+
+// KickoffWith is Kickoff with the person's own opening message, verbatim:
+// the text a session was started with, which the card itself cannot hold
+// (it keeps a line-sized title and one-liner, domain.SplitFreeform). A
+// session started from its first message wants every line of that message
+// as its first turn, not the title it was shortened to. Empty falls back
+// to the card's title and one-liner, which is all a card minted elsewhere
+// (the TUI's form, a restart before the first turn) has to go on.
+func (ff *FreeformSession) KickoffWith(ctx context.Context, opening string) error {
 	ff.mu.Lock()
 	sess := ff.sess
 	ff.mu.Unlock()
@@ -464,7 +480,10 @@ func (ff *FreeformSession) Kickoff(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	brief := strings.TrimSpace(f.Title + "\n\n" + f.OneLiner)
+	brief := strings.TrimSpace(opening)
+	if brief == "" {
+		brief = strings.TrimSpace(f.Title + "\n\n" + f.OneLiner)
+	}
 	if brief == "" {
 		return nil
 	}
@@ -807,7 +826,7 @@ func (e *Engine) dispatchFreeformClientTool(ff *FreeformSession, sess *Session, 
 // that can continue its own conversation is asked to (SessionOpts.ResumeID);
 // one that cannot is handed the transcript instead (freeformReplayHint).
 func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnapshot) {
-	rc, backend := e.resolveRole(f.Profile, agent.RoleImplementer)
+	rc, backend := e.sessionRole(f)
 	sctx, cancel := context.WithCancel(context.Background())
 	sess := &Session{
 		Feature:     f,

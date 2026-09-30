@@ -97,3 +97,34 @@ func TestCloseFreeformRefusesEveryOtherKind(t *testing.T) {
 		t.Errorf("the refused close moved the card to %q", got.Stage)
 	}
 }
+
+// TestASessionKeepsTheModelItWasGiven: the agent and model a person chose
+// for a freeform card's session are the card's, read back as written and
+// changeable afterwards — the switch a session offers mid-conversation.
+func TestASessionKeepsTheModelItWasGiven(t *testing.T) {
+	s := openStore(t)
+	ctx := context.Background()
+	f := freeformFeat(1, "tidy the cli help text")
+	f.SessionBackend, f.SessionModel = "codex", "gpt-5"
+	if err := s.CreateFeature(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SessionBackend != "codex" || got.SessionModel != "gpt-5" {
+		t.Fatalf("read back %q/%q, want codex/gpt-5", got.SessionBackend, got.SessionModel)
+	}
+	got.SessionBackend, got.SessionModel = "claude", "claude-sonnet-5-5"
+	if err := s.UpdateFeature(ctx, &got); err != nil {
+		t.Fatal(err)
+	}
+	again, err := s.GetFeature(ctx, f.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.SessionBackend != "claude" || again.SessionModel != "claude-sonnet-5-5" {
+		t.Errorf("after the switch read back %q/%q, want claude/claude-sonnet-5-5", again.SessionBackend, again.SessionModel)
+	}
+}

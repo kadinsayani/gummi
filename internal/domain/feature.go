@@ -327,6 +327,16 @@ type Feature struct {
 	Slug     string // allowlist-sanitized, used in branch and file names
 	Stage    Stage
 	Profile  string // profile name mapping roles to agent configs
+	// SessionBackend and SessionModel are the agent and model a freeform
+	// card's session runs on, chosen by the person rather than read from
+	// a profile (DESIGN §19.8). Both empty means the profile's
+	// implementer, which is what every freeform card did before a session
+	// could pick its own. A card in the workflow never carries either:
+	// its stages take their agents from its profile, and Validate refuses
+	// a stage card that names one, so "stages come from the profile" is a
+	// fact of the data and not a convention of the readers.
+	SessionBackend string
+	SessionModel   string
 	// GateApproval is who crosses this card's gates on an unattended
 	// resume: GateAttended (default) or GateAutopilot.
 	// Persisted at creation so a `resume` that doesn't re-pass
@@ -926,6 +936,9 @@ func (f *Feature) Validate() error {
 	}
 	if f.Stage == StageOpen && f.kind() != KindFreeform {
 		return fmt.Errorf("feature %s: stage %s is a freeform card's, not a %s's", f.ID, StageOpen, f.kind())
+	}
+	if (f.SessionBackend != "" || f.SessionModel != "") && f.kind() != KindFreeform {
+		return fmt.Errorf("feature %s: a %s takes its agents from its profile, not a session model", f.ID, f.kind())
 	}
 	if f.Budget.Envelope < 0 {
 		return fmt.Errorf("feature %s: negative budget", f.ID)
