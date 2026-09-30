@@ -113,6 +113,11 @@ function dialog (card, a, { ask = null } = {}) {
           if (confirms.length) req.confirm = confirms.join(' ')
           error.hidden = true
           go.disabled = true
+          // a landing sent with no message waits on a drafting pass, a
+          // model call that can take a minute: the dialog says so
+          const msg = fields.get('message')
+          const drafting = !!msg?.drafting && !req.message
+          if (drafting) { msg.drafting(true); go.textContent = 'Drafting…' }
           try {
             await send(card.id, a, req)
             return true
@@ -127,6 +132,10 @@ function dialog (card, a, { ask = null } = {}) {
             return false
           } finally {
             go.disabled = false
+            if (drafting) {
+              msg.drafting(false)
+              if (!asked) go.textContent = cap(a.label)
+            }
           }
         }
       }
@@ -147,13 +156,30 @@ function fieldFor (card, a, need) {
     const landing = /^(merge|squash)$/.test(a.id)
     const ta = h('textarea', { id: 'action-input', testid: 'action-input', value: def, rows: landing ? 8 : 4, spellcheck: 'true' })
     const hint = landing ? h('span', { class: 'fh', testid: 'action-hint' }, messageHint(a, def ? 'default' : 'none')) : null
+    let before = null // the hint's words while a draft is being written
     return {
       el: h('label', { class: 'field' }, label, ta, hint),
       value: () => ({ message: ta.value.trim() }),
       focus: () => ta.focus(),
       // the draft the server stopped to have read is in the box now: the
       // hint says so rather than that nothing was drafted
-      drafted: () => { if (hint) clear(hint).append(messageHint(a, 'drafted')) }
+      drafted: () => { if (hint) { before = null; clear(hint).append(messageHint(a, 'drafted')) } },
+      // while gummi drafts the message the box is not for typing and the
+      // hint says what is being waited on; a reply that brought no draft
+      // puts the hint back as it was
+      drafting: landing
+        ? (on) => {
+            ta.readOnly = on
+            if (on) {
+              before = hint.textContent
+              hint.classList.add('busy')
+              clear(hint).append(h('span', { class: 'spinner', 'aria-hidden': 'true' }), 'gummi is drafting the message — this can take a minute.')
+            } else {
+              hint.classList.remove('busy')
+              if (before !== null) { clear(hint).append(before); before = null }
+            }
+          }
+        : null
     }
   }
   if (need === 'number') {

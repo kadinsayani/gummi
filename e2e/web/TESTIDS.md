@@ -75,7 +75,8 @@ server's question (a 202) — verbatim, line breaks kept; an action that asks a
 yes is sent bare first and never pre-confirmed, and its yes is the token the
 question came with), `action-input` (the field its `needs` asks for,
 prefilled with its default), `action-hint` (under a landing's or a squash's
-message: where it came from and what it becomes), `action-card-<ID>` (a card in the dependency
+message: where it came from and what it becomes, or — with a spinner, the box read-only and
+`action-confirm` saying "Drafting…" — that gummi is drafting it), `action-card-<ID>` (a card in the dependency
 picker), `action-cards-filter`, `action-error` (the board's refusal, in the
 dialog), `action-confirm`, `action-cancel`.
 

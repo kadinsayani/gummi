@@ -554,6 +554,7 @@ table.passes{width:100%;border-collapse:collapse;font-size:12.5px;font-variant-n
 .field textarea{min-height:90px;resize:vertical}
 .field .fl{color:var(--fg2);font-weight:500}
 .field .fh{font-size:12px;color:var(--fg3)}
+.field .fh.busy{display:flex;align-items:center;gap:8px}
 .field .ferr,.aerr{font-size:12.5px;color:var(--err);margin:0}
 .field.bad input,.field.bad textarea,.field.bad select{border-color:var(--err)}
 .aform{display:flex;flex-direction:column;gap:12px}

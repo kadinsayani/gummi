@@ -144,6 +144,24 @@ test.describe('a verified card', () => {
     await expect(page.getByTestId('action-input')).toHaveValue(/^feat: land /);
     await expect(page.getByTestId('action-hint')).toContainText('the one commit the branch becomes');
     await expect(page.getByTestId('action-hint')).not.toContainText(/lands|Nothing was drafted/);
+    // sent with no message, the squash waits on a drafting pass: the
+    // dialog says it is drafting until the draft comes back into the box
+    await page.getByTestId('action-input').fill('');
+    let release!: () => void;
+    const held = new Promise<void>((r) => { release = r; });
+    await page.route(`**/api/cards/${id}/actions/squash`, async (route) => { await held; await route.continue(); });
+    await page.getByTestId('action-confirm').click();
+    await expect(page.getByTestId('action-confirm')).toHaveText('Drafting…');
+    await expect(page.getByTestId('action-confirm')).toBeDisabled();
+    await expect(page.getByTestId('action-hint')).toContainText('gummi is drafting the message');
+    await expect(page.getByTestId('action-input')).not.toBeEditable();
+    await shot(page, info, 'action-drafting');
+    release();
+    await expect(page.getByTestId('action-input')).toHaveValue(/^feat: land /);
+    await expect(page.getByTestId('action-hint')).toContainText('Drafted by gummi just now');
+    await expect(page.getByTestId('action-confirm')).toHaveText('Squash');
+    await expect(page.getByTestId('action-input')).toBeEditable();
+    await page.unroute(`**/api/cards/${id}/actions/squash`);
     await page.getByTestId('action-cancel').click();
     await menu(page, 'merge');
     await page.getByTestId('action-confirm').click();
