@@ -10,6 +10,7 @@
 import { $, h, clear, clock, dur, cr, initials, ROLE, decisionWord, decisionColor, plural } from './dom.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { on, state, row } from './store.js?v=__ASSET_V__'
+import { draftHero } from './session.js?v=__ASSET_V__'
 
 const nodes = new Map() // item key -> { sig, el }
 const groups = new Map() // group key -> { el, body, summary }
@@ -17,7 +18,7 @@ const openGroups = new Set() // folded groups a person opened, by key
 let shownFor = null
 
 export function initThread () {
-  on(['thread', 'sel', 'card'], render)
+  on(['thread', 'sel', 'card', 'sessionDraft'], render)
   on(['live'], () => { if (state.thread && !state.thread.items.length) render() })
   on(['live', 'card', 'board'], renderLive)
   $('#thread-items').addEventListener('toggle', (e) => {
@@ -38,6 +39,7 @@ function render () {
     shownFor = state.sel
   }
   const t = state.thread
+  if (!state.sel && state.sessionDraft) { placeholder(box, draftHero()); return }
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
   if (!t.items.length) {
     if (t.gone) {
@@ -145,7 +147,7 @@ function groupNode (grp, last) {
     ? [st.role && st.role !== st.stage ? st.role : (st.role ? '' : ROLE[st.stage] || ''), st.model, st.exited && verdict ? verdict : null].filter(Boolean)
     : [plural(count, 'event'), verdict || receipt?.receipt?.text || receipt?.text, st.credits ? `${cr(st.credits)} cr` : null].filter(Boolean)
   // a freeform card's one conversation is headed as its live block is
-  const stageName = st.stage === 'open' ? 'freeform' : st.stage
+  const stageName = st.stage === 'open' ? 'session' : st.stage
   const name = st.flavor && !/^(stage|work)$/.test(st.flavor) ? `${stageName} · ${st.flavor}` : stageName
   clear(g.summary).append(h('div', { class: 'ev-stage' },
     last ? null : h('span', { class: 'fold', 'aria-hidden': 'true' }, '▸'),
@@ -328,7 +330,7 @@ function renderLive () {
           l.spent ? h('span', { class: 'spent' }, `${cr(l.spent)} cr`) : null))
       }
       if (l.err) parts.push(h('div', { class: 'live badc', testid: 'live-error' }, l.err))
-      for (const [k, label] of [['consult', 'consult · read-only'], ['freeform', 'freeform']]) {
+      for (const [k, label] of [['consult', 'consult · read-only'], ['freeform', 'session']]) {
         const c = l[k]
         if (!c || !(c.turns?.length || c.streaming || c.busy || c.sending || c.err)) continue
         // headed as the settled turns are: the conversation, then its agent

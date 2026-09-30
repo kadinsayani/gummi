@@ -26,7 +26,7 @@ function render (pane, entry, ctx) {
   const s = entry.data
   if (!s || s.none) {
     pane.append(h('div', { class: 'empty', testid: 'spec-none' }, h('b', null, 'No spec'),
-      s?.why || (ctx.card?.stage === 'open' ? 'A freeform card carries no document. Its conversation is the context.' : 'The plan stage writes it onto the card’s branch.')))
+      s?.why || (ctx.card?.stage === 'open' ? 'A session carries no document. Its conversation is the context.' : 'The plan stage writes it onto the card’s branch.')))
     return
   }
   const lines = String(s.markdown || '').replace(/\r\n?/g, '\n').split('\n')

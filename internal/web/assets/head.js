@@ -6,17 +6,22 @@ import { $, h, icon, clear, append, kindTag, STAGES, cr } from './dom.js?v=__ASS
 import { on, state, row } from './store.js?v=__ASSET_V__'
 import { openMenu, openView } from './views.js?v=__ASSET_V__'
 import { runAction } from './actions.js?v=__ASSET_V__'
+import { draftHead, writeSpecButton } from './session.js?v=__ASSET_V__'
 
 let ctx = {}
 
 export function initHead (c) {
   ctx = c
-  on(['card', 'sel', 'board', 'cardErr', 'rightHidden', 'view'], render)
+  on(['card', 'sel', 'board', 'cardErr', 'rightHidden', 'view', 'sessionDraft'], render)
 }
 
 function render () {
   const el = $('#head')
   clear(el)
+  if (!state.sel && state.sessionDraft) {
+    append(el, draftHead())
+    return
+  }
   const c = state.card || row(state.sel)
   if (!c) {
     el.append(h('div', { class: 'head-row' }, h('h1', { testid: 'card-title' }, !state.sel ? 'No card open' : state.gone === state.sel ? `${state.sel} · deleted` : state.sel)))
@@ -35,6 +40,7 @@ function render () {
       h('span', { class: 'cid', testid: 'card-id' }, c.id),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
+        writeSpecButton(state.card),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn,
         h('button', { class: ['iconbtn', panelOpen && 'on'], testid: 'toggle-panel', title: 'Show or hide the document panel (])', 'aria-label': 'Toggle document panel', 'aria-pressed': String(panelOpen), type: 'button', onclick: ctx.togglePanel }, icon('panel')))),
@@ -72,10 +78,10 @@ export function openActions (line = '') {
 }
 
 function stages (c) {
-  // a freeform card has no stages at all, closed or not: ticking the
-  // workflow's would claim a plan, an implement and a verify it never had
+  // a session has no stages at all, closed or not: ticking the workflow's
+  // would claim a plan, an implement and a verify it never had
   if (c.stage === 'open' || c.kind === 'freeform') {
-    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, c.stage === 'open' ? '◆ freeform · no stages, no gates' : '◆ freeform · closed'))
+    return h('span', { class: 'stages', testid: 'card-stages' }, h('button', { class: 'cur st-open', type: 'button' }, c.stage === 'open' ? '◆ session · no stages' : '◆ session · closed'))
   }
   const idx = STAGES.indexOf(c.stage)
   return h('span', { class: 'stages', testid: 'card-stages' }, STAGES.map((s, i) => [
@@ -95,6 +101,14 @@ function stages (c) {
 function spend (c) {
   const env = c.envelope || 0
   const pct = env ? Math.min(100, (c.spend / env) * 100) : 0
+  // on a session the budget is one click away, since running out of it is
+  // how a session stops: the card's own envelope action raises it
+  const raise = c.session && state.card?.actions?.find(a => a.id === 'envelope')
+  if (raise) {
+    return h('button', { class: ['spend', 'link-spend', env && c.spend > env && 'over'], type: 'button', testid: 'card-spend', title: `${cr(c.spend)} of a ${env || '∞'} credit budget — change it`, onclick: () => runAction(state.card, raise) },
+      h('span', { class: 'bar' }, h('i', { style: { '--pct': pct + '%' } })),
+      h('span', { class: 'mono' }, `${cr(c.spend)} / ${env || '∞'} cr`))
+  }
   return h('span', { class: ['spend', env && c.spend > env && 'over'], testid: 'card-spend', title: env ? `${cr(c.spend)} of a ${env} credit envelope` : 'No envelope' },
     h('span', { class: 'bar' }, h('i', { style: { '--pct': pct + '%' } })),
     h('span', { class: 'mono' }, `${cr(c.spend)} / ${env || '∞'} cr`))

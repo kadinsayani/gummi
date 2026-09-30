@@ -352,6 +352,56 @@ svg.i{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;stro
 .composer .enter{display:flex;align-items:center;gap:6px;min-width:0}
 .composer .enter b{color:var(--fg2);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .composer.blocked .enter b{color:var(--warn)}
+/* a session's composer: the draft's repository, base and budget above the
+   line, and the model picker beside Send (session.js) */
+.draftrow{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:8px 10px 0}
+.draftrow .dsel{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 8px;border-radius:7px;border:1px solid var(--line);background:var(--sunk);font-size:12.5px;color:var(--fg2)}
+.draftrow .dsel select{border:0;background:transparent;outline:0;font-size:12.5px;color:var(--fg);max-width:220px}
+.draftrow .dsel .lbl,.draftrow .dnote-s{font-size:12px;color:var(--fg3)}
+.draftrow .dbtn:hover{border-color:var(--fg4)}
+.draftrow .dbtn b{color:var(--fg);font-weight:600}
+.composer .mslot{margin-left:auto;display:flex;min-width:0}
+.composer .mslot:empty{display:none}
+.composer .mslot + .send{margin-left:0}
+.mbtn{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 8px;border-radius:7px;color:var(--fg2);min-width:0;max-width:280px}
+.mbtn:hover,.mbtn[aria-expanded="true"]{background:var(--sunk)}
+.mbtn .m{color:var(--fg);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mbtn .a{font-size:11px;color:var(--fg3)}
+.mbtn .caret{font-size:10px;color:var(--fg3)}
+.mpick,.spop{position:fixed;z-index:56;background:var(--panel);border:1px solid var(--line2);border-radius:10px;box-shadow:var(--shadow);display:flex;flex-direction:column}
+.mpick{width:min(380px,calc(100vw - 16px));max-height:min(460px,60vh)}
+.mpick .msearch{padding:8px;border-bottom:1px solid var(--line)}
+.mpick .inp,.spop .inp{width:100%;height:32px;border:1px solid var(--line2);border-radius:8px;padding:0 10px;background:var(--bg);outline:0;font-size:13px;color:var(--fg)}
+.mpick .inp:focus,.spop .inp:focus{border-color:var(--accent)}
+.mlist{overflow-y:auto;overscroll-behavior:contain;padding:4px 4px 6px}
+.mgh{display:flex;align-items:baseline;gap:8px;padding:8px 8px 3px;font-size:10.5px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--fg3)}
+.mgh .hint{text-transform:none;letter-spacing:0;font-weight:400;font-size:11px;color:var(--fg4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mrow{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:7px;text-align:left;font-size:13px;color:var(--fg2)}
+.mrow:hover,.mrow:focus-visible{background:var(--sunk);color:var(--fg)}
+.mrow.on{background:var(--band);color:var(--fg)}
+.mrow .m{font-size:12.5px;color:var(--fg)}
+.mrow .sub{margin-left:auto;font-size:11.5px;color:var(--fg3)}
+.mempty{padding:16px;color:var(--fg3);font-size:13px;text-align:center}
+.mfoot-s{padding:8px 12px;border-top:1px solid var(--line);font-size:11.5px;color:var(--fg3)}
+.spop{width:min(280px,calc(100vw - 16px));padding:12px;gap:10px}
+.spop .fl{font-size:12.5px;font-weight:600;color:var(--fg2)}
+.spop .presets{display:flex;flex-wrap:wrap;gap:6px}
+.spop .row{display:flex;gap:6px}
+.spop .fh{margin:0;font-size:12px;color:var(--fg3)}
+/* on a phone the model beats the enter hint for the bar's width */
+@media (max-width:760px){.composer .bar:has(.mbtn) .enter{display:none}.mbtn{max-width:none;flex:1;justify-content:flex-start}}
+.link-spend{border-radius:6px;padding:2px 6px;margin:-2px -6px}
+.link-spend:hover{background:var(--sunk)}
+.draft-hero{display:flex;flex-direction:column;align-items:center;gap:12px;padding:12vh 24px 24px;text-align:center}
+.draft-hero b{font-size:21px;font-weight:600;color:var(--fg)}
+.draft-hero p{margin:0;max-width:520px;color:var(--fg3);font-size:13.5px}
+.draft-hero .starters{display:flex;flex-wrap:wrap;gap:8px;justify-content:center}
+.rail-foot .newsession{border-style:solid;border-color:var(--accent);color:var(--accent);font-weight:500}
+.rail-foot .newsession:hover{background:var(--accent-soft)}
+.spec-body{display:flex;flex-direction:column;gap:14px}
+.spec-body .spec-about{margin:0;color:var(--fg2);font-size:13.5px}
+.spec-body .fh{font-size:12px;color:var(--fg3)}
+.spec-err{margin:0;color:var(--err);font-size:13px}
 .cnote{padding:0 14px 8px;font-size:12.5px;color:var(--warn)}
 .cnote.info{color:var(--fg2)}
 .cnote.err{color:var(--err)}

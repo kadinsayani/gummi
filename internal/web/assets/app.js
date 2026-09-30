@@ -21,6 +21,7 @@ import { initHead } from './head.js?v=__ASSET_V__'
 import { initThread, jumpToStage } from './thread.js?v=__ASSET_V__'
 import { initDecision } from './decision.js?v=__ASSET_V__'
 import { initComposer } from './composer.js?v=__ASSET_V__'
+import { initSession, newSession } from './session.js?v=__ASSET_V__'
 import { initPanel, setTab, togglePanel } from './panel.js?v=__ASSET_V__'
 import { initMobile } from './mobile.js?v=__ASSET_V__'
 import { initKeys } from './keys.js?v=__ASSET_V__'
@@ -103,6 +104,7 @@ async function startBoard () {
     togglePanel,
     jumpToStage,
     refresh,
+    refreshBoard: () => loadBoard(),
     clearComposer: () => {}
   }
   setViewContext(() => ({
@@ -116,11 +118,12 @@ async function startBoard () {
     refreshBoard: loadBoard
   }))
   initTop({ nextNeeding: () => nextNeeding(toast), palette: () => palette(ctx.select), keysHelp, toggleRail })
-  initRail({ select: ctx.select, unpair })
+  initRail({ select: ctx.select, unpair, newSession })
   initHead(ctx)
   initThread()
   initDecision(ctx)
   initComposer(ctx)
+  initSession(ctx)
   initPanel(ctx)
   initMobile()
   initSelection()

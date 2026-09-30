@@ -49,7 +49,7 @@ and inside it `approval-person`, `approval-device`, `approval-source`,
 | `rail-group-<status>` | `needs`, `running`, `paused`, `idle`, `todo`, `done` |
 | `rail-row-<ID>` | a card row; `data-status`, `aria-current="true"` when open |
 | `rail-more-done`, `rail-empty` | "Show all N" landed; no cards / no match |
-| `rail-foot`, `rail-new`, `rail-agent`, `rail-fleet`, `rail-more` | foot buttons |
+| `rail-foot`, `rail-new-session`, `rail-new`, `rail-agent`, `rail-fleet`, `rail-more` | foot buttons (`rail-new-session` opens a session draft, `rail-new` the new-card form) |
 | `rail-more-menu`, `menu-goals`, `menu-stacks`, `menu-ingest`, `menu-bugs`, `menu-doctor`, `menu-push`, `menu-unpair` | the More menu |
 
 ## Resume offer
@@ -107,6 +107,10 @@ dialog), `action-confirm`, `action-cancel`.
 | `decision-carry` | "+ N diff comments" on an answer that takes them |
 | `nextup-slot`, `nextup` | "X also needs you" chip after an answer |
 | `dock`, `composer`, `composer-input`, `composer-says`, `composer-send` | composer; `composer-says` is the enter line (the server's reading of the line, or the decision's answer) |
+| `composer-model`, `model-picker-btn` | a session's model beside Send (a draft's, or an open session's); absent on a card in the workflow |
+| `model-picker`, `model-search`, `model-<agent>-<model>`, `model-typed-<agent>`, `model-recent-<agent>-<model>` | the picker: search or type an id; a suggested model (`default` for the agent's own), a typed id, a recent pair |
+| `composer-draft`, `draft-repo`, `draft-base`, `draft-budget`, `draft-budget-pop`, `draft-budget-<n>`, `draft-budget-input` | a session draft's row above the line: repository, base, budget (`0` is uncapped) |
+| `draft-hero`, `draft-starter`, `draft-cancel` | a session draft's empty conversation, its starter lines, and leaving the draft |
 | `composer-note` | a line about the last send: handed back mid-turn, or refused |
 
 ## Panel

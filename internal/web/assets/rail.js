@@ -1,7 +1,8 @@
 // rail.js — the card rail: the board's rows grouped by status (in the
 // server's order within a group), a filter and kind chips, a compact form
 // below 1280px or on `[`, and the foot that opens the board's other
-// surfaces (new card, board agent, fleet stats, and the More menu).
+// surfaces (new session, new card, board agent, fleet stats, and the More
+// menu).
 
 import { $, h, icon, clear, kindTag, needsColor, needsWord, GLYPH, STAGES, cr, isMobile, storage } from './dom.js?v=__ASSET_V__'
 import { on, set, state, rows } from './store.js?v=__ASSET_V__'
@@ -20,7 +21,7 @@ const DONE_SHOWN = 3
 
 let selectCard = () => {}
 
-export function initRail ({ select, unpair }) {
+export function initRail ({ select, unpair, newSession }) {
   selectCard = select
   $('#filter-icon').replaceWith(icon('search'))
   $('#filter').addEventListener('input', (e) => set({ filter: e.target.value.toLowerCase().trim() }))
@@ -37,7 +38,7 @@ export function initRail ({ select, unpair }) {
     const b = e.target.closest('.chip')
     if (b) set({ kind: b.dataset.k })
   })
-  renderFoot(unpair)
+  renderFoot(unpair, newSession)
   on(['board', 'sel', 'filter', 'kind', 'doneAll'], renderRail)
   on(['railManual'], applyRail)
   window.addEventListener('resize', applyRail)
@@ -101,7 +102,7 @@ function renderRail () {
         : null))
   }
   if (!box.children.length) {
-    box.append(h('div', { class: 'empty', testid: 'rail-empty' }, all.length ? 'No cards match.' : h('span', null, h('b', null, 'No cards yet'), h('br'), 'Start one with New card.')))
+    box.append(h('div', { class: 'empty', testid: 'rail-empty' }, all.length ? 'No cards match.' : h('span', null, h('b', null, 'No cards yet'), h('br'), 'Start with New session, or New card for work that walks the stages.')))
   }
   box.scrollTop = top
   box.querySelector('.row.sel')?.scrollIntoView?.({ block: 'nearest' })
@@ -129,7 +130,7 @@ function rowEl (r) {
   h('span', { class: 't' }, r.title),
   h('span', { class: 'id' }, r.id),
   h('span', { class: 'meta' },
-    r.stage === 'open' || r.kind === 'freeform' ? h('span', { class: 'ff' }, 'freeform') : strip(r.stage),
+    r.stage === 'open' || r.kind === 'freeform' ? h('span', { class: 'ff' }, 'session') : strip(r.stage),
     badge,
     r.waits?.length ? h('span', { class: 'waits' }, `waits on ${r.waits.join(', ')}`) : null,
     r.stack ? h('span', { class: ['badge stack', r.stack.stale && 'stale'], title: r.stack.name }, `stack ${r.stack.pos + 1} of ${r.stack.of}`) : null,
@@ -146,7 +147,7 @@ function strip (stage) {
   }))
 }
 
-function renderFoot (unpair) {
+function renderFoot (unpair, newSession) {
   const foot = $('#rail-foot')
   const more = h('button', { testid: 'rail-more', title: 'More', 'aria-haspopup': 'menu', 'aria-expanded': 'false', type: 'button' }, icon('more'), h('span', { class: 'lbl' }, 'More'))
   more.addEventListener('click', () => {
@@ -163,6 +164,7 @@ function renderFoot (unpair) {
     openMenu(more, items, { up: true, testid: 'rail-more-menu' })
   })
   foot.append(
+    h('button', { class: 'newcard newsession', testid: 'rail-new-session', title: 'New session: one agent in its own worktree, no stages', type: 'button', onclick: () => newSession?.() }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), h('span', { class: 'lbl' }, 'New session')),
     h('button', { class: 'newcard', testid: 'rail-new', title: 'New card', type: 'button', onclick: () => openView('newcard') }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), h('span', { class: 'lbl' }, 'New card')),
     h('button', { testid: 'rail-agent', title: 'Board agent', type: 'button', onclick: () => openView('agent') }, icon('agent'), h('span', { class: 'lbl' }, 'Board agent'), h('span', { class: 'sub', id: 'agent-sub' })),
     h('button', { testid: 'rail-fleet', title: 'Fleet stats', type: 'button', onclick: () => openView('fleet') }, icon('fleet'), h('span', { class: 'lbl' }, 'Fleet stats'), h('span', { class: 'sub' }, '7 days')),

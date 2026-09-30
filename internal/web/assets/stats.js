@@ -21,7 +21,7 @@ function render (pane, entry, ctx) {
     // a freeform card has turns, not stage passes: say so rather than
     // "nothing has run" beside a head that shows what it spent
     pane.append(ctx.card?.stage === 'open'
-      ? h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'No stage passes'), 'A freeform card works in turns, not stages. What it has spent is in its head.')
+      ? h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'No stage passes'), 'A session works in turns, not stages. What it has spent is in its head.')
       : h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'Nothing has run yet'), 'Passes and their credits appear here once a stage starts.'))
     return
   }

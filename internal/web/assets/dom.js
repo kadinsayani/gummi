@@ -82,7 +82,7 @@ export function icon (name) {
 // ---- shared words ----
 export const STAGES = ['todo', 'plan', 'implement', 'verify', 'done']
 export const GLYPH = { todo: '○', plan: '●', implement: '●', verify: '◐', done: '✔', open: '◆' }
-export const ROLE = { plan: 'architect', implement: 'implementer', verify: 'verify', open: 'freeform' }
+export const ROLE = { plan: 'architect', implement: 'implementer', verify: 'verify', open: 'session' }
 
 // kindTag is the rail's short kind: the card id's prefix (FD, BG, RS, FF, GL).
 export function kindTag (row) {

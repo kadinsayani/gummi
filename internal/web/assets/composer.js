@@ -10,6 +10,9 @@
 // A sent line can come back: "busy" (the agent is mid-turn) puts it back in
 // the field with a note, "menu" opens the card's actions, "newcard" opens
 // the new-card form seeded with it.
+//
+// With a session draft open (session.js) there is no card yet: the line is
+// the session's first message, and sending it creates the session.
 
 import { $, clear } from './dom.js?v=__ASSET_V__'
 import { post, cardPath } from './api.js?v=__ASSET_V__'
@@ -18,6 +21,7 @@ import { toast } from './toast.js?v=__ASSET_V__'
 import { answer, openDecision, wordsOption, highlight, enterSays, sentence, togglePick } from './decision.js?v=__ASSET_V__'
 import { openActions } from './head.js?v=__ASSET_V__'
 import { openView } from './views.js?v=__ASSET_V__'
+import { startSession } from './session.js?v=__ASSET_V__'
 
 let classify = true // POST …/composer is answered by this server
 let said = null // { id, text, says, route } for the open card
@@ -61,7 +65,7 @@ export function initComposer (ctx) {
   })
   $('#send').addEventListener('click', submit)
   on(['sel'], () => { clearComposer(); said = null; setNote('') })
-  on(['card', 'hi', 'conn', 'picked'], renderSays)
+  on(['card', 'hi', 'conn', 'picked', 'sessionDraft'], renderSays)
   ctx.clearComposer = clearComposer
   ctx.restoreComposer = restore
   // a line enter would otherwise have given to an answer that takes no
@@ -141,9 +145,15 @@ function renderSays () {
   const c = current()
   box.classList.remove('blocked')
   box.dataset.route = c?.route || ''
-  btn.disabled = offline || sending || !state.card
+  btn.disabled = offline || sending || (!state.card && !state.sessionDraft)
+  $('#composer-input').placeholder = placeholder()
   if (offline) {
     says.textContent = 'answers and messages wait until the board reconnects'
+    return
+  }
+  if (state.sessionDraft) {
+    btn.textContent = 'Send'
+    says.textContent = state.draft.trim() ? 'starts the session with this message' : 'type what the session should do'
     return
   }
   // with a decision pinned, a line that answers goes with it
@@ -159,7 +169,33 @@ function renderSays () {
   if (c?.route === 'blocked') { box.classList.add('blocked'); btn.disabled = true }
 }
 
+// placeholder names who a line goes to: a session's agent by name, since a
+// session is one agent and the person picked it.
+function placeholder () {
+  if (state.sessionDraft) return 'What should it do? The first message starts the session'
+  const s = state.card?.session
+  if (s && state.card.stage === 'open') return `Message ${s.backend || 'the agent'}, or type a command`
+  return 'Message the agent, or type a command'
+}
+
+async function submitDraft (text) {
+  if (!text || sending) return
+  if (state.conn !== 'live') { toast('Messages wait until the board reconnects'); return }
+  sending = true
+  renderSays()
+  try {
+    await startSession(text)
+    setNote('')
+  } catch (err) {
+    setNote(sentence(err.data?.error || err.message), 'err')
+  } finally {
+    sending = false
+    renderSays()
+  }
+}
+
 async function submit ({ asLine = false } = {}) {
+  if (state.sessionDraft) return submitDraft(state.draft.trim())
   const d = openDecision()
   const text = state.draft.trim()
   if (d && !text) { answer(); return }
@@ -194,7 +230,7 @@ async function submit ({ asLine = false } = {}) {
     clearComposer()
     setNote('')
     if (r?.card && state.sel === id) set({ card: r.card })
-    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the freeform agent', goalnote: 'Noted on the goal', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
+    const where = { steer: 'Steered the agent', consult: 'Asked a consult session', freeform: 'Sent to the session', goalnote: 'Noted on the goal', verb: 'Ran the command', answer: 'Answered', read: 'Sent — the board reads it to place it' }[r?.route]
     if (where) toast(where)
     ctxRef.refresh?.(id)
   } catch (err) {

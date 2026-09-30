@@ -232,7 +232,7 @@ registerView('fleet', {
     function legend (f) {
       const stages = STAGE_ORDER.filter(s => f.stages.has(s)).concat([...f.stages].filter(s => !STAGE_ORDER.includes(s)))
       return h('ul', { class: 'keyrow legend', testid: 'fleet-legend' },
-        stages.map(s => h('li', null, h('i', { class: ['sw', `st-${s}`], 'aria-hidden': 'true' }), s === 'open' ? 'freeform' : s)),
+        stages.map(s => h('li', null, h('i', { class: ['sw', `st-${s}`], 'aria-hidden': 'true' }), s === 'open' ? 'session' : s)),
         f.running ? h('li', null, h('i', { class: 'sw run', 'aria-hidden': 'true' }), 'still running') : null,
         f.wait ? h('li', null, h('i', { class: 'sw c-you hatch', 'aria-hidden': 'true' }), 'waiting on you') : null,
         f.gate ? h('li', null, h('i', { class: 'dia', 'aria-hidden': 'true' }), 'gate crossed') : null,
