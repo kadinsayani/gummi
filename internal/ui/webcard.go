@@ -481,7 +481,9 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 		// a session runs on the model its person picked, not on a profile
 		// role, so its menu switches the model instead (DESIGN §19.8)
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
-			list = append(list, cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"})
+			list = append(list,
+				cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"},
+				cardAction{id: "writespec", label: "write a spec", why: "continue this work as a feature: the profile's architect plans it from this conversation and the branch so far, and it lands on a verified branch"})
 		}
 	} else {
 		list = append(list, m.cardProfileActions()...)
@@ -546,6 +548,17 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		a.Default = r.F.Repo
 		for _, n := range m.repoNames {
 			a.Choices = append(a.Choices, webapi.Choice{Value: n, Label: n})
+		}
+	case "writespec":
+		a.Needs = webapi.ActionNeedsSpec
+		a.Default = r.F.Title
+		if m.engine != nil {
+			// named by what runs first: the spec's plan stage, whose
+			// architect reads the session's conversation
+			for _, p := range m.engine.CardProfiles(domain.StagePlan) {
+				backend, model := labelBackendModel(p.Backend, p.Model)
+				a.Choices = append(a.Choices, webapi.Choice{Value: p.Name, Label: p.Name, Detail: backend + " · " + model})
+			}
 		}
 	case "model":
 		a.Needs = webapi.ActionNeedsModel

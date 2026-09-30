@@ -1,7 +1,11 @@
 package web
 
 import (
+	"context"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -143,4 +147,64 @@ func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
 	if h.card(f.ID).Session != nil {
 		t.Error("a card in the workflow reports a session model")
 	}
+}
+
+// Writing a spec from a session ends the session with its branch kept and
+// continues its work as a feature: the session's own words are the brief,
+// the feature's branch is cut from the session's tip (so what the session
+// wrote is already on it), and its plan stage runs at once.
+func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
+	fake := agent.NewFake("done")
+	fake.Responder = func(opts agent.SessionOpts, msg string) []agent.Event {
+		if strings.Contains(msg, "flake") {
+			if err := os.WriteFile(filepath.Join(opts.WorkDir, "clock.go"), []byte("package sync\n"), 0o600); err != nil {
+				t.Error(err)
+			}
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}
+	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Find why the retry test flakes", Backend: "codex", Model: "gpt-5"})
+	waitTranscript(t, h, s.ID, "done")
+	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the opening turn never ended")
+		}
+	}
+	session := h.feature(s.ID)
+
+	if !slices.ContainsFunc(h.card(s.ID).Actions, func(a webapi.Action) bool { return a.ID == "writespec" && a.Needs == webapi.ActionNeedsSpec }) {
+		t.Fatalf("a session's menu offers no way to write a spec: %+v", h.card(s.ID).Actions)
+	}
+	budget := 300
+	spec := h.action(s.ID, "writespec", webapi.ActionRequest{Message: "Configurable sync retries", Number: &budget})
+	if spec.Kind != string(domain.KindFeature) || spec.Title != "Configurable sync retries" || spec.ID == s.ID {
+		t.Fatalf("the action answered %s %q (%s), want the new feature", spec.ID, spec.Title, spec.Kind)
+	}
+	if spec.Envelope != budget {
+		t.Errorf("the spec's budget is %d, want %d", spec.Envelope, budget)
+	}
+	if spec.Session != nil {
+		t.Error("the spec reports a session model; its stages take theirs from its profile")
+	}
+
+	closed := h.feature(s.ID)
+	if closed.Stage != domain.StageDone || closed.HandedOffAt.IsZero() {
+		t.Errorf("the session is at %s (handed off %v), want closed by hand-off", closed.Stage, closed.HandedOffAt)
+	}
+	git := func(a ...string) string {
+		out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", h.root}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	// the session keeps its branch; the spec has one of its own, cut from it
+	f := h.feature(spec.ID)
+	git("rev-parse", "--verify", session.BranchName())
+	git("cat-file", "-e", f.BranchName()+":clock.go")
+	if f.BranchName() == session.BranchName() {
+		t.Error("the spec shares the session's branch; it must have its own")
+	}
+	h.waitCard(spec.ID, "the plan stage", func(c webapi.Card) bool { return c.Stage == string(domain.StagePlan) })
 }

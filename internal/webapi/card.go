@@ -146,6 +146,10 @@ const (
 	// ActionNeedsModel: a session's agent and model (ActionRequest.Backend
 	// and ActionRequest.Model), picked from Form.Sessions or typed.
 	ActionNeedsModel ActionNeeds = "model"
+	// ActionNeedsSpec: writing a spec from a session asks for the spec's
+	// title (ActionRequest.Message), its profile (ActionRequest.Profile,
+	// from Choices) and its budget (ActionRequest.Number).
+	ActionNeedsSpec ActionNeeds = "spec"
 )
 
 // Action is one entry in a card's menu.

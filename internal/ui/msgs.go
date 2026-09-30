@@ -511,6 +511,10 @@ type cardCreatedMsg struct {
 	// shell ticks it so the card's branch is cut on the right base.
 	stack domain.StackID
 	warn  string // a dependency edge that could not be written
+	// run starts the card's first stage once it is on the board: a spec
+	// written from a session plans at once, the way the session it
+	// continues was already working.
+	run bool
 	// opening is the text a freeform card was created with, verbatim: its
 	// session's first turn (FreeformSession.KickoffWith), which the card
 	// itself only keeps as a line-sized title and one-liner.

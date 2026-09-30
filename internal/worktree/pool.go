@@ -329,6 +329,15 @@ func (p *Pool) Create(ctx context.Context, f *domain.Feature) (string, error) {
 	return wt.Create(ctx, f)
 }
 
+// CreateFrom is Manager.CreateFrom in the card's repository.
+func (p *Pool) CreateFrom(ctx context.Context, f *domain.Feature, start string) (string, error) {
+	wt, err := p.ManagerFor(ctx, f)
+	if err != nil {
+		return "", err
+	}
+	return wt.CreateFrom(ctx, f, start)
+}
+
 // Attach is Create's counterpart for an adopted card (Manager.Attach).
 func (p *Pool) Attach(ctx context.Context, f *domain.Feature) (string, error) {
 	wt, err := p.ManagerFor(ctx, f)

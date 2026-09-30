@@ -618,3 +618,48 @@ func TestRebaseOnMainAutostashCarriesDirty(t *testing.T) {
 		t.Fatalf("uncommitted edit lost after autostash: %q, %v", content, err)
 	}
 }
+
+// CreateFrom cuts a card's branch at another branch's tip — a spec
+// continuing a session's work (DESIGN §19.8) — and records the fork where
+// that work left main, not main's head: the new card's diff is the whole
+// of the work, and drift is judged from where it really forked.
+func TestCreateFromRecordsTheForkOfTheWorkItContinues(t *testing.T) {
+	root := newRepo(t)
+	fs := &memForkStore{}
+	m, err := NewManager(ctx, root, root, fs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := feature(1, "Session work")
+	tree, err := m.Create(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fork := mustGit(t, root, "merge-base", "HEAD", session.BranchName())
+	writeFile(t, tree, "clock.go", "package sync\n")
+	mustGit(t, tree, "add", ".")
+	mustGit(t, tree, "commit", "-q", "-m", "session turn")
+	tip := mustGit(t, tree, "rev-parse", "HEAD")
+	// main moves on after the session forked
+	writeFile(t, root, "later.txt", "later\n")
+	mustGit(t, root, "add", ".")
+	mustGit(t, root, "commit", "-q", "-m", "main moves on")
+
+	spec := feature(2, "Spec from the session")
+	specTree, err := m.CreateFrom(ctx, spec, tip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(specTree, "clock.go")); err != nil {
+		t.Errorf("the session's work is not on the spec's branch: %v", err)
+	}
+	if got := mustGit(t, root, "rev-parse", spec.BranchName()); got != tip {
+		t.Errorf("the spec's branch is at %s, want the session's tip %s", got, tip)
+	}
+	if got, _ := fs.ForkPoint(ctx, spec.ID); got != fork {
+		t.Errorf("recorded fork = %s, want the session's fork %s", got, fork)
+	}
+	if _, err := m.CreateFrom(ctx, feature(3, "No start"), ""); err == nil {
+		t.Error("CreateFrom with no commit to cut from was accepted")
+	}
+}

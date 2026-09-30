@@ -369,11 +369,33 @@ func (m *Manager) requireWorktree(f *domain.Feature) (string, error) {
 // when it names neither (which is what every card did before bases were
 // selectable).
 func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error) {
+	return m.createAt(ctx, f, "")
+}
+
+// CreateFrom is Create with the new branch cut at start instead of at the
+// card's base: how a spec written from a session (DESIGN §19.8) continues
+// that session's work on a branch of its own. The fork point is still
+// merge-base(base, branch), which for a branch cut from a session's tip is
+// the session's own fork — so the card's diff is the whole of the work,
+// the session's commits included, and drift is judged from where that
+// work actually left the base.
+func (m *Manager) CreateFrom(ctx context.Context, f *domain.Feature, start string) (string, error) {
+	if strings.TrimSpace(start) == "" {
+		return "", fmt.Errorf("%s: no commit to cut its branch from", f.ID)
+	}
+	return m.createAt(ctx, f, start)
+}
+
+func (m *Manager) createAt(ctx context.Context, f *domain.Feature, start string) (string, error) {
 	p, branch, err := m.featurePaths(f)
 	if err != nil {
 		return "", err
 	}
 	base := m.baseRev(ctx, f)
+	from := base
+	if start != "" {
+		from = start
+	}
 	if _, err := runGit(ctx, m.repo, "rev-parse", "--verify", "HEAD"); err != nil {
 		return "", fmt.Errorf("repository has no commits yet; commit something before creating a feature worktree: %w", err)
 	}
@@ -399,7 +421,7 @@ func (m *Manager) Create(ctx context.Context, f *domain.Feature) (string, error)
 	// add -b` without a commit-ish forks from whatever HEAD carries, which
 	// is right only for a card that named no base.
 	add := func() error {
-		_, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p, base)
+		_, err := runGit(ctx, m.repo, "worktree", "add", "-b", branch, "--", p, from)
 		return err
 	}
 	if err := add(); err != nil {
