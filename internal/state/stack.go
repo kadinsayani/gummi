@@ -30,6 +30,12 @@ var ErrStackRepoMismatch = errors.New("card and stack belong to different reposi
 // (whose own cards already share one goal branch).
 var ErrStackNotStackable = errors.New("card kind has no branch to stack")
 
+// ErrStackCardClosed reports an attempt to move a card whose work has left
+// gummi — landed or handed off. It holds its place: the cards that were
+// stacked on it already fork from the base, and lifting it above open
+// cards would name a closed card as what they fork from.
+var ErrStackCardClosed = errors.New("card is closed and keeps its place in the stack")
+
 // CreateStack records a new stack. The caller derives the id, normally
 // from the bottom card's slug via domain.NewStackID.
 func (s *Store) CreateStack(ctx context.Context, st *domain.Stack, at time.Time) error {
@@ -269,6 +275,9 @@ func (s *Store) MoveInStack(ctx context.Context, card domain.FeatureID, pos int)
 	}
 	if f.StackID == "" {
 		return fmt.Errorf("%s is not in a stack", card)
+	}
+	if f.Stage == domain.StageDone || f.LandedSHA != "" {
+		return fmt.Errorf("moving %s: %w", card, ErrStackCardClosed)
 	}
 	return s.AddToStack(ctx, f.StackID, card, pos)
 }

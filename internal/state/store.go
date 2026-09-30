@@ -1622,6 +1622,12 @@ func (s *Store) DeleteFeature(ctx context.Context, id domain.FeatureID) error {
 	if len(deps) > 0 {
 		return fmt.Errorf("deleting %s: %w", id, ErrDependedOn)
 	}
+	// A card leaves its stack the way `stack rm` takes it out — the gap
+	// closed, the cards above moved down — or the stack is left with a hole
+	// ("stack 3 of 2") that nothing renumbers.
+	if err := s.RemoveFromStack(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("deleting %s: %w", id, err)
+	}
 	res, err := s.db.ExecContext(ctx, `DELETE FROM features WHERE id=?`, string(id))
 	if err != nil {
 		return fmt.Errorf("deleting %s: %w", id, err)
