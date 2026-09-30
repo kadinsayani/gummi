@@ -424,6 +424,21 @@ need. Pairing still applies on the tailnet, and `--no-pairing` is refused
 on anything but loopback. See
 [docs/CONFIGURATION.md](docs/CONFIGURATION.md#the-web-host-on-a-tailnet).
 
+**Sessions.** The rail's **New session** opens an empty conversation
+rather than a form. You pick the repository, base and budget in the
+composer, and the model beside Send. The first message you send starts it.
+A session is a freeform card: one agent in its own worktree, with no
+stages and no gates, and it lands on your read of its diff. It runs on
+any model an installed agent offers (claude, codex, copilot, opencode, pi,
+or a headless command). The picker suggests the models your profiles
+already use and takes any id you type. Switching models mid-session keeps
+the conversation. When the work turns out to need a design, **Write a
+spec** in the session's head continues it as a feature: its branch is cut
+from the session's, the profile's architect plans it from the
+conversation, and from there it walks the whole workflow. Profiles only
+ever choose the models for a spec's stages
+([DESIGN §19.8](docs/DESIGN.md#198-sessions-the-model-is-the-sessions-own)).
+
 Once one browser is paired, a new one paired with a `gummi web pair` code
 (or one a browser asked for) only waits: every page at the board shows the
 request — name, browser, address, how it paired — with **Approve** and

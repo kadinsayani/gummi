@@ -3695,6 +3695,81 @@ checks" is a number on a screen rather than a feeling; and a
 checkpoint-commits every turn and by the fourth cycle most of the diff
 against base is already read.
 
+### 19.8 Sessions: the model is the session's own
+
+The web face calls a freeform card a **session**, and treats it as the
+default kind of work rather than the last row of the new-card form: one
+agent, running as itself, in its own worktree, reached from any browser.
+The workflow stays exactly what it was for every card in it; a session is
+how work starts when nobody has asked for a design yet, and **writing a
+spec** is how it enters the graph when somebody does.
+
+**A session picks its own agent and model; a stage never does.** The card
+carries `SessionBackend` and `SessionModel`. Both empty is the profile's
+implementer, which is what every freeform card ran on before, so no row
+needs a migration value. `Feature.Validate` refuses either on a card in
+the workflow. "Stages take their agents from the profile" is therefore a
+fact the data enforces, not a convention every reader has to remember.
+
+**Any installed agent, not only the ones the profiles name.** A board
+starts the backends its profiles route to (§5), so a person picking codex
+on a claude-only workspace would otherwise get the default agent. That
+would be a model nobody chose. `engine.Config.StartAgent` starts a backend
+the first time a session asks for it, and the engine closes the ones it
+started. `sessionAgent` never falls back to the default for a name it
+does not know, which is the one way it differs from `agentFor`.
+
+**There is still no model registry** (see `KnownModels`). The picker
+suggests the ids the workspace's profiles already run on each agent, plus
+the pairs sessions on the board use, and accepts any other id typed in.
+`CheckSessionModel` refuses a pair before it is stored: an unknown agent,
+an agent that needs a model and got none, and the ids the claude CLI would
+refuse at session start. Refusing it then, rather than at the next spawn,
+means a person does not type a message into a session that cannot answer
+it.
+
+**Switching mid-session keeps the conversation, not the backend's.**
+`SwitchSessionModel` refuses a turn in flight, stores the new pair on the
+card and stops the backend between turns, when the worktree is committed.
+It also drops the conversation id the old backend kept, so the next turn
+respawns on the new model with the conversation replayed
+(`freeformReplayHint`) instead of resumed. A conversation id belongs to
+the backend and model that kept it; asking another to resume it is either
+refused or quietly wrong. The thread records the switch as a system line.
+
+**The draft is the new-session form.** On the web, New session opens no
+dialog. The conversation column becomes an empty session. Repository, base
+and budget sit in the composer, and the model picker sits beside Send,
+where it stays for the life of the session. The first message creates
+the card (`POST /api/cards`, kind freeform, no title needed; the title is
+its first line) and is its first turn verbatim (`KickoffWith`). The card
+itself keeps only that first line, so before this a multi-line opening
+was cut to its title.
+
+**Writing a spec continues the work on a branch of the spec's own.** The
+session is handed off: its last turn committed, its branch kept, and the
+one floor it has (open diff comments) checked first. A feature is minted
+with the person's turns as its brief, and its branch is cut from the
+session's tip (`Manager.CreateFrom`). Its fork point is the merge base
+with the card's base, which for such a branch is the session's own fork,
+so the feature's diff is the whole of the work. It then moves into plan,
+whose architect reads that brief and that branch. It walks the whole graph
+from there, like an adopted card (D22).
+
+It does not *adopt* the session's branch. Adoption would make one branch
+two cards' ("one branch, one card", `BranchTaken`), and deleting the
+closed session force-deletes a branch it cut, which would take the spec's
+work with it. A branch of its own is gummi's to rebase, land and clean
+like any feature's. The session's branch is left where a hand-off always
+leaves one.
+
+Deferred: the model picker in the TUI (`SwitchSessionModel` is the
+engine half; the Shell's `switchSessionModel` is shared, so it is a
+binding away); a permission dock for guarded mode, which needs an adapter
+that emits `EventPermission` first (none does); and a terminal and a files
+tab, since a shell in the browser is a new surface under §20.5, not a
+restyle.
+
 ## 20. The web face — the board in a browser
 
 `gummi web` serves the board to a browser as a page of its own: cards on

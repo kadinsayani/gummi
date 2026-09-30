@@ -142,6 +142,14 @@ board keeps the profiles it had and says why (the web Doctor view's
 `profiles:live` line) — and backends are started once, so a new backend
 needs a restart.
 
+Sessions (freeform cards) are the one exception to "the profiles decide
+which backends start". A session picks its own agent and model in the web
+face, and the board starts an installed agent CLI the first time a
+session asks for it, even if no profile names it. The engine closes the
+agents it started. `headless` needs `GUMMI_AGENT_CMD` for this, as it does
+everywhere. A spec's stages still take their agents from the card's
+profile (DESIGN §19.8).
+
 Model ids are forwarded verbatim, so their spelling is the backend's: the
 claude CLI takes `claude-haiku-4-5`, while Copilot's spells the same
 model `claude-haiku-4.5`. `gummi doctor` fails a claude-backed role
