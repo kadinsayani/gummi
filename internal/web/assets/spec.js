@@ -9,7 +9,7 @@ import { h, append, clock, plural } from './dom.js?v=__ASSET_V__'
 import { get, post, cardPath } from './api.js?v=__ASSET_V__'
 import { markdown } from './markdown.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
-import { requestChanges } from './actions.js?v=__ASSET_V__'
+import { changesButton } from './actions.js?v=__ASSET_V__'
 
 export const specTab = {
   name: 'spec',
@@ -67,7 +67,8 @@ function render (pane, entry, ctx) {
     // back (asked first)
     pane.append(h('div', { class: 'pending' },
       h('span', { testid: 'spec-pending' }, `${plural(s.openComments, 'comment')} ${s.openComments === 1 ? 'is' : 'are'} still open here.`),
-      h('button', { class: 'btn', type: 'button', testid: 'spec-request-changes', title: 'Send the open comments to the stage that writes what they are about', onclick: (e) => requestChanges(ctx.id, 'spec', e.currentTarget) }, 'Request changes')))
+      changesButton(ctx.id, 'spec', [ctx.card?.stage, s.rev, s.openComments].join('|'),
+        'Send the open comments to the stage that writes what they are about')))
   }
   pane.append(h('div', { class: 'spec', testid: 'spec' },
     h('nav', { class: 'toc', 'aria-label': 'Sections', testid: 'spec-toc' }, h('h2', null, 'Sections'),

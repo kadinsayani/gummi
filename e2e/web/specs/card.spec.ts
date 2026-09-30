@@ -56,6 +56,10 @@ test('the spec shows sections, notes, checks and a comment box', async ({ paired
   await expect(page.getByTestId('spec-pending')).toHaveText('1 comment is still open here.');
   await page.getByTestId('spec-request-changes').click();
   await expect(page.getByTestId('toast').filter({ hasText: 'with 1 review comment' })).toBeVisible();
+  // the comments stay open until the agent answers them: the button stays
+  // down so the same ones are not sent twice
+  await expect(page.getByTestId('spec-request-changes')).toBeDisabled();
+  await expect(page.getByTestId('spec-request-changes')).toHaveText('Sent');
   expect(m.changes).toEqual(['spec']);
   await shot(page, info, 'spec');
 });
@@ -87,6 +91,8 @@ test('the diff draws files, comments inline, keeps viewed ticks and adds a comme
   await expect(page.getByTestId('changes-question')).toContainText('back to implement');
   await page.getByTestId('changes-go').click();
   await expect(page.getByTestId('toast').filter({ hasText: 'sent back to implement' })).toBeVisible();
+  await expect(page.getByTestId('diff-request-changes')).toBeDisabled();
+  await expect(page.getByTestId('diff-request-changes')).toHaveText('Sent');
   expect(m.changes).toEqual(['diff', 'diff:c0ffee']);
   await shot(page, info, 'diff');
 });

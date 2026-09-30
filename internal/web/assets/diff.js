@@ -11,7 +11,7 @@ import { h, plural, storage } from './dom.js?v=__ASSET_V__'
 import { get, post, del, cardPath } from './api.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { state } from './store.js?v=__ASSET_V__'
-import { requestChanges } from './actions.js?v=__ASSET_V__'
+import { changesButton } from './actions.js?v=__ASSET_V__'
 
 // "Since you last read it": the branch head this browser showed on the
 // previous visit to a card's diff is the baseline, and the toggle asks the
@@ -104,7 +104,8 @@ function render (pane, entry, ctx) {
     pane.append(h('div', { class: 'pending' }, h('span', { testid: 'diff-pending' }, carried
       ? `${plural(d.pendingComments, 'comment')} will go with your next answer.`
       : `${plural(d.pendingComments, 'comment')} on this diff ${d.pendingComments === 1 ? 'is' : 'are'} still open.`),
-    h('button', { class: 'btn', type: 'button', testid: 'diff-request-changes', title: 'Send the open comments to the implementer, or back to plan with a design note', onclick: (e) => requestChanges(ctx.id, 'diff', e.currentTarget) }, 'Request changes')))
+    changesButton(ctx.id, 'diff', [ctx.card?.stage, d.rev, anns.filter(a => !a.resolved).map(a => a.id).sort((a, b) => a - b)].join('|'),
+      'Send the open comments to the implementer, or back to plan with a design note')))
   }
 
   if (onlySince && !files.length) pane.append(h('div', { class: 'empty' }, h('b', null, 'Nothing new'), `No file changed after ${since.slice(0, 7)}.`))

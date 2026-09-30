@@ -262,6 +262,30 @@ function sentence (s) {
   return s ? s[0].toUpperCase() + s.slice(1) : ''
 }
 
+// sentChanges remembers, per card and surface, what "Request changes"
+// last sent: the comments stay open until the agent answers them, so the
+// tab keeps offering the button — and a second press would send the same
+// comments twice. While what the tab shows is what was sent (the same
+// open comments at the same revision and stage) the button reads "Sent"
+// and stays down; a new comment, a resolved one, a new revision or a
+// moved card is something new to send.
+const sentChanges = new Map() // `${id}:${what}` -> the signature sent
+
+// changesButton is the spec and diff tabs' "Request changes" button. sig
+// names what it would send as the tab shows it.
+export function changesButton (id, what, sig, title) {
+  const key = `${id}:${what}`
+  const sent = sentChanges.get(key) === sig
+  return h('button', {
+    class: 'btn',
+    type: 'button',
+    testid: `${what}-request-changes`,
+    title: sent ? 'These comments were sent; the button comes back when something changes' : title,
+    disabled: sent,
+    onclick: (e) => requestChanges(id, what, e.currentTarget, sig)
+  }, sent ? 'Sent' : 'Request changes')
+}
+
 // requestChanges is the spec and diff tabs' "Request changes" — the TUI's
 // R on those surfaces: the card's open comments on what (spec or diff) go
 // to the agent that writes them, POST …/{what}/changes. When one of them
@@ -269,26 +293,33 @@ function sentence (s) {
 // instead — send the card back to that stage? — asked here in its own
 // words; the yes is the token it came with, and sends it again. The
 // board's answer is its own sentence; the broadcast of the same one shows
-// once.
-export async function requestChanges (id, what, btn) {
+// once. Once sent, the button stays down (sentChanges).
+async function requestChanges (id, what, btn, sig) {
+  const key = `${id}:${what}`
+  const sent = () => {
+    sentChanges.set(key, sig)
+    if (btn.isConnected) { btn.textContent = 'Sent'; btn.disabled = true }
+  }
   btn.disabled = true
+  btn.textContent = 'Sending…'
   try {
     const res = await post(cardPath(id, `${what}/changes`), {})
+    sent()
     toast(res?.text || 'Comments sent')
   } catch (err) {
+    btn.disabled = false
+    btn.textContent = 'Request changes'
     if (err.status === 409 && err.data?.error === 'confirm') {
-      confirmChanges(id, what, err.data)
+      confirmChanges(id, what, err.data, sent)
     } else {
       toast(err.notBuilt ? 'Requesting changes from the web is not available yet' : err.message, { err: !err.notBuilt })
     }
-  } finally {
-    btn.disabled = false
   }
 }
 
 // confirmChanges asks the send-back the board stopped on, and sends the
 // request again with the yes to it.
-function confirmChanges (id, what, ask) {
+function confirmChanges (id, what, ask, sent) {
   const error = h('p', { class: 'aerr', testid: 'changes-error', role: 'alert', hidden: true })
   openModal({
     title: `Request changes · ${id}`,
@@ -306,6 +337,7 @@ function confirmChanges (id, what, ask) {
         onClick: async () => {
           try {
             const res = await post(cardPath(id, `${what}/changes`), { confirm: ask.confirm })
+            sent()
             toast(res?.text || 'Sent back')
             return true
           } catch (err) {
