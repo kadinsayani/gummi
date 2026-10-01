@@ -118,13 +118,16 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	case in.attn == attnGate:
 		kind = decisionGate
 	}
-	if kind == decisionIdle && r.F.IsFreeform() && r.F.Stage == domain.StageOpen && !in.freeformBusy {
-		// A session with nothing running has nothing to decide: it is a
-		// conversation, and the composer is the next turn of it. Pinning
-		// "choose what happens next" there turned every line into an
-		// answer to a menu (DESIGN §19.8). Its endings — land, hand off,
-		// write a spec — are in its menu; a turn in flight still pins its
-		// stop, and a failure or an empty budget still asks.
+	if kind == decisionIdle && r.F.IsFreeform() && r.F.Stage == domain.StageOpen {
+		// A session has nothing to decide in the composer, running or
+		// not: it is a conversation, and the composer is the next turn
+		// of it. Pinning "choose what happens next" there turned every
+		// line into an answer to a menu (DESIGN §19.8), and pinning
+		// "stop it here" while a turn runs only duplicated the stop
+		// already in that menu — on the web face it read as an answer
+		// given "against" a branch revision nothing was actually being
+		// decided against. A failure or an empty budget still asks,
+		// since those are real decisions.
 		return nil
 	}
 	question := decisionQuestion(kind, r, in)
@@ -487,12 +490,6 @@ func decisionQuestion(kind decisionKind, r featureRow, in nextInput) string {
 			// reattach the conversation is in the picker just below
 			// (talkAction), where enter's own label already says so.
 			return "no agent attached — choose what happens next."
-		}
-		if in.freeformBusy {
-			// a freeform card's turn is in flight: its only answer is to
-			// stop it (stageActions), and the idle sentence would say
-			// nothing is running one line above the turn that is
-			return "the agent is working on a turn — let it finish, or stop it here."
 		}
 		if r.F.IsGoal() && r.F.Stage == domain.StageImplement {
 			// a goal's implement stage has no session of its own: its cards

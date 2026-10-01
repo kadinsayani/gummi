@@ -10,9 +10,9 @@ import (
 	"github.com/morphis/gummi/internal/domain"
 )
 
-// While a freeform turn runs, the decision offers only "stop this turn",
-// and the menu offers nothing that ends the branch either: no merge,
-// squash or hand-off over whatever the agent has half-written.
+// While a freeform turn runs, the menu offers only "stop this turn" among
+// its endings: no merge, squash or hand-off over whatever the agent has
+// half-written.
 func TestABusyFreeformCardsMenuOffersNoLanding(t *testing.T) {
 	busy := nextInput{stage: domain.StageOpen, kind: domain.KindFreeform, hasWorktree: true, freeformBusy: true}
 	r := freeformRow(12, "drop the leaked pty fd", true)

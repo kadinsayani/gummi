@@ -162,8 +162,7 @@ func (m *Shell) webWorkflowDecision(r featureRow, d *threadDecision) *webOpenDec
 
 // webDecisionWord is the word the page heads a decision with, and its
 // tone: the kind alone cannot say it — a verify decision is a landing on
-// a passed verify and a failure on a failed one, and an idle card whose
-// freeform turn is in flight is working, not idle.
+// a passed verify and a failure on a failed one.
 func (m *Shell) webDecisionWord(kind webapi.DecisionKind, r featureRow) (word, tone string) {
 	switch kind {
 	case webapi.DecisionGate:
@@ -191,9 +190,6 @@ func (m *Shell) webDecisionWord(kind webapi.DecisionKind, r featureRow) (word, t
 		return "stage failed", "err"
 	case webapi.DecisionClosed:
 		return "closed", ""
-	}
-	if m.freeformTurnBusy(r) {
-		return "working", "info"
 	}
 	return "idle", ""
 }

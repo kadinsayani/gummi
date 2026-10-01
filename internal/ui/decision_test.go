@@ -1018,15 +1018,12 @@ func TestGateAnswerCrosses(t *testing.T) {
 	}
 }
 
-// A freeform card mid-turn offers one answer — stop the turn — and its
-// question says the turn is running, never that nothing is.
+// A freeform card mid-turn offers one answer — stop the turn — through its
+// menu; it is not pinned as a composer decision, which would have nothing
+// honest to say it was raised "against" (there is no revision in question,
+// just a turn to let finish or stop).
 func TestAFreeformTurnInFlightIsNotCalledIdle(t *testing.T) {
-	r := featureRow{F: domain.Feature{ID: "FF-001", Kind: domain.KindFreeform, Stage: domain.StageOpen}}
 	in := nextInput{stage: domain.StageOpen, freeformBusy: true}
-	q := decisionQuestion(decisionIdle, r, in)
-	if strings.Contains(q, "nothing is running") || !strings.Contains(q, "working on a turn") {
-		t.Errorf("question = %q", q)
-	}
 	if acts := stageActions(in); len(acts) != 1 || acts[0].id != "pause" {
 		t.Errorf("answers = %+v, want the one that stops the turn", acts)
 	}
