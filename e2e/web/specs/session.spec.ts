@@ -57,6 +57,29 @@ test('a session starts from its first message, on the model picked beside Send',
   await expect(page.locator('#pane')).toBeEmpty();
 });
 
+// The model picker's search input takes focus as it opens, which on a phone
+// raises the keyboard — and a headless browser stands in for that by
+// shrinking the viewport, the same way typing-on-a-phone does. That shrink
+// is a window resize, which the popover also closes on when the page moves
+// out from under it; it must tell its own keyboard apart from that.
+test('the model picker survives the keyboard it raises, on a phone', async ({ pairedPage: page }, info) => {
+  test.skip(info.project.name !== 'phone', 'the keyboard is a phone’s');
+  await expect(page.getByTestId('conn')).toHaveAttribute('data-state', 'live');
+  await page.getByTestId('mnav-cards').click();
+  await page.getByTestId('rail-new-session').click();
+  await expect(page.getByTestId('draft-hero')).toBeVisible();
+
+  const full = page.viewportSize()!;
+  await page.getByTestId('model-picker-btn').click();
+  await expect(page.getByTestId('model-picker')).toBeVisible();
+  await page.setViewportSize({ width: full.width, height: Math.round(full.height * 0.5) });
+  await expect(page.getByTestId('model-picker')).toBeVisible();
+  await page.getByTestId('model-search').fill('alt-impl');
+  await expect(page.getByTestId('model-headless-e2e-alt-implementer')).toBeVisible();
+
+  await page.setViewportSize(full);
+});
+
 // A session's model is switched from the same picker mid-conversation: the
 // switch is the card's model action, the thread says so, and the next turn
 // runs on the new model. A card in the workflow has no picker at all.

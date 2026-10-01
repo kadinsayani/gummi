@@ -219,7 +219,10 @@ function openPop (kind, anchor, el, { alignLeft = false } = {}) {
     e.stopPropagation()
     if (e.key === 'Escape') { closePop(); anchor.focus() }
   }
-  const moved = () => closePop()
+  // a resize here is usually the on-screen keyboard, raised by this same
+  // popover's own search/budget input grabbing focus below — not the page
+  // moving out from under it, so it must not close what focus just opened
+  const moved = () => { if (!el.contains(document.activeElement)) closePop() }
   setTimeout(() => document.addEventListener('mousedown', outside), 0)
   el.addEventListener('keydown', keys)
   window.addEventListener('resize', moved)
