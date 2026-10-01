@@ -257,9 +257,11 @@ function renderDecision () {
 }
 
 function drawDecision (box) {
-  // the answers scroll inside a capped decision: keep where the list was,
-  // and bring the highlighted answer into view when it moves
+  // the answers scroll inside a capped decision: keep where the list was
+  // and where the question was scrolled to, and bring the highlighted
+  // answer into view when it moves
   const was = box.querySelector('.decision > .opts')?.scrollTop || 0
+  const wasQ = box.querySelector('.decision > .q')?.scrollTop || 0
   clear(box)
   box.append(noteEl(false) || '')
   const d = openDecision()
@@ -288,6 +290,8 @@ function drawDecision (box) {
   confirmEl(false) || '')
   const opts = box.querySelector('.decision > .opts')
   if (opts) opts.scrollTop = was
+  const q = box.querySelector('.decision > .q')
+  if (q) q.scrollTop = wasQ
   if (state.hi !== shownHi) {
     shownHi = state.hi
     opts?.querySelector('.opt.hi')?.scrollIntoView({ block: 'nearest' })

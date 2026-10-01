@@ -246,8 +246,8 @@ test.describe('a failed verify', () => {
 test.describe('an agent’s question', () => {
   // A question's options live only in the process that asked it, so the
   // card is started from this board rather than seeded by `gummi run`.
-  async function ask(api: any): Promise<string> {
-    const c = (await api('POST', '/api/cards', { kind: 'feature', title: '[ask] Add a choosy helper' })).json;
+  async function ask(api: any, title = '[ask] Add a choosy helper'): Promise<string> {
+    const c = (await api('POST', '/api/cards', { kind: 'feature', title })).json;
     let card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: c.decision.ref, option: 'advance', against: c.decision.against.token })).json;
     card = (await api('POST', `/api/cards/${c.id}/answer`, { ref: card.decision.ref, option: 'run', against: card.decision.against.token })).json;
     await expect.poll(async () => (await api('GET', `/api/cards/${c.id}`)).json.decision?.kind).toBe('ask');
@@ -263,6 +263,76 @@ test.describe('an agent’s question', () => {
     await answerOption(page, isPhone(info), '1');
     const items = await thread(page, isPhone(info));
     await expect(items).toContainText('Extend the existing file');
+    await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
+  });
+
+  // A question long enough to overflow the decision's cap on every
+  // viewport: the question yields first (scrolling inside its own region,
+  // down to a floor of about two lines) so the answers list never gets
+  // pushed past the box's bottom edge.
+  test('a long question keeps its answers in reach', async ({ pairedPage: page, server, api }, info) => {
+    const id = await ask(api, '[ask-long] Add a wordy helper');
+    await open(page, server, id);
+    if (isPhone(info)) await page.getByTestId('mnav-thread').click();
+    const decision = page.getByTestId('decision');
+    await expect(decision).toHaveAttribute('data-kind', 'ask');
+    const q = page.getByTestId('decision-question');
+
+    // (a) the answers list's rect lies inside the decision box's rect, and
+    // is at least as tall as its first two answers; (b) the box itself
+    // never scrolls
+    const geo = await decision.evaluate((box) => {
+      const opts = box.querySelector('.opts')!;
+      const first = opts.querySelector('.opt')!.getBoundingClientRect();
+      const b = box.getBoundingClientRect();
+      const o = opts.getBoundingClientRect();
+      return { top: o.top - b.top, bottom: b.bottom - o.bottom, height: o.height, floor: first.height * 2, scrollTop: box.scrollTop };
+    });
+    expect(geo.top, 'the answers list starts inside the box').toBeGreaterThanOrEqual(-0.5);
+    expect(geo.bottom, 'the answers list ends inside the box').toBeGreaterThanOrEqual(-0.5);
+    expect(geo.height, 'the answers list keeps room for two answers').toBeGreaterThanOrEqual(geo.floor - 0.5);
+    expect(geo.scrollTop, 'the box itself is never scrolled').toBe(0);
+
+    // (c) every answer, scrolled into view within the list, is the element
+    // at its own centre point (reachable and tappable)
+    const options = decision.locator('.opt');
+    const count = await options.count();
+    for (let i = 0; i < count; i++) {
+      const opt = options.nth(i);
+      await opt.scrollIntoViewIfNeeded();
+      const hit = await opt.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return !!at && (at === el || el.contains(at));
+      });
+      expect(hit, `option ${i} is reachable and tappable`).toBe(true);
+    }
+
+    // (d) the question region is scrollable, and scrolled to its end its
+    // last line is inside the box
+    expect(await q.evaluate((el) => el.scrollHeight > el.clientHeight), 'the question scrolls').toBe(true);
+    const qEnd = await q.evaluate((el) => { el.scrollTop = el.scrollHeight; return el.getBoundingClientRect().bottom; });
+    const boxBox = (await decision.boundingBox())!;
+    expect(qEnd, 'the question, scrolled to its end, is inside the box').toBeLessThanOrEqual(boxBox.y + boxBox.height + 0.5);
+    await shot(page, info, 'ask-long');
+
+    // the question's scroll position survives a redraw of the decision (a
+    // highlight move), as the answers list's already does
+    await q.evaluate((el) => { el.scrollTop = 10 });
+    if (isPhone(info)) {
+      // tapping the chat answer only highlights it: it needs words before
+      // it answers, so this is a redraw with no answer given
+      await page.getByTestId('decision-option-chat').click();
+    } else {
+      // a digit only moves the highlight; enter is what answers
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      await page.keyboard.press('1');
+    }
+    await expect.poll(() => q.evaluate((el) => el.scrollTop)).toBe(10);
+    await expect(decision).toHaveAttribute('data-kind', 'ask');
+
+    // (e) tapping the second answer answers the question (card leaves ask)
+    await page.getByTestId('decision-option-2').click();
     await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.kind).not.toBe('ask');
   });
 

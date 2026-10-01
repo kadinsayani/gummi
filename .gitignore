@@ -13,6 +13,10 @@
 *.swp
 .DS_Store
 
+# python bytecode cache from scripts/*.py
+__pycache__/
+*.pyc
+
 # workshop container lockfile
 .workshop.lock
 

@@ -27,6 +27,10 @@ artifact):
                    with whatever the answer was.
     [ask-multi]    as [ask], but the question takes several answers
                    (multi_select), so a test can pick more than one.
+    [ask-long]     as [ask], but the question is a multi-paragraph text of
+                   about 1200 characters with three options, so a test can
+                   prove a long question and every answer both stay in reach
+                   on a phone as well as a desktop.
     [ask-gives-up] as [ask], but the agent's own tool call times out before
                    the person answers (GUMMI_E2E_ASK_TIMEOUT seconds, default
                    2): it says so and ends its turn with the question still
@@ -354,6 +358,32 @@ func Test%(name)sRegresses(t *testing.T) {
 # stages
 # --------------------------------------------------------------------------
 
+# A [ask-long] card's question: long enough (about 1200 characters, three
+# paragraphs, `\n` breaks) that it overflows the decision's cap on every
+# viewport, so a test can prove the question and every answer both stay
+# reachable rather than one being clipped away.
+LONG_QUESTION = (
+    "Before the plan is written, %s needs a decision on where its helper lives, "
+    "and the three shapes on the table each cost something a one-line summary "
+    "would hide.\n"
+    "A new file keeps greet.go untouched: the helper and its test live beside "
+    "it in their own file, so a reviewer sees one diff for one change and "
+    "nothing already there shifts under them. It is the smallest diff of the "
+    "three, and it is what the plan recommends.\n"
+    "Extending the existing file keeps the file count down, but a second "
+    "responsibility lands in greet.go and its test file grows a second "
+    "concern alongside the first -- fine today, harder to read back once a "
+    "third helper wants to join it.\n"
+    "A shared package moves the existing greeting and the new helper into a "
+    "package other cards can import, which only pays for itself once another "
+    "card is already waiting to reuse it; otherwise it is a package of one "
+    "caller, indirection with nothing behind it yet.\n"
+    "None of the three changes behavior or the command, and all three pass "
+    "the same checks and leave the module in a state a later card can still "
+    "build on cleanly -- pick the shape you want this module to keep growing in."
+)
+
+
 def plan_feature(turn, answer=None):
     ctx = turn.ctx
     turn.think("reading the module to see where the change belongs")
@@ -372,16 +402,20 @@ def plan_feature(turn, answer=None):
     gives_up = "[ask-gives-up]" in ctx["keywords"]
     dies = "[ask-dies]" in ctx["keywords"]
     spends = "[ask-spends]" in ctx["keywords"]
-    if ("[ask]" in ctx["keywords"] or "[ask-multi]" in ctx["keywords"] or gives_up or dies or spends) and answer is None:
+    long_q = "[ask-long]" in ctx["keywords"]
+    if ("[ask]" in ctx["keywords"] or "[ask-multi]" in ctx["keywords"] or long_q or gives_up or dies or spends) and answer is None:
         turn.say("Two ways to do this are written up under Considered approaches. "
                  "I need you to pick one.")
+        options = [
+            {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
+            {"label": "Extend the existing file", "detail": "fewer files, noisier diff"},
+        ]
+        if long_q:
+            options.append({"label": "A shared package", "detail": "a new package other cards can import too"})
         answer = call_tool("ask_user", timeout=ASK_TIMEOUT if gives_up or dies else None,
                            spend=ASK_SPEND if spends else 0, args={
-            "question": "Where should %s's helper live?" % ctx["card"],
-            "options": [
-                {"label": "A new file (recommended)", "detail": "one function and its test, nothing else touched"},
-                {"label": "Extend the existing file", "detail": "fewer files, noisier diff"},
-            ],
+            "question": (LONG_QUESTION % ctx["card"]) if long_q else "Where should %s's helper live?" % ctx["card"],
+            "options": options,
             "changes_section": "Chosen approach",
             "spec_anchor": "Chosen approach",
             **({"multi_select": True} if "[ask-multi]" in ctx["keywords"] else {}),
@@ -641,7 +675,7 @@ def scribe(ctx, prompt):
 # session
 # --------------------------------------------------------------------------
 
-KEYWORDS = ("[ask-multi]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[slow]", "[research]")
+KEYWORDS = ("[ask-multi]", "[ask-long]", "[fail-check]", "[fail-verify]", "[ask]", "[ask-gives-up]", "[ask-dies]", "[ask-spends]", "[slow]", "[research]")
 
 
 def detect(frame):
