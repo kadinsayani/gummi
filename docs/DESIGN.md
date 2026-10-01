@@ -3763,6 +3763,27 @@ work with it. A branch of its own is gummi's to rebase, land and clean
 like any feature's. The session's branch is left where a hand-off always
 leaves one.
 
+**An idle session pins nothing.** A card in the workflow that has
+stopped is waiting on a decision, so its thread pins one. A session that
+has stopped is waiting for its next turn. Pinning "choose what happens
+next" there made every line typed into it an answer to a menu.
+`openDecision` therefore pins nothing for an open, idle session.
+A turn in flight still pins its stop, and a failure or an empty budget
+still asks. The endings (land, hand off, write a spec) are in the
+session's menu, and on the web its head carries Land and Write a spec.
+
+**A closed session keeps its conversation.** Its row outlives the card,
+and its thread is the record of what was said about the work on its
+branch. `FreeformHistory` serves it after `Close` and after a restart
+(`Restore` keeps a closed card's row as history rather than skipping it as
+stale). A session continued as a spec says so as its last line.
+
+**The picker hides what an agent would refuse.** Each agent in the
+catalog carries a pattern for typed ids: claude refuses the foreign
+prefixes and dotted versions, and opencode and pi need `provider/model`.
+The page offers a typed id only on agents it fits. The pattern is a
+courtesy; `CheckSessionModel` is still the check.
+
 Deferred: the model picker in the TUI (`SwitchSessionModel` is the
 engine half; the Shell's `switchSessionModel` is shared, so it is a
 binding away); a permission dock for guarded mode, which needs an adapter

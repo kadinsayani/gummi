@@ -121,6 +121,11 @@ func TestASessionSwitchesItsModelFromItsMenu(t *testing.T) {
 		}
 	}
 
+	// an idle session is waiting for its next turn, not on a decision: the
+	// composer is a line to the agent, and its endings are in its menu
+	if d := h.card(c.ID).Decision; d != nil {
+		t.Errorf("an idle session pins a decision: %s %q", d.Kind, d.Question)
+	}
 	if !slices.ContainsFunc(h.card(c.ID).Actions, func(a webapi.Action) bool { return a.ID == "model" && a.Needs == webapi.ActionNeedsModel }) {
 		t.Fatalf("a session's menu offers no model switch: %+v", h.card(c.ID).Actions)
 	}
@@ -207,4 +212,22 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 		t.Error("the spec shares the session's branch; it must have its own")
 	}
 	h.waitCard(spec.ID, "the plan stage", func(c webapi.Card) bool { return c.Stage == string(domain.StagePlan) })
+	// the architect's brief is the session's: where its work came from and
+	// what the person asked of it
+	doc, err := os.ReadFile(filepath.Join(h.root, f.ArtifactPath()))
+	if err != nil {
+		doc, err = os.ReadFile(filepath.Join(h.ws.DraftsDir(), filepath.Base(f.ArtifactPath())))
+	}
+	if err != nil || !strings.Contains(string(doc), "Continued from the session "+s.ID) || !strings.Contains(string(doc), "Find why the retry test flakes") {
+		t.Errorf("the spec does not carry the session's brief (%v):\n%s", err, doc)
+	}
+	// and the closed session still shows its conversation, with where it went
+	snap, ok := h.eng.FreeformHistory(domain.FeatureID(s.ID))
+	var said strings.Builder
+	for _, m := range snap.Transcript {
+		said.WriteString(m.Content + "\n")
+	}
+	if !ok || !strings.Contains(said.String(), "Continued as the spec "+spec.ID) {
+		t.Errorf("the closed session does not say where its work went:\n%s", said.String())
+	}
 }

@@ -118,6 +118,15 @@ func (m *Shell) openDecision(r featureRow) *threadDecision {
 	case in.attn == attnGate:
 		kind = decisionGate
 	}
+	if kind == decisionIdle && r.F.IsFreeform() && r.F.Stage == domain.StageOpen && !in.freeformBusy {
+		// A session with nothing running has nothing to decide: it is a
+		// conversation, and the composer is the next turn of it. Pinning
+		// "choose what happens next" there turned every line into an
+		// answer to a menu (DESIGN §19.8). Its endings — land, hand off,
+		// write a spec — are in its menu; a turn in flight still pins its
+		// stop, and a failure or an empty budget still asks.
+		return nil
+	}
 	question := decisionQuestion(kind, r, in)
 	ids := make([]string, 0, len(actions))
 	for _, action := range actions {

@@ -37,11 +37,12 @@ test('a freeform turn is sent by one enter and ends on the page when it ends', a
 test('a landed freeform card claims no stages', async ({ pairedPage: page, server, api }, info) => {
   test.setTimeout(90_000);
   const id = String((await api('POST', '/api/cards', { kind: 'freeform', title: 'Poke at the padding' })).json?.id);
-  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.decision?.options?.some((o: any) => o.id === 'merge'), { timeout: 30_000 }).toBe(true);
-  let d = (await api('GET', `/api/cards/${id}`)).json.decision;
-  let r = await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: 'merge', against: d.against.token, words: 'chore: pad the padding' });
+  // an idle session pins no decision: its landing is its menu's merge
+  await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.actions?.some((a: any) => a.id === 'merge'), { timeout: 30_000 }).toBe(true);
+  expect((await api('GET', `/api/cards/${id}`)).json.decision).toBeUndefined();
+  let r = await api('POST', `/api/cards/${id}/actions/merge`, { message: 'chore: pad the padding' });
   for (let i = 0; i < 3 && r.json?.confirm; i++) {
-    r = await api('POST', `/api/cards/${id}/answer`, { ref: d.ref, option: 'merge', against: d.against.token, words: 'chore: pad the padding', confirm: r.json.confirm });
+    r = await api('POST', `/api/cards/${id}/actions/merge`, { message: 'chore: pad the padding', confirm: r.json.confirm });
   }
   await expect.poll(async () => (await api('GET', `/api/cards/${id}`)).json.stage, { timeout: 30_000 }).toBe('done');
   await page.goto(`${server.url}/#${id}`);
