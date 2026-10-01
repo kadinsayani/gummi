@@ -17,6 +17,8 @@ export const specTab = {
   key: 'g s',
   fetch: (id) => get(cardPath(id, 'spec')),
   empty: (s) => !s || s.none,
+  // a session has no spec and never will: its work is its diff
+  hidden: (c) => c?.stage === 'open' || c?.kind === 'freeform',
   render
 }
 

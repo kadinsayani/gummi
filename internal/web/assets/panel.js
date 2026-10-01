@@ -17,6 +17,10 @@ import { statsTab } from './stats.js?v=__ASSET_V__'
 const TABS = [specTab, diffTab, logTab, prTab, statsTab]
 const byName = Object.fromEntries(TABS.map(t => [t.name, t]))
 
+// shown is the tabs the open card has: a tab may hide itself for a kind
+// of card it has nothing for (the spec, on a session)
+const shown = () => TABS.filter(t => !t.hidden?.(state.card))
+
 let cache = {} // tab name -> { data, fresh, err, loading, stale }
 let cacheFor = null
 let ctx = {}
@@ -37,7 +41,13 @@ export function initPanel (c) {
     for (const k of Object.keys(cache)) cache[k].stale = true
     load(state.tab, true)
   })
-  on(['card'], () => { prefetch(); renderTabs() })
+  on(['card'], () => {
+    // the card has just said it has no such tab: move to its diff
+    // (without opening the panel the way a person's choice of a tab does)
+    if (byName[state.tab]?.hidden?.(state.card)) { set({ tab: 'diff' }); writeHash(state.sel, 'diff') }
+    prefetch()
+    renderTabs()
+  })
   on(['rightHidden'], applyHidden)
   initResizer()
   applyHidden()
@@ -45,7 +55,7 @@ export function initPanel (c) {
 }
 
 export function setTab (t) {
-  if (!byName[t]) return
+  if (!byName[t] || byName[t].hidden?.(state.card)) return
   if (state.rightHidden) { set({ rightHidden: false }); storage.set('rightHidden', false) }
   if (isMobile()) set({ view: 'panel' })
   set({ tab: t })
@@ -113,7 +123,7 @@ function renderTabs () {
   const list = h('div', { class: 'tablist', role: 'tablist', 'aria-label': 'Documents' })
   list.addEventListener('keydown', tabKeys)
   box.append(list)
-  for (const t of TABS) {
+  for (const t of shown()) {
     const e = cache[t.name]
     const on = state.tab === t.name
     const empty = e && !e.err && e.data && t.empty?.(e.data)
@@ -142,7 +152,7 @@ function renderTabs () {
 // tabKeys moves between the tabs with the arrow keys, Home and End, as a
 // tablist does; the one chosen opens.
 function tabKeys (e) {
-  const names = TABS.map(t => t.name)
+  const names = shown().map(t => t.name)
   const i = names.indexOf(e.target.dataset?.tab)
   if (i < 0) return
   const to = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: names.length - 1 }[e.key]

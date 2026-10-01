@@ -10,19 +10,18 @@ export const statsTab = {
   label: 'Stats',
   key: 'g r',
   fetch: (id) => get(cardPath(id, 'stats')),
-  empty: (s) => !s || !s.sessions?.length,
+  empty: (s) => !s || (isSession(s) ? !s.money?.credits : !s.sessions?.length),
   render
 }
+
+const isSession = (s) => s?.stage === 'open' || s?.kind === 'freeform'
 
 function render (pane, entry, ctx) {
   const s = entry.data
   const ps = s?.sessions || []
+  if (isSession(s)) { session(pane, s, ctx); return }
   if (!ps.length) {
-    // a freeform card has turns, not stage passes: say so rather than
-    // "nothing has run" beside a head that shows what it spent
-    pane.append(ctx.card?.stage === 'open'
-      ? h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'No stage passes'), 'A session works in turns, not stages. What it has spent is in its head.')
-      : h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'Nothing has run yet'), 'Passes and their credits appear here once a stage starts.'))
+    pane.append(h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'Nothing has run yet'), 'Passes and their credits appear here once a stage starts.'))
     return
   }
   const m = s.money || {}
@@ -50,6 +49,34 @@ function render (pane, entry, ctx) {
     m.elsewhere > 0
       ? h('p', { class: 'foot-note' }, `${cr(m.elsewhere)} cr on turns that are not passes`,
         (m.elsewhereBy || []).length ? ' — ' + m.elsewhereBy.map(b => `${b.name} ${cr(b.credits)}`).join(', ') : '')
+      : null,
+    h('p', { class: 'foot-note' }, 'The same numbers as ', h('span', { class: 'mono' }, `gummi status --stats ${ctx.id}`), '.')))
+}
+
+// session draws a session's run: it works in turns, not stage passes, so
+// there is no pass table — what it spent, against its envelope, and on
+// which models.
+function session (pane, s, ctx) {
+  const m = s.money || {}
+  if (!m.credits) {
+    pane.append(h('div', { class: 'empty', testid: 'stats-none' }, h('b', null, 'Nothing spent yet'), 'What the session spends appears here once its agent has taken a turn.'))
+    return
+  }
+  const env = s.envelope?.credits
+  const models = (m.byModel || []).filter(b => b.credits > 0)
+  const max = Math.max(...models.map(b => b.credits), 0.1)
+  pane.append(h('div', { class: 'sect', testid: 'stats' },
+    h('div', { class: 'tiles' },
+      tile(`${cr(m.credits)}`, 'cr', env ? `spent of ${env} envelope` : 'spent', 'stats-spent'),
+      env ? tile(cr(Math.max(s.envelope.left, 0)), 'cr', 'left', 'stats-left') : null,
+      tile(String(models.length), '', models.length === 1 ? 'model' : 'models', 'stats-models')),
+    models.length
+      ? h('div', { class: 'tablewrap', tabindex: '0', role: 'region', 'aria-label': 'Models' }, h('table', { class: 'passes', testid: 'stats-table' },
+        h('thead', null, h('tr', null, h('th', null, 'model'), h('th', { class: 'num' }, 'credits'), h('th', { class: 'barc' }, h('span', { class: 'sr-only' }, 'share')))),
+        h('tbody', null, models.map(b => h('tr', null,
+          h('td', { class: 'mono' }, b.name || '—'),
+          h('td', { class: 'num' }, cr(b.credits)),
+          h('td', { class: 'barc' }, h('div', { class: 'b', style: { '--w': (b.credits / max * 100) + '%' } })))))))
       : null,
     h('p', { class: 'foot-note' }, 'The same numbers as ', h('span', { class: 'mono' }, `gummi status --stats ${ctx.id}`), '.')))
 }

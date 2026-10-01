@@ -50,6 +50,9 @@ test('a session starts from its first message, on the model picked beside Send',
   // a second draft shows nothing of the card it was opened from, before
   // its first message is sent
   if (phone) return;
+  // a session has no spec, so it has no Spec tab
+  await expect(page.getByTestId('tab-diff')).toBeVisible();
+  await expect(page.getByTestId('tab-spec')).toHaveCount(0);
   await page.getByTestId('tab-stats').click();
   await expect(page.locator('#pane')).not.toBeEmpty();
   await page.getByTestId('rail-new-session').click();
