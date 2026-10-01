@@ -207,3 +207,54 @@ func TestASessionStartsFromItsWholeOpeningMessage(t *testing.T) {
 		t.Errorf("the opening message was cut short:\n%s", got)
 	}
 }
+
+// TestAClosedSessionKeepsItsConversation: a session that ended — landed,
+// handed off, continued as a spec — is still the record of what was said
+// about the work on its branch, so its conversation stays readable on the
+// closed card, with what became of it, here and after a restart.
+func TestAClosedSessionKeepsItsConversation(t *testing.T) {
+	ws, store, wt := newRepo(t)
+	ctx := context.Background()
+	f := freeformCard(30, "closed but not forgotten")
+	createFeature(t, store, f)
+
+	e1 := New(Config{Agents: singleAgent(agent.NewFake("Added pty.go.")), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	ff, err := e1.OpenFreeform(ctx, f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ff.Send(ctx, "drop the leaked pty fd"); err != nil {
+		t.Fatal(err)
+	}
+	waitFreeformIdle(t, ff)
+	if err := ff.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CloseFreeform(ctx, f.ID, "t"); err != nil {
+		t.Fatal(err)
+	}
+	if e1.Freeform(f.ID) != nil {
+		t.Fatal("a closed session is still open in the engine")
+	}
+	e1.NoteClosedFreeform(f.ID, "Continued as the spec FD-031.")
+	snap, ok := e1.FreeformHistory(f.ID)
+	if !ok || !strings.Contains(transcriptText(snap), "drop the leaked pty fd") || !strings.Contains(transcriptText(snap), "Continued as the spec FD-031.") {
+		t.Fatalf("the closed session's conversation is not readable (ok=%v):\n%s", ok, transcriptText(snap))
+	}
+	if err := e1.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	e2 := New(Config{Agents: singleAgent(recordingAgent()), Store: store, Worktrees: wt, Workspace: ws, Model: "m", Persist: true})
+	t.Cleanup(func() { e2.Close() })
+	if err := e2.Restore(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e2.Freeform(f.ID) != nil {
+		t.Error("a closed session came back open after a restart")
+	}
+	snap, ok = e2.FreeformHistory(f.ID)
+	if !ok || !strings.Contains(transcriptText(snap), "Added pty.go.") || !strings.Contains(transcriptText(snap), "Continued as the spec FD-031.") {
+		t.Errorf("the closed session's conversation did not survive a restart (ok=%v):\n%s", ok, transcriptText(snap))
+	}
+}

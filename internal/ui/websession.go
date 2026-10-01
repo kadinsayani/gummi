@@ -51,12 +51,12 @@ func (m *Shell) webSessionModels() webapi.SessionModels {
 		out.Default = webapi.SessionModel{Backend: b, Model: model}
 	}
 	for _, name := range engine.SessionBackends {
-		needs, hint := engine.SessionModelRule(name)
+		needs, hint, pattern := engine.SessionModelRule(name)
 		out.Agents = append(out.Agents, webapi.SessionAgent{
 			Name:       name,
 			Installed:  (m.engine != nil && m.engine.HasAgent(name)) || agentInstalled(name),
 			Models:     append([]string{}, suggest[name]...),
-			NeedsModel: needs, Hint: hint,
+			NeedsModel: needs, Hint: hint, Pattern: pattern,
 		})
 	}
 	var named []domain.Feature
@@ -174,7 +174,11 @@ func (m *Shell) specFromSession(f domain.Feature, title, profile string, envelop
 		if _, diffOpen, _, err := eng.GateBlockers(ctx, f.ID); err != nil {
 			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: f.ID}
 		} else if diffOpen > 0 {
-			return noticeMsg{text: string(f.ID) + " has " + itoa(diffOpen) + " open diff comment" + plural(diffOpen) + " — send or resolve them before writing a spec from it", isErr: true, id: f.ID}
+			them := "them"
+			if diffOpen == 1 {
+				them = "it"
+			}
+			return noticeMsg{text: string(f.ID) + " has " + itoa(diffOpen) + " open diff comment" + plural(diffOpen) + " — send or resolve " + them + " before writing a spec from it", isErr: true, id: f.ID}
 		}
 		// the session's backend and lock go first: the hand-off commits the
 		// worktree, and nothing may still be writing into it
@@ -216,8 +220,10 @@ func (m *Shell) specFromSession(f domain.Feature, title, profile string, envelop
 		// for in a backlog
 		adv, err := eng.Advance(ctx, spec.ID, actor)
 		if err != nil || adv.Status != engine.StatusAdvanced {
+			eng.NoteClosedFreeform(f.ID, "Continued as the spec "+string(spec.ID)+" ("+spec.Title+").")
 			return cardCreatedMsg{f: spec, open: true}
 		}
+		eng.NoteClosedFreeform(f.ID, "Continued as the spec "+string(adv.Feature.ID)+" ("+adv.Feature.Title+"), on its own branch "+adv.Feature.BranchName()+" cut from this one.")
 		return cardCreatedMsg{f: adv.Feature, open: true, run: true}
 	}
 }

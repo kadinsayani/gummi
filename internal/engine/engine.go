@@ -376,6 +376,10 @@ type Engine struct {
 	// holds its card's worktree, its per-card lock and its envelope (see
 	// freeformsession.go).
 	freeform map[domain.FeatureID]*FreeformSession
+	// freeformClosed keeps the conversation of each freeform card whose
+	// session ended (FreeformHistory), so a closed card still shows what
+	// was said on it.
+	freeformClosed map[domain.FeatureID]*Session
 	// started holds the backends a session asked for that the board did
 	// not start (sessionAgent), keyed by name, closed by Close.
 	startedMu sync.Mutex
@@ -539,16 +543,17 @@ func New(cfg Config) *Engine {
 		pool.SetGoalLookup(cfg.Store.GetFeature)
 	}
 	e := &Engine{
-		cfg:      cfg,
-		now:      time.Now,
-		raw:      make(chan Event, 256),
-		events:   make(chan Event),
-		stopped:  make(chan struct{}),
-		live:     map[domain.FeatureID]*Session{},
-		oneShots: map[domain.FeatureID]int{},
-		consult:  map[domain.FeatureID]*ConsultSession{},
-		freeform: map[domain.FeatureID]*FreeformSession{},
-		pool:     pool,
+		cfg:            cfg,
+		now:            time.Now,
+		raw:            make(chan Event, 256),
+		events:         make(chan Event),
+		stopped:        make(chan struct{}),
+		live:           map[domain.FeatureID]*Session{},
+		oneShots:       map[domain.FeatureID]int{},
+		consult:        map[domain.FeatureID]*ConsultSession{},
+		freeform:       map[domain.FeatureID]*FreeformSession{},
+		freeformClosed: map[domain.FeatureID]*Session{},
+		pool:           pool,
 	}
 	e.initProfiles()
 	e.consultIdleTimeout = consultIdleTimeout

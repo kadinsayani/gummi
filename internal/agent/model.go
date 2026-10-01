@@ -24,6 +24,17 @@ var foreignModelPrefixes = []struct{ prefix, provider string }{
 	{"command-", "Cohere"},
 }
 
+// ForeignModelPrefixes lists the leading tokens ForeignModel refuses, for
+// a reader that has to say the same thing elsewhere (a session's model
+// picker, which hides a typed id claude would refuse).
+func ForeignModelPrefixes() []string {
+	out := make([]string, 0, len(foreignModelPrefixes))
+	for _, p := range foreignModelPrefixes {
+		out = append(out, p.prefix)
+	}
+	return out
+}
+
 // ForeignModel reports whether id names a model from a provider the
 // Anthropic-only Claude Code CLI cannot route to, and if so which provider.
 // It is a denylist by design (see foreignModelPrefixes): an empty id, the

@@ -128,6 +128,10 @@ func (m *Shell) webFreeform(r featureRow) *webapi.Conversation {
 	sending := m.consultSending[r.F.ID]
 	ff := m.engine.Freeform(r.F.ID)
 	if ff == nil {
+		// a session that has ended still shows what was said on it
+		if snap, ok := m.engine.FreeformHistory(r.F.ID); ok && sending == "" {
+			return webConversation(snap, "", "working")
+		}
 		if sending == "" {
 			return nil
 		}

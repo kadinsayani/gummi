@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -148,7 +149,7 @@ func CheckSessionModel(backend, model string) error {
 		}
 	case "claude":
 		if foreign, provider := agent.ForeignModel(model); foreign {
-			return fmt.Errorf("%s is a %s model; the claude CLI only runs Anthropic models", model, provider)
+			return fmt.Errorf("the claude CLI only runs Anthropic models, and %s is from %s", model, provider)
 		}
 		if suggest, bad := agent.ClaudeModelIDHint(model); bad {
 			return fmt.Errorf("the claude CLI spells %s as %s", model, suggest)
@@ -275,18 +276,24 @@ func (e *Engine) HasAgent(name string) bool {
 }
 
 // SessionModelRule says whether backend refuses to start without a model
-// id and how it spells one, for the picker to say before CheckSessionModel
-// has to refuse.
-func SessionModelRule(backend string) (needsModel bool, hint string) {
+// id, how it spells one, and a pattern a typed id must match (an
+// ECMAScript regular expression, case-insensitive, for the page; empty
+// takes any id), so the picker offers no pair CheckSessionModel would
+// refuse. The pattern is a courtesy, not the check: CheckSessionModel is.
+func SessionModelRule(backend string) (needsModel bool, hint, pattern string) {
 	switch backend {
 	case "opencode":
-		return true, "provider/model, e.g. anthropic/claude-sonnet-5-5"
+		return true, "provider/model, e.g. anthropic/claude-sonnet-5-5", `^[^/\s]+/\S+$`
 	case "pi":
-		return true, "provider/id"
+		return true, "provider/id", `^[^/\s]+/\S+$`
 	case "codex":
-		return true, ""
+		return true, "", ""
 	case "claude":
-		return false, "versions with dashes, e.g. claude-haiku-4-5; empty is the CLI's default"
+		var alts []string
+		for _, p := range agent.ForeignModelPrefixes() {
+			alts = append(alts, regexp.QuoteMeta(p))
+		}
+		return false, "versions with dashes, e.g. claude-haiku-4-5; empty is the CLI's default", `^(?!(` + strings.Join(alts, "|") + `))(?!\S*\d\.\d)`
 	}
-	return false, ""
+	return false, "", ""
 }

@@ -100,6 +100,11 @@ type SessionAgent struct {
 	NeedsModel bool `json:"needsModel,omitempty"`
 	// Hint says how this agent spells a model id, when it has a rule.
 	Hint string `json:"hint,omitempty"`
+	// Pattern is what a typed id must match for this agent to run it: an
+	// ECMAScript regular expression, case-insensitive; empty takes any id.
+	// The picker hides a typed id that does not match; the server still
+	// checks every pick.
+	Pattern string `json:"pattern,omitempty"`
 }
 
 // Choice is one option in a select: a value and the words for it.

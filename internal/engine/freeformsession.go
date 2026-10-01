@@ -147,6 +147,34 @@ func (e *Engine) OpenFreeform(ctx context.Context, f domain.Feature) (*FreeformS
 	return ff, nil
 }
 
+// NoteClosedFreeform adds a line from gummi to a closed freeform card's
+// conversation — what became of its work, once that is known — so a reader
+// of the closed card sees it beneath the last turn. The row is updated
+// too, so the line is there after a restart.
+func (e *Engine) NoteClosedFreeform(id domain.FeatureID, text string) {
+	e.mu.Lock()
+	sess := e.freeformClosed[id]
+	e.mu.Unlock()
+	if sess == nil {
+		return
+	}
+	sess.appendSystem(text)
+	e.persistClosed(sess)
+}
+
+// FreeformHistory is the conversation of a freeform card whose session has
+// ended, for a reader that wants to show what was said on a closed card.
+// ok is false for a card with no ended session in this engine.
+func (e *Engine) FreeformHistory(id domain.FeatureID) (Snapshot, bool) {
+	e.mu.Lock()
+	sess := e.freeformClosed[id]
+	e.mu.Unlock()
+	if sess == nil {
+		return Snapshot{}, false
+	}
+	return sess.Snapshot(), true
+}
+
 // Freeform looks up a card's freeform session without ever spawning one —
 // the read path a render or a delivery uses (the diff surface's request
 // changes) to reach whatever exists without opening a backend as a side
@@ -568,9 +596,17 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 func (ff *FreeformSession) Close() error {
 	ff.settle()
 	ff.stopBackend()
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
 	ff.engine.mu.Lock()
 	if ff.engine.freeform[ff.id] == ff {
 		delete(ff.engine.freeform, ff.id)
+	}
+	// the conversation stays readable once the card has ended: it is the
+	// record of the work its branch holds (FreeformHistory)
+	if sess != nil && len(sess.Snapshot().Transcript) > 0 {
+		ff.engine.freeformClosed[ff.id] = sess
 	}
 	ff.engine.mu.Unlock()
 	ff.engine.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventStopped})
@@ -827,6 +863,27 @@ func (e *Engine) dispatchFreeformClientTool(ff *FreeformSession, sess *Session, 
 // one that cannot is handed the transcript instead (freeformReplayHint).
 func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnapshot) {
 	rc, backend := e.sessionRole(f)
+	sess := restoredFreeformSession(f, snap)
+	e.stampSpawnInfo(sess)
+	e.freeform[f.ID] = &FreeformSession{
+		engine: e, id: f.ID, rc: rc, backend: backend, sess: sess,
+	}
+}
+
+// restoreClosedFreeformLocked keeps a closed freeform card's conversation
+// readable after a restart: its row outlives the card, and a session that
+// ended (landed, handed off, continued as a spec) is still the record of
+// what was said and done on that branch. Nothing about it can run again.
+func (e *Engine) restoreClosedFreeformLocked(f domain.Feature, snap state.SessionSnapshot) {
+	sess := restoredFreeformSession(f, snap)
+	sess.cancel()
+	e.freeformClosed[f.ID] = sess
+}
+
+// restoredFreeformSession rebuilds a freeform session from its row, with no
+// backend: the transcript, activity, spend and the backend's conversation
+// id, exactly as they were persisted.
+func restoredFreeformSession(f domain.Feature, snap state.SessionSnapshot) *Session {
 	sctx, cancel := context.WithCancel(context.Background())
 	sess := &Session{
 		Feature:     f,
@@ -849,10 +906,7 @@ func (e *Engine) restoreFreeformLocked(f domain.Feature, snap state.SessionSnaps
 	sess.spend = usageFrom(snap)
 	sess.exhausted = snap.Exhausted
 	sess.setAgentSessionID(snap.AgentSession)
-	e.stampSpawnInfo(sess)
-	e.freeform[f.ID] = &FreeformSession{
-		engine: e, id: f.ID, rc: rc, backend: backend, sess: sess,
-	}
+	return sess
 }
 
 // restoredStart parses a persisted generation stamp, falling back to now

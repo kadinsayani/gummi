@@ -38,7 +38,25 @@ func (e *Engine) persist(s *Session) {
 	if s.finalizedState() {
 		return
 	}
+	e.saveLocked(s)
+}
 
+// persistClosed saves a closed freeform session's row, which persist will
+// not: the session has stopped, but its row is the closed card's record
+// and is never dropped, so a line added to it afterwards (what became of
+// the work) has to reach it.
+func (e *Engine) persistClosed(s *Session) {
+	if !e.cfg.Persist || e.cfg.Store == nil || !s.Feature.IsFreeform() {
+		return
+	}
+	e.persistMu.Lock()
+	defer e.persistMu.Unlock()
+	e.saveLocked(s)
+}
+
+// saveLocked writes a session's row. The caller holds persistMu and has
+// decided the session may write.
+func (e *Engine) saveLocked(s *Session) {
 	snap := s.Snapshot()
 	rec := state.SessionSnapshot{
 		Feature:      snap.Feature.ID,
@@ -283,6 +301,10 @@ func (e *Engine) Restore(ctx context.Context) error {
 	defer e.mu.Unlock()
 	for _, snap := range snaps {
 		f, err := e.cfg.Store.GetFeature(ctx, snap.Feature)
+		if err == nil && f.IsFreeform() && f.Stage == domain.StageDone && snap.Stage == domain.StageOpen {
+			e.restoreClosedFreeformLocked(f, snap)
+			continue
+		}
 		if err != nil || f.Stage != snap.Stage {
 			continue // stale session for a since-advanced feature
 		}
