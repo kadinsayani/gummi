@@ -19,6 +19,21 @@ type NamedRepo struct {
 	Root string
 }
 
+// ErrRepoNotConfigured reports a card whose repository was dropped from
+// `repos:` after the card was minted into it. Nothing on disk answers for
+// it any more — same shape as ErrGoalWorktreeMissing — so a caller that
+// cannot reach the card's worktree or branch this way can still fall back
+// to removing the record.
+var ErrRepoNotConfigured = errors.New("repository is not configured")
+
+// repoNotConfiguredError carries the detailed, user-facing message while
+// still unwrapping to ErrRepoNotConfigured for callers that only need to
+// recognize the case.
+type repoNotConfiguredError struct{ msg string }
+
+func (e *repoNotConfiguredError) Error() string { return e.msg }
+func (e *repoNotConfiguredError) Unwrap() error { return ErrRepoNotConfigured }
+
 // Pool caches one worktree.Manager per managed repository root, all bound to
 // the same workspace root. It is the per-card gateway: a card names a
 // configured repository (the empty name selects the default), and ManagerFor
@@ -210,7 +225,7 @@ func (p *Pool) ManagerForName(ctx context.Context, name string) (*Manager, error
 	} else {
 		r, ok := p.byName[name]
 		if !ok {
-			return nil, fmt.Errorf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or recreate the card against a configured repository", name)
+			return nil, &repoNotConfiguredError{msg: fmt.Sprintf("repository %q is not configured; add it to `repos:` in .gummi/config.yaml, or recreate the card against a configured repository", name)}
 		}
 		root = r
 	}

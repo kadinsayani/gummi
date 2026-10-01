@@ -133,3 +133,39 @@ func TestBoardKeyORefusedWithWorktree(t *testing.T) {
 		t.Errorf("notice = %q isErr=%v, want error about fixed repo", m.notice.text, m.notice.isErr)
 	}
 }
+
+// TestDeletingACardWhoseRepoIsNoLongerConfigured: a card minted against a
+// named repo that has since been dropped from `repos:` has nothing on disk
+// left to reach — the delete still has to take its record off the board
+// rather than refusing it forever.
+func TestDeletingACardWhoseRepoIsNoLongerConfigured(t *testing.T) {
+	m := repoWorkspace(t)
+	ctx := context.Background()
+	f, err := m.store.GetFeature(ctx, m.rows[0].F.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Repo = "a"
+	if err := m.store.UpdateFeature(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.wt.Ensure(ctx, &f); err != nil {
+		t.Fatal(err)
+	}
+
+	// "a" drops out of `repos:` between sessions: the pool that comes
+	// back up knows nothing of it.
+	pool, err := worktree.NewPool(ctx, m.wt.Root(), m.wt.Root(), nil, m.store, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.wt = pool
+
+	msg, ok := m.deleteFeature(f.ID)().(noticeMsg)
+	if !ok || msg.isErr {
+		t.Fatalf("delete refused: %#v", msg)
+	}
+	if _, err := m.store.GetFeature(ctx, f.ID); err == nil {
+		t.Errorf("%s still has a record", f.ID)
+	}
+}

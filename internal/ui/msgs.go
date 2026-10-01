@@ -1663,21 +1663,32 @@ func (m *Shell) deleteCard(ctx context.Context, f *domain.Feature) error {
 			return err
 		}
 	}
-	if ok, err := m.wt.Exists(ctx, f); err == nil && ok {
+	// a card whose repository was dropped from `repos:` after it was
+	// minted has nothing on disk left to reach — same story as a goal
+	// card whose tree is gone (ErrGoalWorktreeMissing) — so the record
+	// and workspace files below are all that is left to remove, rather
+	// than refusing the delete outright.
+	if ok, err := m.wt.Exists(ctx, f); err != nil {
+		if !errors.Is(err, worktree.ErrRepoNotConfigured) {
+			return err
+		}
+	} else if ok {
 		if err := m.wt.Remove(ctx, f, true); err != nil {
 			return err
 		}
 	}
 	// ...and the scratch tree, which is the only tree a research card
 	// ever has.
-	if err := m.wt.RemoveScratch(ctx, f); err != nil {
+	if err := m.wt.RemoveScratch(ctx, f); err != nil && !errors.Is(err, worktree.ErrRepoNotConfigured) {
 		return err
 	}
 	// a feature that never left Spec has no branch — only delete
 	// one that exists. An adopted card's branch is skipped outright: the
 	// card record goes, the inherited work stays (DESIGN §10 D22).
 	if ok, err := m.wt.BranchExists(ctx, f); err != nil {
-		return err
+		if !errors.Is(err, worktree.ErrRepoNotConfigured) {
+			return err
+		}
 	} else if ok && !f.Adopted() {
 		if err := m.wt.DeleteBranch(ctx, f, true); err != nil {
 			return err
