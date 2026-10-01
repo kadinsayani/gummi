@@ -318,7 +318,8 @@ type ActionRequest struct {
 // move past a pinned decision, so they run without an Against: the menu
 // entries that change what the card waits for, what it may spend, which
 // profile or repository it runs under and which pull request it is linked
-// to (and, for a session, which model it runs on), and the ones that copy
+// to (and, for a session, which model it runs on and committing its
+// worktree), and the ones that copy
 // or remove it (each of those asks its own
 // question first). Every other action — a crossing, a landing, a
 // send-back, a run, a pause, a rebase, a hand-off, the autopilot switch —
@@ -328,5 +329,5 @@ type ActionRequest struct {
 // options is never independent.
 var DecisionIndependentActions = []string{
 	"deps", "profile", "envelope", "repo", "prlink", "prunlink", "prpull",
-	"duplicate", "delete", "clean", "model",
+	"duplicate", "delete", "clean", "model", "commit",
 }

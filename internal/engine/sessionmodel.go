@@ -212,9 +212,8 @@ func (e *Engine) SwitchSessionModel(ctx context.Context, id domain.FeatureID, ba
 	sess.setAgentSessionID("")
 	sess.appendSystem(fmt.Sprintf("Switched to %s on %s. The conversation so far goes with it.", modelLabel(model), backend))
 	if sess.Live() {
-		// Between turns the worktree is committed, so stopping here loses
-		// nothing; settle commits anyway, the way Close does, in case a
-		// turn's last write has not reached a checkpoint yet.
+		// Stopping the backend loses nothing: what it wrote stays in the
+		// worktree for the next one, and settle saves the conversation.
 		ff.settle()
 		sess.setState(StateDone)
 		sess.stop()

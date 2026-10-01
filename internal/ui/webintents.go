@@ -567,6 +567,15 @@ func (m *Shell) webAction(r featureRow, id string, req webapi.ActionRequest) (te
 			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: engine.ErrSessionBusy.Error()}
 		}
 		return m.switchSessionModel(r.F.ID, req.Backend, strings.TrimSpace(req.Model)), nil
+	case "commit":
+		if msg == "" {
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictNeeds, Needs: string(webapi.ActionNeedsMessage),
+				Text: "say what the commit is — your words are its message"}
+		}
+		if ff := m.engine.Freeform(r.F.ID); ff != nil && ff.Busy() {
+			return nil, &WebError{Code: WebConflict, Reason: webapi.ConflictBusy, Text: "the session is mid-turn; commit once this turn ends"}
+		}
+		return m.commitSession(r.F.ID, msg), nil
 	case "profile":
 		if !slices.ContainsFunc(entry.Choices, func(c webapi.Choice) bool { return c.Value == req.Profile }) {
 			return nil, refuse(WebBadRequest, "profile "+strconv.Quote(req.Profile)+" is not one "+string(r.F.ID)+" can switch to")

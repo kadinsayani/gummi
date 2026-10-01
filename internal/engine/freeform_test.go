@@ -46,12 +46,11 @@ func waitFreeformIdle(t *testing.T, ff *FreeformSession) {
 	}
 }
 
-// TestAFreeformTurnCheckpointsItsWorktree is the load-bearing property of
-// the whole kind: a freeform card has no stage completion to settle and no
-// gate to hold its work, so the commit at the end of each turn is the only
-// thing between what the agent wrote and the branch. A turn that ended
-// uncommitted would be a turn whose work exists only in a working tree.
-func TestAFreeformTurnCheckpointsItsWorktree(t *testing.T) {
+// TestAFreeformTurnDoesNotCommit: every commit on a freeform card's branch
+// is one somebody meant. A turn ending is not a reason to commit, so what
+// the turn wrote is in the card's worktree, on its branch's checkout, and
+// still uncommitted.
+func TestAFreeformTurnDoesNotCommit(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
 		// write into the session's own cwd, which must be the card's
 		// worktree — the freeform card's "gets its worktree/branch" half
@@ -82,22 +81,14 @@ func TestAFreeformTurnCheckpointsItsWorktree(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(tree, "sketch.txt")); err != nil {
 		t.Fatalf("the turn's file is not in the card's worktree: %v", err)
 	}
-	// The commit exists, on the card's own branch, and names a turn rather
-	// than the stage the card is parked at.
-	log := gitOut(t, tree, "log", "--oneline", "--no-decorate")
-	if !strings.Contains(log, string(f.ID)+": turn checkpoint") {
-		t.Errorf("no turn checkpoint on the branch:\n%s", log)
-	}
 	if got := strings.TrimSpace(gitOut(t, tree, "rev-parse", "--abbrev-ref", "HEAD")); got != f.BranchName() {
 		t.Errorf("worktree is on %s, want the card's branch %s", got, f.BranchName())
 	}
-	if files := gitOut(t, tree, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(files, "sketch.txt") {
-		t.Errorf("the checkpoint did not commit the turn's file:\n%s", files)
+	if out := gitOut(t, tree, "status", "--porcelain"); !strings.Contains(out, "sketch.txt") {
+		t.Errorf("the turn's file was committed, want it left in the worktree:\n%s", out)
 	}
-	// Nothing left dirty: the point of checkpointing every turn is that the
-	// tree is not where the work lives.
-	if out := gitOut(t, tree, "status", "--porcelain"); strings.TrimSpace(out) != "" {
-		t.Errorf("worktree still dirty after the turn:\n%s", out)
+	if log := gitOut(t, tree, "log", "--oneline", "--no-decorate", "--grep=checkpoint"); strings.TrimSpace(log) != "" {
+		t.Errorf("a checkpoint was committed after the turn:\n%s", log)
 	}
 }
 
@@ -501,8 +492,8 @@ func TestInterruptingAFreeformTurnCommitsWhatItWrote(t *testing.T) {
 	}
 	// The stand-in writes on its own goroutine, so wait for the turn to
 	// have actually written something before stopping it — otherwise the
-	// test asserts the checkpoint committed a file that did not exist yet,
-	// and only loses that race under load.
+	// test asserts on a file that did not exist yet, and only loses that
+	// race under load.
 	tree := filepath.Join(ws.Root, f.WorktreePath())
 	waitForFile(t, filepath.Join(tree, "half.txt"))
 	if err := e.InterruptFreeform(ctx, f.ID); err != nil {
@@ -514,8 +505,8 @@ func TestInterruptingAFreeformTurnCommitsWhatItWrote(t *testing.T) {
 	if ff.Snapshot().Busy {
 		t.Error("the session still reports itself busy after the stop")
 	}
-	if files := gitOut(t, tree, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(files, "half.txt") {
-		t.Errorf("the interrupted turn's work was not committed:\n%s", files)
+	if out := gitOut(t, tree, "status", "--porcelain"); !strings.Contains(out, "half.txt") {
+		t.Errorf("the interrupted turn's work was committed, want it left in the worktree:\n%s", out)
 	}
 	// And the conversation survives the stop: the backend is kept, so the
 	// next turn continues rather than starting a new session.
@@ -524,12 +515,10 @@ func TestInterruptingAFreeformTurnCommitsWhatItWrote(t *testing.T) {
 	}
 }
 
-// TestAFreeformCardsWorktreeIsSettledOnShutdown: every other card's work
-// reaches its branch through a stage that ends; a freeform card's reaches
-// it through the commit at the end of each turn, so a board that quits
-// mid-turn is the one moment its work could be stranded. The pty drive
-// found exactly that — an untracked file left behind by a quit.
-func TestAFreeformCardsWorktreeIsSettledOnShutdown(t *testing.T) {
+// TestAFreeformCardsWorktreeIsLeftAloneOnShutdown: a board quitting
+// mid-turn commits nothing on a freeform card's behalf. What the turn wrote
+// stays in the worktree, uncommitted, for somebody to commit on purpose.
+func TestAFreeformCardsWorktreeIsLeftAloneOnShutdown(t *testing.T) {
 	ag := &agent.Fake{Responder: func(opts agent.SessionOpts, _ string) []agent.Event {
 		if err := os.WriteFile(filepath.Join(opts.WorkDir, "inflight.txt"), []byte("x\n"), 0o600); err != nil {
 			t.Error(err)
@@ -555,11 +544,8 @@ func TestAFreeformCardsWorktreeIsSettledOnShutdown(t *testing.T) {
 	if err := e.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if out := gitOut(t, tree, "status", "--porcelain"); strings.TrimSpace(out) != "" {
-		t.Errorf("the shutdown stranded work in the worktree:\n%s", out)
-	}
-	if files := gitOut(t, tree, "show", "--name-only", "--format=", "HEAD"); !strings.Contains(files, "inflight.txt") {
-		t.Errorf("the in-flight turn's work never reached the branch:\n%s", files)
+	if out := gitOut(t, tree, "status", "--porcelain"); !strings.Contains(out, "inflight.txt") {
+		t.Errorf("the shutdown committed the in-flight turn's work, want it left in the worktree:\n%s", out)
 	}
 }
 

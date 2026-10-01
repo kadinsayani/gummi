@@ -40,6 +40,7 @@ function render () {
       h('span', { class: 'cid', testid: 'card-id' }, c.id),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
+        commitButton(c, actions),
         landButton(c, actions),
         writeSpecButton(state.card),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
@@ -68,6 +69,17 @@ function landButton (c, actions) {
   const merge = actions.find(a => a.id === 'merge')
   if (!merge) return null
   return h('button', { class: 'btn pri hide-s', type: 'button', testid: 'session-land', title: merge.detail || 'Land this session’s branch', onclick: () => runAction(state.card, merge) }, 'Land…')
+}
+
+// commitButton commits an open session's worktree with the person's own
+// message. gummi never commits a session's work on its own, so this is
+// shown whenever the worktree holds something to commit (the server lists
+// the action only then).
+function commitButton (c, actions) {
+  if (!c.session || c.stage !== 'open') return null
+  const commit = actions.find(a => a.id === 'commit')
+  if (!commit) return null
+  return h('button', { class: 'btn hide-s', type: 'button', testid: 'session-commit', title: commit.detail || 'Commit the worktree', onclick: () => runAction(state.card, commit) }, 'Commit…')
 }
 
 // openActions drops the card's menu from the head's "⋯". With a line (a

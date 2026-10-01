@@ -2634,18 +2634,12 @@ func (e *Engine) Close() error {
 	for _, c := range consults {
 		c.stopBackend()
 	}
-	// A freeform session's teardown commits what its last turn left, saves
-	// the conversation, and drops the card lock with the backend — so
-	// another gummi process can drive the card once this board is gone, and
-	// so the person who comes back finds the conversation they left.
-	//
-	// The checkpoint is not optional politeness. Every other card's work
-	// reaches its branch through a stage that ends; a freeform card's
-	// reaches it through the commit at the end of each turn, so a board
-	// that quits mid-turn — or between a write and an idle that never
-	// arrived — is the one moment its work could be stranded in a working
-	// tree. The pty drive found exactly that: an untracked file left behind
-	// by a turn the quit interrupted.
+	// A freeform session's teardown saves the conversation and drops the
+	// card lock with the backend — so another gummi process can drive the
+	// card once this board is gone, and so the person who comes back finds
+	// the conversation they left. It commits nothing: whatever the card's
+	// worktree holds stays there, for the agent or the person to commit on
+	// purpose.
 	for _, ff := range freeforms {
 		ff.settle()
 		ff.stopBackend()
@@ -2989,18 +2983,18 @@ func (e *Engine) settle(s *Session) error {
 // completion path (not the exhaustion gate, which never advances a
 // stage) must fail the run rather than let it read as a clean finish.
 func (e *Engine) checkpoint(s *Session) error {
-	if s.Interactive && !s.Feature.IsFreeform() {
+	if s.Interactive {
 		// A design chat runs in the card's own worktree now, so anything it
 		// writes survives to implement without a hand-off — but it is a
 		// conversation, not work, and checkpointing every turn of one would
 		// bury the branch's real history. The tree is no longer discarded,
 		// so nothing is lost by waiting.
 		//
-		// A freeform session is the exception, and not a grudging one: it
-		// is interactive AND it is the work — there is no later stage to
-		// hand a tree to, so this commit is the only thing between what the
-		// turn wrote and the branch. Its history IS turn-by-turn, and the
-		// landing squashes it like any other card's.
+		// A freeform session is no exception. It is the work, but every
+		// commit on its branch is one somebody meant: the agent commits when
+		// the person asks it to or the work reaches a point worth keeping,
+		// never because a turn happened to end. What it leaves loose stays
+		// in the worktree, which Remove refuses to delete while dirty.
 		return nil
 	}
 	// Research stages are worktree-less by design (a research branch never
@@ -3026,12 +3020,6 @@ func (e *Engine) checkpoint(s *Session) error {
 	ctx, cancel := context.WithTimeout(context.Background(), checkpointTimeout)
 	defer cancel()
 	msg := fmt.Sprintf("%s: %s checkpoint", s.Feature.ID, s.Feature.Stage)
-	if s.Feature.IsFreeform() {
-		// "FF-012: open checkpoint" names the stage a freeform card is
-		// parked at rather than what happened, and every one of its commits
-		// would carry the same word. A turn is the unit here.
-		msg = fmt.Sprintf("%s: turn checkpoint", s.Feature.ID)
-	}
 	wt, err := e.mgr(ctx, &s.Feature)
 	if err != nil {
 		s.appendActivity("checkpoint commit failed: " + err.Error())

@@ -1386,9 +1386,11 @@ Your working directory is a full checkout of this card's own branch (%s):
 
 That directory is the boundary of your work: run every command from
 inside it, and never write into the repository's main checkout, which is
-someone else's. Everything the worktree holds when your turn ends is
-committed to that branch automatically, so leave nothing behind you did
-not mean to keep, and there is no need to commit by hand.
+someone else's. Nothing is committed for you: every commit on this
+branch must be intentional. Commit when the person asks you to, or when
+the work reaches a point worth keeping, with a message that describes
+the change — never just because a turn is ending. What you leave
+uncommitted stays in the worktree for the next turn.
 
 The person is in this conversation with you. They will steer you two
 ways: prose, and comments anchored to specific lines of your diff. The

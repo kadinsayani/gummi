@@ -35,9 +35,9 @@ import (
 // What it has that neither of them does is the reason it needed its own
 // file: it WRITES. So it takes the card's worktree as its cwd, the card's
 // per-card lock for as long as it lives, the card's envelope as a real
-// cap, and it checkpoint-commits at the end of every turn — because with
-// no stage to hand a tree to, that commit is the only thing between what
-// the turn wrote and the branch.
+// cap. What it does NOT do is commit for the agent: every commit on a
+// freeform card's branch is one the agent made on purpose, so what a turn
+// leaves loose stays in the worktree until somebody means to keep it.
 //
 // What it deliberately does NOT have is an attention slot, a gate, a
 // verdict, a round cap or a kickoff. The corrective-round cap exists to
@@ -84,8 +84,9 @@ type FreeformSession struct {
 	// across a restart (restoreFreeformLocked) — and a lock held for all of
 	// that would mean a board left open overnight blocks every CLI landing
 	// of every freeform card on it, including ones nobody has touched.
-	// Between turns there is no backend and the worktree is committed (each
-	// turn ends in a checkpoint), so there is nothing left to exclude.
+	// Between turns there is no backend; what the worktree still holds
+	// uncommitted is guarded by Remove's refusal of a dirty tree, not by
+	// this lock.
 	lockMu  sync.Mutex
 	release func()
 
@@ -521,11 +522,8 @@ func (ff *FreeformSession) KickoffWith(ctx context.Context, opening string) erro
 // InterruptFreeform stops a freeform card's turn in flight. It is
 // Engine.Interrupt's counterpart for a session that is not in e.live, and
 // it keeps the backend: the conversation continues, this turn does not.
-//
-// The checkpoint afterwards is the point. An interrupted turn has still
-// written whatever it wrote before being stopped, and on a freeform card
-// nothing else will commit it — the EventIdle arm that normally does may
-// never arrive for a turn the backend abandoned.
+// Whatever the turn wrote before it was stopped stays in the worktree,
+// uncommitted, for the next turn to carry on from.
 func (e *Engine) InterruptFreeform(ctx context.Context, id domain.FeatureID) error {
 	ff := e.Freeform(id)
 	if ff == nil {
@@ -543,13 +541,55 @@ func (e *Engine) InterruptFreeform(ctx context.Context, id domain.FeatureID) err
 		}
 	}
 	sess.setBusy(false)
-	if err := e.checkpoint(sess); err != nil {
-		sess.appendActivity("the worktree is gone — nothing the interrupted turn wrote could be committed: " + err.Error())
-	}
 	sess.appendActivity("stopped mid-turn by the reader")
 	e.persist(sess)
 	e.send(Event{Feature: id, Stage: domain.StageOpen, Kind: EventUpdated})
 	return nil
+}
+
+var errCommitBusy = errors.New("the session is mid-turn; commit once this turn ends")
+
+// CommitFreeform commits everything in a freeform card's worktree to its
+// branch with the person's own message: the one way a freeform card's work
+// becomes a commit without the agent making it. It reports whether there
+// was anything to commit.
+//
+// It refuses while a turn is in flight, because a commit taken then would
+// catch the turn half-written.
+func (e *Engine) CommitFreeform(ctx context.Context, id domain.FeatureID, message string) (bool, error) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return false, errors.New("a commit needs a message")
+	}
+	ff := e.Freeform(id)
+	if ff != nil && ff.Busy() {
+		return false, errCommitBusy
+	}
+	f, err := e.feature(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if !f.IsFreeform() {
+		return false, fmt.Errorf("%s is a %s card: its stages commit its work", id, f.Kind)
+	}
+	wt, err := e.mgr(ctx, &f)
+	if err != nil {
+		return false, err
+	}
+	committed, err := wt.CommitAll(ctx, &f, message)
+	if err != nil || !committed || ff == nil {
+		return committed, err
+	}
+	ff.mu.Lock()
+	sess := ff.sess
+	ff.mu.Unlock()
+	if sess != nil {
+		subject, _, _ := strings.Cut(message, "\n")
+		sess.appendActivity("committed by the reader: " + subject)
+		e.persist(sess)
+	}
+	e.send(Event{Feature: id, Stage: domain.StageOpen, Kind: EventUpdated})
+	return true, nil
 }
 
 // Busy reports whether the card's agent is mid-turn, without copying the
@@ -589,10 +629,9 @@ func (ff *FreeformSession) Snapshot() Snapshot {
 // cancels the idle timer, drops the card lock, and clears the engine's
 // reference so a later OpenFreeform starts fresh.
 //
-// It checkpoints first. A person closing the card page, quitting the
-// board, or landing the card must not be the moment work is lost, and
-// what the last turn left in the worktree is only on the branch once this
-// commit exists.
+// It saves the conversation first. It commits nothing: what the last turn
+// left in the worktree stays there, uncommitted, for somebody to commit on
+// purpose.
 func (ff *FreeformSession) Close() error {
 	ff.settle()
 	ff.stopBackend()
@@ -613,10 +652,12 @@ func (ff *FreeformSession) Close() error {
 	return nil
 }
 
-// settle commits whatever is in the card's worktree, so nothing a turn
-// wrote is left only on disk. Close does this on its way out and
-// Engine.Close calls it directly — the two teardown paths differ in what
-// else they tidy, not in whether the work survives.
+// settle saves the conversation, which is what a person comes back to
+// beside the tree: the tree carries what the turns wrote, the row carries
+// what was said about it and the backend conversation to continue. Close
+// does this on its way out and Engine.Close calls it directly — the two
+// teardown paths differ in what else they tidy, not in whether the
+// conversation survives. It deliberately commits nothing.
 func (ff *FreeformSession) settle() {
 	ff.mu.Lock()
 	sess := ff.sess
@@ -624,10 +665,6 @@ func (ff *FreeformSession) settle() {
 	if sess == nil {
 		return
 	}
-	_ = ff.engine.checkpoint(sess)
-	// And the conversation, which is the other half of what a person comes
-	// back to: the tree carries what the turns wrote, the row carries what
-	// was said about it and the backend conversation to continue.
 	ff.engine.persist(sess)
 }
 
@@ -745,9 +782,7 @@ func (e *Engine) pumpFreeform(ff *FreeformSession, sess *Session) {
 }
 
 // handleFreeform folds one backend event into the freeform session —
-// handleConsult's shape, plus the two arms a session that writes and
-// spends needs: the checkpoint commit when a turn completes, and the
-// envelope.
+// handleConsult's shape, plus the envelope a session that spends needs.
 func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Event) {
 	switch ev.Kind {
 	case agent.EventTextDelta:
@@ -776,22 +811,8 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 			e.exhaustFreeform(ff, sess)
 		}
 	case agent.EventIdle:
-		// Commit what the turn wrote, and do it BEFORE clearing the busy
-		// flag. This is the freeform card's whole durability story: there is
-		// no stage completion to settle and no gate to hold the work, so a
-		// turn that ends uncommitted is a turn whose work exists only in a
-		// working tree.
-		//
-		// The order is deliberately the opposite of a stage's (see the
-		// EventIdle arm of Engine.handle): a stage clears busy first so the
-		// footer stops claiming an attention slot the agent has already left,
-		// and its checkpoint is bookkeeping after the fact. A freeform card
-		// holds no slot, and the first thing the person does when it stops is
-		// read its diff — so "not busy" here has to mean "committed", or that
-		// read lands on a tree whose commit has not happened yet.
-		if err := e.checkpoint(sess); err != nil {
-			sess.appendActivity("the worktree is gone — nothing this turn wrote could be committed: " + err.Error())
-		}
+		// No commit here: a turn ending is not a reason to commit. The agent
+		// commits what it means to keep; the rest stays in the worktree.
 		sess.setBusy(false)
 		e.persist(sess)
 		ff.armIdleTimer() // a reply landing resets the idle clock
@@ -811,7 +832,7 @@ func (e *Engine) handleFreeform(ff *FreeformSession, sess *Session, ev agent.Eve
 }
 
 // exhaustFreeform is the envelope running out on a freeform card. It
-// commits what the card has and says what would unblock it — and that is
+// says what would unblock it — and that is
 // all it does, because there is nothing here to park: no stage to leave
 // mid-flight, no gate to raise, no lane slot to free. The conversation
 // simply refuses further turns (Send checks Exhausted) until the person
@@ -820,8 +841,7 @@ func (e *Engine) exhaustFreeform(ff *FreeformSession, sess *Session) {
 	if !sess.markExhausted() {
 		return
 	}
-	_ = e.checkpoint(sess)
-	sess.appendSystem("this card has spent its envelope — its work is committed to its branch; " +
+	sess.appendSystem("this card has spent its envelope — its work is left as it is in its worktree; " +
 		"raise the envelope to carry on")
 	sess.setBusy(false)
 	e.send(Event{Feature: ff.id, Stage: domain.StageOpen, Kind: EventExhausted})
@@ -969,12 +989,11 @@ func freeformReplayHint(seed []Message, resuming bool) string {
 //
 // Tool lines are left out, and the pty drive is why. The transcript keeps
 // them for the reader, but two kinds of line live there — the backend's own
-// calls, and gummi's activity notes (the checkpoint commit, a budget nudge,
-// "stopped mid-turn by the reader") — and a restored transcript cannot tell
-// them apart, because the persisted row carries each line's text without
-// the tool name that would. Replayed indiscriminately they came out as "you
-// ran: worktree committed", which is not something the session did and
-// directly contradicts the contract telling it gummi commits for it.
+// calls, and gummi's activity notes (a budget nudge, "stopped mid-turn by
+// the reader") — and a restored transcript cannot tell them apart, because
+// the persisted row carries each line's text without the tool name that
+// would. Replayed indiscriminately they came out as "you ran: …", which is
+// not something the session did.
 //
 // Nothing is lost by dropping them. What a tool DID is in the worktree the
 // session is standing in and in the branch's diff; what it was for is in

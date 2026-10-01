@@ -117,7 +117,7 @@ func (m *Shell) checkSessionPick(backend, model string) string {
 }
 
 // switchSessionModel moves a card's session to another agent and model,
-// off the loop: stopping a live backend commits the worktree first.
+// off the loop: a live backend is stopped first, its worktree left as it is.
 func (m *Shell) switchSessionModel(id domain.FeatureID, backend, model string) tea.Cmd {
 	eng := m.engine
 	return func() tea.Msg {
@@ -131,6 +131,22 @@ func (m *Shell) switchSessionModel(id domain.FeatureID, backend, model string) t
 			label += " · " + backend
 		}
 		return sessionSwitchedMsg{id: id, text: string(id) + " now runs on " + label}
+	}
+}
+
+// commitSession commits a session's worktree with the person's message, off
+// the loop. The rows reload so the branch's new head is what the board shows.
+func (m *Shell) commitSession(id domain.FeatureID, message string) tea.Cmd {
+	eng := m.engine
+	return func() tea.Msg {
+		committed, err := eng.CommitFreeform(context.Background(), id, message)
+		if err != nil {
+			return noticeMsg{text: sanitize(err.Error()), isErr: true, id: id}
+		}
+		if !committed {
+			return noticeMsg{text: string(id) + " has nothing to commit", id: id}
+		}
+		return noticeMsg{text: string(id) + ": committed", reload: true, id: id}
 	}
 }
 

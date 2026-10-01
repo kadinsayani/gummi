@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -352,7 +353,24 @@ func (b *Bridge) Card(ctx context.Context, id string) (webapi.Card, error) {
 	}
 	c.DecisionsMore = m.webDecisionsMore(ctx, st.f.ID, c.Decision)
 	m.webActionDefaults(ctx, st.f, c.Actions)
+	c.Actions = m.webDropCleanCommit(ctx, st.f, c.Actions)
 	return c, nil
+}
+
+// webDropCleanCommit leaves a session's "commit" out of its menu while the
+// worktree holds nothing to commit. Asking git is IO, so it is decided here,
+// off the loop, rather than when the menu is built.
+func (m *Shell) webDropCleanCommit(ctx context.Context, f domain.Feature, acts []webapi.Action) []webapi.Action {
+	i := slices.IndexFunc(acts, func(a webapi.Action) bool { return a.ID == "commit" })
+	if i < 0 {
+		return acts
+	}
+	if m.wt != nil {
+		if dirty, err := m.wt.Dirty(ctx, &f); err == nil && dirty {
+			return acts
+		}
+	}
+	return slices.Delete(acts, i, i+1)
 }
 
 // webLandingEmpty is what a landing entry says when no message has been
@@ -483,6 +501,9 @@ func (m *Shell) webActions(r featureRow) []webapi.Action {
 		if r.F.Stage == domain.StageOpen && !r.watchOnly() && m.engine != nil {
 			list = append(list,
 				cardAction{id: "model", label: "model", why: "switch the agent and model this session runs on — from its next turn, with the conversation so far"},
+				// listed only while the worktree holds something to commit:
+				// Bridge.Card drops it off the loop when it does not
+				cardAction{id: "commit", label: "commit", why: "commit everything in the worktree to " + r.F.BranchName() + " — gummi never commits a session's work on its own"},
 				cardAction{id: "writespec", label: "write a spec", why: "continue this work as a feature: the profile's architect plans it from this conversation and the branch so far, and it lands on a verified branch"})
 		}
 	} else {
@@ -517,7 +538,7 @@ func (m *Shell) webActionInput(r featureRow, a *webapi.Action) {
 		// (Bridge.Card fills it off the loop)
 		a.Needs = webapi.ActionNeedsMessage
 		a.Detail += webLandingEmpty
-	case "changes", "newbug":
+	case "changes", "newbug", "commit":
 		a.Needs = webapi.ActionNeedsMessage
 	case "envelope":
 		a.Needs = webapi.ActionNeedsNumber

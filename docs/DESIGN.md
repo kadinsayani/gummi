@@ -3539,10 +3539,14 @@ What it has that neither of them does is that it **writes**:
   is the one floor a freeform card keeps, and running into it is a stop,
   not an ending: raising the envelope respawns and the conversation
   carries on;
-- a **checkpoint commit at the end of every turn** — before the busy flag
-  clears, the opposite order from a stage, because a freeform card holds
-  no attention slot and the first thing a person does when it stops is
-  read its diff.
+- **no commit of its own**. gummi never checkpoints a freeform card —
+  not when a turn ends, is interrupted or runs out of envelope, nor when
+  the session closes. Every commit on its branch is intentional: the agent
+  makes it when asked or when the work is worth keeping, the person makes
+  it from the web page's **Commit** action (offered while the worktree is
+  dirty, with their own message), and what it
+  leaves loose stays in the worktree (which `Remove` refuses to delete
+  while dirty, and the diff surface reads against the working tree).
 
 It has **no artifact**: `Kind.ArtifactNoun` and `ArtifactPath` are empty
 for it, nothing is seeded at mint, and the thread is the record.
@@ -3691,9 +3695,8 @@ has answered.
 Two things worth building next for their own sake: recording **which
 floor a landing crossed**, so "how much of this week landed without
 checks" is a number on a screen rather than a feeling; and a
-**since-I-last-looked** toggle in the diff tab, since a freeform card
-checkpoint-commits every turn and by the fourth cycle most of the diff
-against base is already read.
+**since-I-last-looked** toggle in the diff tab, since by a freeform
+card's fourth cycle most of the diff against base is already read.
 
 ### 19.8 Sessions: the model is the session's own
 

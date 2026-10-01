@@ -231,3 +231,50 @@ func TestWritingASpecContinuesASessionAsAFeature(t *testing.T) {
 		t.Errorf("the closed session does not say where its work went:\n%s", said.String())
 	}
 }
+
+// gummi never commits a session's work on its own, so the person commits
+// it from the page: the menu offers "commit" only while the worktree holds
+// something, and the commit carries the person's own message.
+func TestASessionIsCommittedFromItsMenu(t *testing.T) {
+	fake := agent.NewFake("done")
+	fake.Responder = func(opts agent.SessionOpts, _ string) []agent.Event {
+		if err := os.WriteFile(filepath.Join(opts.WorkDir, "retry.go"), []byte("package sync\n"), 0o600); err != nil {
+			t.Error(err)
+		}
+		return []agent.Event{{Kind: agent.EventMessage, Text: "done"}, {Kind: agent.EventIdle}}
+	}
+	h := newCardBoard(t, namedFake{Fake: fake, name: "codex"})
+	s := h.create(webapi.CreateCardRequest{Kind: "freeform", Description: "Retry the sync", Backend: "codex", Model: "gpt-5"})
+	waitTranscript(t, h, s.ID, "done")
+	for deadline := time.Now().Add(10 * time.Second); h.eng.Freeform(domain.FeatureID(s.ID)).Busy(); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("the opening turn never ended")
+		}
+	}
+	offers := func() bool {
+		return slices.ContainsFunc(h.card(s.ID).Actions, func(a webapi.Action) bool { return a.ID == "commit" && a.Needs == webapi.ActionNeedsMessage })
+	}
+	if !offers() {
+		t.Fatalf("a session with work in its worktree offers no commit: %+v", h.card(s.ID).Actions)
+	}
+	h.action(s.ID, "commit", webapi.ActionRequest{Message: "sync: retry on timeout"})
+
+	sf := h.feature(s.ID)
+	tree := filepath.Join(h.root, sf.WorktreePath())
+	git := func(a ...string) string {
+		out, err := exec.CommandContext(context.Background(), "git", append([]string{"-C", tree}, a...)...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v\n%s", a, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if got := git("log", "-1", "--format=%s"); got != "sync: retry on timeout" {
+		t.Errorf("the branch's head is %q, want the person's message", got)
+	}
+	if files := git("show", "--name-only", "--format=", "HEAD"); !strings.Contains(files, "retry.go") {
+		t.Errorf("the commit does not carry the session's work:\n%s", files)
+	}
+	if offers() {
+		t.Error("a clean worktree still offers a commit")
+	}
+}
