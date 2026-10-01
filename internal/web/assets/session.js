@@ -46,8 +46,13 @@ async function loadForm (repo = '') {
 // newSession opens an empty draft in the conversation column.
 export async function newSession () {
   closePop()
-  const f = await loadForm()
-  const d = f?.sessions?.default || {}
+  // the draft opens at once, on what the page already knows; the form's
+  // defaults fill it when they arrive, without touching what was typed
+  const known = form
+  const draftOf = (f) => {
+    const d = f?.sessions?.default || {}
+    return { repo: f?.repos?.[0] || '', base: '', envelope: f?.envelope || 0, backend: d.backend || '', model: d.model || '' }
+  }
   set({
     sel: null,
     card: null,
@@ -55,17 +60,21 @@ export async function newSession () {
     thread: null,
     live: null,
     gone: null,
-    sessionDraft: {
-      repo: f?.repos?.[0] || '',
-      base: '',
-      envelope: f?.envelope || 0,
-      backend: d.backend || '',
-      model: d.model || ''
-    }
+    sessionDraft: draftOf(known)
   })
   if (isMobile()) set({ view: 'thread' })
   ctx.clearComposer?.()
   $('#composer-input')?.focus()
+  const f = await loadForm()
+  if (!known && f && state.sessionDraft) set({ sessionDraft: { ...draftOf(f), ...pickedOnly(state.sessionDraft) } })
+}
+
+// pickedOnly is what a person changed in a draft before its defaults came.
+function pickedOnly (d) {
+  const out = {}
+  for (const k of ['repo', 'base', 'backend', 'model']) if (d[k]) out[k] = d[k]
+  if (d.envelope) out.envelope = d.envelope
+  return out
 }
 
 // startSession sends the draft's first message: the card is created with
@@ -113,13 +122,14 @@ export function draftHero () {
     h('b', null, `What are we working on in ${where}?`),
     h('p', null, 'A session is one agent in its own worktree, with no stages and no gates. It starts when you send the first message. The model is next to Send, and you can switch it later.'),
     h('div', { class: 'starters' }, starters.map(s => h('button', {
-      class: 'btn', type: 'button', testid: 'draft-starter', onclick: () => ctx.restoreComposer?.(s + ' ')
+      class: 'btn', type: 'button', testid: 'draft-starter', onclick: () => { ctx.restoreComposer?.(s + ' '); $('#composer-input')?.focus() }
     }, s))))
 }
 
 function cancelDraft () {
   closePop()
   set({ sessionDraft: null })
+  ctx.clearComposer?.()
   const first = state.board?.rows?.[0]?.id
   if (first) ctx.select(first)
 }
@@ -192,21 +202,33 @@ function openPop (kind, anchor, el, { alignLeft = false } = {}) {
   closePop()
   document.body.append(el)
   const r = anchor.getBoundingClientRect()
+  // pinned above the anchor, and kept inside the window whichever edge it
+  // hangs from: on a phone the picker is wider than the space left of Send
+  const w = el.offsetWidth
+  const left = alignLeft ? r.left : r.right - w
   setVars(el, {
     bottom: Math.max(8, window.innerHeight - r.top + 6) + 'px',
-    left: alignLeft ? Math.max(8, r.left) + 'px' : null,
-    right: alignLeft ? null : Math.max(8, window.innerWidth - r.right) + 'px'
+    left: Math.max(8, Math.min(left, window.innerWidth - w - 8)) + 'px',
+    right: null
   })
   anchor.setAttribute('aria-expanded', 'true')
   const outside = (e) => { if (!el.contains(e.target) && !anchor.contains(e.target)) closePop() }
-  const keys = (e) => { if (e.key === 'Escape') { e.stopPropagation(); closePop(); anchor.focus() } }
+  // every key typed in a popover is the popover's: the page's shortcuts
+  // (] hides the panel, [ the rail) would move the layout out from under it
+  const keys = (e) => {
+    e.stopPropagation()
+    if (e.key === 'Escape') { closePop(); anchor.focus() }
+  }
+  const moved = () => closePop()
   setTimeout(() => document.addEventListener('mousedown', outside), 0)
   el.addEventListener('keydown', keys)
+  window.addEventListener('resize', moved)
   pop = {
     kind,
     el,
     close: () => {
       document.removeEventListener('mousedown', outside)
+      window.removeEventListener('resize', moved)
       anchor.setAttribute('aria-expanded', 'false')
       el.remove()
     }
@@ -228,6 +250,13 @@ function openBudget (anchor) {
   openPop('budget', anchor, el, { alignLeft: true })
   input.focus()
   input.select()
+}
+
+// openModelPicker opens the picker from the card's menu: anchored to the
+// model beside Send, which is where it lives.
+export function openModelPicker () {
+  const btn = document.querySelector('[data-testid=model-picker-btn]')
+  if (btn) openPicker(btn)
 }
 
 async function openPicker (anchor) {
@@ -272,9 +301,10 @@ async function openPicker (anchor) {
     }
     // an id nobody suggested is still a model: offered once, on each agent
     // that could run it, below everything the workspace already uses
-    if (q && !exact && installed.length) {
+    const fits = installed.filter(a => { try { return !a.pattern || new RegExp(a.pattern, 'i').test(q) } catch { return true } })
+    if (q && !exact && fits.length) {
       append(list, [h('div', { class: 'mgh' }, 'Use this id'),
-        installed.map(a => rowEl(a.name, q, `on ${a.name}`, `model-typed-${a.name}`))])
+        fits.map(a => rowEl(a.name, q, `on ${a.name}`, `model-typed-${a.name}`))])
     }
     if (!list.children.length) list.append(h('div', { class: 'mempty' }, 'No agent on this host can run a session.'))
     clear(foot)
@@ -333,12 +363,12 @@ async function choose (backend, model) {
 export function writeSpecButton (card) {
   const a = card?.actions?.find(x => x.id === 'writespec')
   if (!a) return null
-  return h('button', { class: 'btn', type: 'button', testid: 'write-spec', title: a.detail, onclick: () => openWriteSpec(card, a) }, 'Write a spec')
+  return h('button', { class: 'btn hide-s', type: 'button', testid: 'write-spec', title: a.detail, onclick: () => openWriteSpec(card, a) }, 'Write a spec')
 }
 
 // openWriteSpec asks for the spec's title, profile and budget, then runs
 // the session's "writespec" action and moves the page onto the new card.
-async function openWriteSpec (card, a) {
+export async function openWriteSpec (card, a) {
   if (!form) await loadForm(card.repo || '')
   const title = h('input', { value: a.default || card.title, testid: 'spec-title', autocomplete: 'off' })
   const profile = h('select', { testid: 'spec-profile' },

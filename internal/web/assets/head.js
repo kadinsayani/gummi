@@ -40,6 +40,7 @@ function render () {
       h('span', { class: 'cid', testid: 'card-id' }, c.id),
       h('h1', { testid: 'card-title', title: c.title }, c.title),
       h('div', { class: 'head-actions' },
+        landButton(c, actions),
         writeSpecButton(state.card),
         prominent ? h('button', { class: ['btn', c.running?.pausing && 'on'], testid: `action-btn-${prominent.id}`, type: 'button', title: prominent.detail || prominent.label, onclick: () => runAction(state.card, prominent) }, prominent.label) : null,
         menuBtn,
@@ -57,6 +58,16 @@ function render () {
       c.stack ? h('button', { class: ['badge stack', c.stack.stale && 'stale'], type: 'button', testid: 'card-stack', title: `Open the stack ${c.stack.name || c.stack.id}`, onclick: () => openView('stacks', { id: c.stack.id }) }, `stack ${c.stack.pos + 1} of ${c.stack.of}`) : null,
       spend(c)),
     state.cardErr && !state.card ? h('div', { class: 'subline badc', testid: 'card-error' }, state.cardErr.message) : null])
+}
+
+// landButton is an open session's landing, in its head: a session pins no
+// decision while it is idle (DESIGN §19.8), so its way onto the base is
+// here, as its merge action — which shows the drafted message first.
+function landButton (c, actions) {
+  if (!c.session || c.stage !== 'open') return null
+  const merge = actions.find(a => a.id === 'merge')
+  if (!merge) return null
+  return h('button', { class: 'btn pri hide-s', type: 'button', testid: 'session-land', title: merge.detail || 'Land this session’s branch', onclick: () => runAction(state.card, merge) }, 'Land…')
 }
 
 // openActions drops the card's menu from the head's "⋯". With a line (a

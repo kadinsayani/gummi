@@ -164,7 +164,7 @@ function renderFoot (unpair, newSession) {
     openMenu(more, items, { up: true, testid: 'rail-more-menu' })
   })
   foot.append(
-    h('button', { class: 'newcard newsession', testid: 'rail-new-session', title: 'New session: one agent in its own worktree, no stages', type: 'button', onclick: () => newSession?.() }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), h('span', { class: 'lbl' }, 'New session')),
+    h('button', { class: 'newcard newsession', testid: 'rail-new-session', title: 'New session: one agent in its own worktree, no stages', type: 'button', onclick: () => newSession?.() }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '◆'), h('span', { class: 'lbl' }, 'New session')),
     h('button', { class: 'newcard', testid: 'rail-new', title: 'New card', type: 'button', onclick: () => openView('newcard') }, h('span', { class: 'plus', 'aria-hidden': 'true' }, '+'), h('span', { class: 'lbl' }, 'New card')),
     h('button', { testid: 'rail-agent', title: 'Board agent', type: 'button', onclick: () => openView('agent') }, icon('agent'), h('span', { class: 'lbl' }, 'Board agent'), h('span', { class: 'sub', id: 'agent-sub' })),
     h('button', { testid: 'rail-fleet', title: 'Fleet stats', type: 'button', onclick: () => openView('fleet') }, icon('fleet'), h('span', { class: 'lbl' }, 'Fleet stats'), h('span', { class: 'sub' }, '7 days')),

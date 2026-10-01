@@ -40,6 +40,10 @@ function render () {
   }
   const t = state.thread
   if (!state.sel && state.sessionDraft) { placeholder(box, draftHero()); return }
+  if (!state.sel) {
+    placeholder(box, h('div', { class: 'empty', testid: 'thread-none' }, h('b', null, 'Nothing open'), 'Start a session, or pick a card from the list.'))
+    return
+  }
   if (!t) { placeholder(box, h('div', { class: 'empty', testid: 'thread-loading' }, h('span', { class: 'spinner' }))); return }
   if (!t.items.length) {
     if (t.gone) {

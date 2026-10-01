@@ -21,12 +21,18 @@ import { post, cardPath } from './api.js?v=__ASSET_V__'
 import { openModal } from './views.js?v=__ASSET_V__'
 import { toast } from './toast.js?v=__ASSET_V__'
 import { state, set, rows } from './store.js?v=__ASSET_V__'
+import { openModelPicker, openWriteSpec } from './session.js?v=__ASSET_V__'
 
 const NOUN = { message: 'Message', number: 'Credits', profile: 'Profile', repo: 'Repository', mode: 'Mode', cards: 'Waits for', text: 'Value' }
 
 function cap (s) { s = String(s || ''); return s ? s[0].toUpperCase() + s.slice(1) : s }
 
 export async function runAction (card, a) {
+  // a session's model and its spec have surfaces of their own (session.js):
+  // the generic one-field dialog cannot carry an agent and a model, or a
+  // profile and a budget
+  if (a.needs === 'model') { openModelPicker(); return }
+  if (a.needs === 'spec') { openWriteSpec(card, a); return }
   if (!a.needs || a.needs === 'confirm') {
     try {
       await send(card.id, a, {})
