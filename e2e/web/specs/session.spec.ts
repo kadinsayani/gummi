@@ -88,7 +88,13 @@ test('a session is continued as a spec from its head', async ({ pairedPage: page
   await expect(page.getByTestId('card-id')).toHaveText(id);
   await expect(page.getByTestId('composer-says')).not.toContainText('stop this turn', { timeout: 30_000 });
 
-  await page.getByTestId('write-spec').click();
+  if (info.project.name === 'phone') {
+    // no room in a phone's head: the card's menu carries it
+    await page.getByTestId('card-actions').click();
+    await page.getByTestId('action-writespec').click();
+  } else {
+    await page.getByTestId('write-spec').click();
+  }
   await expect(page.getByTestId('write-spec-dialog')).toBeVisible();
   await page.getByTestId('spec-title').fill('Sum before rounding');
   await page.getByTestId('spec-profile').selectOption('e2e-alt');
