@@ -226,8 +226,16 @@ func webToolCall(msg engine.Message, inflight bool) webapi.ToolCall {
 		c.Status = "fail"
 		c.Output = boundTail(threadfold.Sanitize(msg.ToolOutput), webapi.LiveText)
 	default:
-		if inflight {
+		switch {
+		case inflight:
 			c.Status = "running"
+		case threadfold.WatchTool(tool):
+			// a backend's own background watch (Claude Code's Monitor
+			// tool) never gets a reported outcome while it runs, and the
+			// turn that started it does not wait on it either — it stays
+			// outstanding long after the call stops being the inflight
+			// one, often past the turn going idle.
+			c.Status = threadfold.StatusWatching
 		}
 	}
 	return c

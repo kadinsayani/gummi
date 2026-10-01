@@ -18,6 +18,7 @@ func TestToolDetailPicksSalientArg(t *testing.T) {
 		{"non-string values skipped", map[string]any{"command": 42, "path": "a.go"}, "a.go"},
 		{"nothing displayable", map[string]any{"todos": []any{"a"}}, ""},
 		{"nil args", nil, ""},
+		{"monitor websocket", map[string]any{"ws": map[string]any{"url": "wss://example.com/ci"}}, "wss://example.com/ci"},
 	}
 	for _, c := range cases {
 		if got := toolDetail("/wt", c.args); got != c.want {

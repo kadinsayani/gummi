@@ -1900,7 +1900,15 @@ func stageEventLine(s *theme.Styles, ev state.CardEvent, w int, role string, ans
 	case state.EventTool:
 		var p state.ToolPayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
-		return eventMarker(s, ev.Status) + toolLineView(s, sanitize(p.Label), max(w-6, 8))
+		status := ev.Status
+		tool := p.Tool
+		if tool == "" {
+			tool, _, _ = strings.Cut(strings.TrimSpace(p.Label), "  ")
+		}
+		if status == "" && threadfold.WatchTool(tool) {
+			status = threadfold.StatusWatching
+		}
+		return eventMarker(s, status) + toolLineView(s, sanitize(p.Label), max(w-6, 8))
 	case state.EventMessage:
 		var p threadfold.MessagePayload
 		_ = json.Unmarshal([]byte(ev.Payload), &p)
@@ -2012,6 +2020,8 @@ func eventMarker(s *theme.Styles, status string) string {
 		return s.Success.Render("✓ ")
 	case state.StatusFail:
 		return s.Error.Render("✗ ")
+	case threadfold.StatusWatching:
+		return s.Info.Render("◎ ")
 	default:
 		return s.Faint.Render("· ")
 	}

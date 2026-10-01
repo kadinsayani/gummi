@@ -240,8 +240,17 @@ function you (it) {
 export function tools (list) {
   const fails = list.filter(t => t.status === 'fail').length
   const running = list.some(t => t.status === 'running')
+  // a Monitor watch (webapi.StatusWatching) never settles on its own the
+  // way an ordinary call does — it stays outstanding past the turn that
+  // started it going idle — so it earns its own word and a spinner that
+  // doesn't spin: there, but not "busy", so a reply stays obviously safe
+  // to send.
+  const watching = list.some(t => t.status === 'watching')
   return h('details', { class: 'tools', testid: 'tool-group' },
-    h('summary', null, plural(list.length, 'tool call'), fails ? h('span', { class: 'fails' }, `· ${fails} failed`) : null, running ? h('span', { class: 'spinner' }) : null),
+    h('summary', null, plural(list.length, 'tool call'),
+      fails ? h('span', { class: 'fails' }, `· ${fails} failed`) : null,
+      watching ? h('span', { class: 'watching' }, '· watching') : null,
+      (running || watching) ? h('span', { class: ['spinner', !running && 'still'] }) : null),
     h('ol', null, list.map(t => {
       const label = String(t.label || '').replace(/\s+/g, ' ').trim()
       const named = label.startsWith(t.tool + ' ') || label === t.tool

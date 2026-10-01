@@ -43,6 +43,25 @@ func TestWebTranscriptOnlyTheCallInFlightRuns(t *testing.T) {
 	}
 }
 
+// A Monitor watch (Claude Code's background-watch tool) never gets a
+// reported outcome while it runs, and it keeps running past the turn
+// that started it going idle: unlike an ordinary pending call, it must
+// still read as active rather than as "outcome unknown", whether or not
+// the session is busy or this is its newest call.
+func TestWebTranscriptAMonitorWatchKeepsWatching(t *testing.T) {
+	tr := []engine.Message{
+		{Author: engine.AuthorTool, Tool: "Monitor", Detail: "tail -f build.log", Content: "Monitor  tail -f build.log"},
+		{Author: engine.AuthorAssistant, Content: "started the watch"},
+	}
+	turns, _, tool := webTranscript(engine.Snapshot{Transcript: tr})
+	if tool != nil {
+		t.Fatalf("an idle session has no call in flight, got %+v", tool)
+	}
+	if st := turns[0].Tool.Status; st != "watching" {
+		t.Fatalf("an idle session's outstanding watch: status %q, want watching", st)
+	}
+}
+
 // A message a pause (or a failure) cut off is not still being written:
 // the session is not mid-turn, and the page drew it under "writing" with a
 // spinner for as long as the paused session stayed around.

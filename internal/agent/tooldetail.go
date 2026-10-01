@@ -39,6 +39,18 @@ func toolDetail(workdir string, args map[string]any) string {
 			}
 		}
 	}
+	// Monitor's WebSocket form (docs: tools-reference#websocket-source)
+	// takes its endpoint nested under "ws" instead of a top-level string
+	// key, so the loop above never finds it and a watch opened on a
+	// socket would otherwise show as a bare "Monitor" with nothing to
+	// say what it's watching.
+	if ws, ok := args["ws"].(map[string]any); ok {
+		if v, ok := ws["url"].(string); ok {
+			if d := collapseDetail(workdir, v); d != "" {
+				return d
+			}
+		}
+	}
 	return ""
 }
 

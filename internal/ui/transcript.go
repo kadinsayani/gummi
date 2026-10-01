@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/morphis/gummi/internal/engine"
+	"github.com/morphis/gummi/internal/threadfold"
 	"github.com/morphis/gummi/internal/ui/theme"
 )
 
@@ -42,7 +43,7 @@ func transcriptLines(s *theme.Styles, snap engine.Snapshot, w int, showOutput bo
 			if msg.Content == engine.AnswerCapturedNote && i > 0 && snap.Transcript[i-1].Author == engine.AuthorUser {
 				continue
 			}
-			lines = append(lines, "  "+toolMarker(s, msg.ToolStatus)+
+			lines = append(lines, "  "+toolMarker(s, msg.Tool, msg.ToolStatus)+
 				toolLineView(s, sanitize(msg.Content), max(w-6, 8)))
 			lines = append(lines, toolOutputLines(s, msg.ToolStatus, msg.ToolOutput, w, showOutput)...)
 			if i+1 == len(snap.Transcript) || snap.Transcript[i+1].Author != engine.AuthorTool {
@@ -131,15 +132,21 @@ func toolOutputLines(s *theme.Styles, status engine.ToolStatus, output string, w
 }
 
 // toolMarker is the outcome glyph before a tool line: confirmed success,
-// confirmed failure, or a neutral dot when the outcome is unknown (notes
-// and backends that don't report results) — never a dishonest ✓.
-func toolMarker(s *theme.Styles, st engine.ToolStatus) string {
+// confirmed failure, a backend's own background watch still outstanding
+// (threadfold.WatchTool — Claude Code's Monitor tool, which never gets a
+// reported outcome while it runs), or a neutral dot when the outcome is
+// genuinely unknown (notes and backends that don't report results) —
+// never a dishonest ✓.
+func toolMarker(s *theme.Styles, tool string, st engine.ToolStatus) string {
 	switch st {
 	case engine.ToolOK:
 		return s.Success.Render("✓ ")
 	case engine.ToolFail:
 		return s.Error.Render("✗ ")
 	default:
+		if threadfold.WatchTool(tool) {
+			return s.Info.Render("◎ ")
+		}
 		return s.Faint.Render("· ")
 	}
 }

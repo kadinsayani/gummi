@@ -107,8 +107,9 @@ type ToolCall struct {
 	Tool   string `json:"tool"`
 	Label  string `json:"label"`
 	Detail string `json:"detail,omitempty"`
-	// Status is state.StatusOK, state.StatusFail, or "" while the call
-	// has no reported outcome.
+	// Status is state.StatusOK, state.StatusFail, StatusWatching (a
+	// backend's own background watch, still outstanding — WatchTool), or
+	// "" while an ordinary call has no reported outcome.
 	Status string `json:"status,omitempty"`
 	MS     int64  `json:"ms,omitempty"`
 	// Output is kept for a failed call only: the tail a person needs to
@@ -542,6 +543,8 @@ func toolCall(p state.ToolPayload, ev state.CardEvent) ToolCall {
 	c := ToolCall{Tool: tool, Label: label, Detail: detail, Status: ev.Status, MS: p.MS}
 	if ev.Status == state.StatusFail {
 		c.Output = Sanitize(ev.Output)
+	} else if ev.Status == "" && WatchTool(tool) {
+		c.Status = StatusWatching
 	}
 	return c
 }

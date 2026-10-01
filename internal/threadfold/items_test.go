@@ -239,6 +239,17 @@ func TestItems(t *testing.T) {
 			},
 		},
 		{
+			name: "an outstanding Monitor watch reads as watching, not unknown",
+			log: newLog().
+				enter(impl, "implementer", "stage").
+				add(impl, state.EventTool, "", state.ToolPayload{Label: "Monitor  tail -f build.log", Tool: "Monitor", Detail: "tail -f build.log"}, "").
+				add(impl, state.EventTool, state.StatusOK, state.ToolPayload{Label: "Read  internal/domain/delete.go", Tool: "Read", Detail: "internal/domain/delete.go"}, ""),
+			want: []string{
+				`stage implement · implementer · stage · exited=false verdict="" credits=0 mark=""`,
+				`tools Monitor|tail -f build.log|watching, Read|internal/domain/delete.go|ok`,
+			},
+		},
+		{
 			name: "a stage that never opened a session still gets a divider",
 			log: newLog().
 				enter(plan, "architect", "stage").

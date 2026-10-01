@@ -479,15 +479,20 @@ func TestToolLineView(t *testing.T) {
 
 func TestToolMarkerHonest(t *testing.T) {
 	s := theme.New(theme.GummiDark())
-	if got := toolMarker(s, engine.ToolOK); got != s.Success.Render("✓ ") {
+	if got := toolMarker(s, "Bash", engine.ToolOK); got != s.Success.Render("✓ ") {
 		t.Errorf("ok marker = %q", got)
 	}
-	if got := toolMarker(s, engine.ToolFail); got != s.Error.Render("✗ ") {
+	if got := toolMarker(s, "Bash", engine.ToolFail); got != s.Error.Render("✗ ") {
 		t.Errorf("fail marker = %q", got)
 	}
 	// unknown outcomes must not claim success
-	if got := toolMarker(s, engine.ToolPending); got != s.Faint.Render("· ") {
+	if got := toolMarker(s, "Bash", engine.ToolPending); got != s.Faint.Render("· ") {
 		t.Errorf("pending marker = %q", got)
+	}
+	// a still-outstanding Monitor watch gets its own marker, not the
+	// generic "unknown outcome" dot
+	if got := toolMarker(s, "Monitor", engine.ToolPending); got != s.Info.Render("◎ ") {
+		t.Errorf("watching marker = %q", got)
 	}
 }
 

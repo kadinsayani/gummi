@@ -25,6 +25,22 @@ import (
 // browser has no use for them either. Only newline and tab survive;
 // gummi's own styling is applied after this, so nothing legitimate is
 // lost.
+// StatusWatching marks a tool call that is a backend's own persistent
+// background watch (WatchTool) while it is still outstanding: neither
+// TUI nor web ever sees an EventToolResult for one (no backend reports
+// it), so without this it would read exactly like any other call nobody
+// ever heard back from — the neutral "outcome unknown" dot — instead of
+// what it is, still active and the reason a session that looks idle may
+// still interject on its own.
+const StatusWatching = "watching"
+
+// WatchTool reports whether tool is a backend's own persistent
+// background watch rather than an ordinary, synchronous call: Claude
+// Code's Monitor tool (docs: tools-reference#monitor-tool), which
+// returns before the thing it is watching resolves and runs on, outside
+// any turn, until it fires or hits its deadline.
+func WatchTool(tool string) bool { return tool == "Monitor" }
+
 func Sanitize(s string) string {
 	s = ansi.Strip(s) // remove recognized escape sequences (CSI/OSC/…)
 	return strings.Map(func(r rune) rune {

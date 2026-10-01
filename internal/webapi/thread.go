@@ -98,8 +98,11 @@ type ToolCall struct {
 	Label  string `json:"label"`
 	Detail string `json:"detail,omitempty"`
 	// Status is "ok" or "fail" once the call reported an outcome;
-	// "running" for the call a live session has in flight; "" for a
-	// logged call that never reported one.
+	// "running" for the call a live session has in flight; "watching" for
+	// a backend's own persistent background watch (Claude Code's Monitor
+	// tool) still outstanding, which never reports one while it runs and
+	// may outlive the turn that started it; "" for a logged call that
+	// never reported one.
 	Status string `json:"status"`
 	Ms     int64  `json:"ms,omitempty"`
 	// Output is kept for a failed call only: the tail that says why.
