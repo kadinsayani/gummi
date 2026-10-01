@@ -46,6 +46,15 @@ test('a session starts from its first message, on the model picked beside Send',
   expect(card.envelope).toBe(500);
   // the whole first message is the first turn, not the title it was cut to
   await expect(page.getByTestId('thread')).toContainText('Keep it to one paragraph.', { timeout: 30_000 });
+
+  // a second draft shows nothing of the card it was opened from, before
+  // its first message is sent
+  if (phone) return;
+  await page.getByTestId('tab-stats').click();
+  await expect(page.locator('#pane')).not.toBeEmpty();
+  await page.getByTestId('rail-new-session').click();
+  await expect(page.getByTestId('draft-hero')).toBeVisible();
+  await expect(page.locator('#pane')).toBeEmpty();
 });
 
 // A session's model is switched from the same picker mid-conversation: the

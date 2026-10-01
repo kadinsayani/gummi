@@ -23,7 +23,15 @@ let ctx = {}
 
 export function initPanel (c) {
   ctx = c
-  on(['sel'], () => { cache = {}; cacheFor = state.sel; prefetch(); load(state.tab) })
+  on(['sel'], () => {
+    cache = {}
+    cacheFor = state.sel
+    // no card (a new session's draft): nothing loads, so the pane and its
+    // tabs are cleared here or they keep the last card's
+    if (!state.sel) { set({ diffPending: 0 }); renderTabs(); renderPane(false); return }
+    prefetch()
+    load(state.tab)
+  })
   on(['tab'], () => { load(state.tab); renderTabs(); renderPane(false) })
   on(['cardRev'], () => {
     for (const k of Object.keys(cache)) cache[k].stale = true
